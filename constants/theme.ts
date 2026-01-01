@@ -1,53 +1,49 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
+import { useColorScheme } from "react-native";
 
-import { Platform } from 'react-native';
+// Brand colors
+const tintColorLight = "#49941C";
+const tintColorDark = "#C7F0A6";
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
-
-export const Colors = {
-  light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
-  },
-  dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
-  },
+export const lightTheme = {
+  mode: "light",
+  text: "#123A09",
+  background: "#FFFFFF",
+  primary: "#949494ff",
+  secondary: "#62BA28",
+  tertiary: "#F2FCE9",
+  quaternary: "#476F29",
+  quinary: "#78B644",
+  quinest: "#F4FBEB",
+  ash: "#0000004D",
+  error: "#FF4D4F",
+  warning: "#FFC107",
+  tint: tintColorLight,
+  icon: "#687076",
+  tabIconDefault: "#687076",
+  tabIconSelected: tintColorLight,
 };
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  },
-});
+export const darkTheme = {
+  mode: "dark",
+  text: "#F2FCE9",
+  background: "#132A09",
+  primary: "#a6a6a680",
+  secondary: "#49941C",
+  tertiary: "#2A4D1A",
+  quaternary: "#476F29",
+  quinary: "#78B644",
+  quinest: "#F4FBEB",
+  ash: "#D9D9D9",
+  error: "#FF4D4F",
+  warning: "#FFC107",
+  tint: tintColorDark,
+  icon: "#9BA1A6",
+  tabIconDefault: "#9BA1A6",
+  tabIconSelected: tintColorDark,
+};
+
+// Hook to use anywhere
+export function useTheme() {
+  const scheme = useColorScheme();
+  return scheme === "dark" ? darkTheme : lightTheme;
+}
