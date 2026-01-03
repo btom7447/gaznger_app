@@ -7,24 +7,20 @@ import {
   StatusBar,
   Image,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
-import OTPField from "@/components/ui/OTPField";
-import BackButton from "@/components/ui/BackButton";
+import OTPField from "@/components/ui/auth/OTPField";
+import BackButton from "@/components/ui/global/BackButton";
 import { router, useLocalSearchParams } from "expo-router";
-import { maskEmail, maskPhone } from "@/utils/mask";
+import { maskEmail } from "@/utils/mask";
 import { useTheme } from "@/constants/theme";
 
 export default function OtpScreen() {
   const theme = useTheme();
+  const params = useLocalSearchParams<{ email: string }>();
+  const { email } = params;
 
-  const params = useLocalSearchParams<{
-    method: "sms" | "email";
-    email: string;
-    phone: string;
-  }>();
-  const { method, email, phone } = params;
-
-  if (!method || !email || !phone) {
+  if (!email) {
     return (
       <View style={[styles.container, { backgroundColor: theme.background }]}>
         <Text style={{ textAlign: "center", marginTop: 50, color: theme.text }}>
@@ -34,12 +30,13 @@ export default function OtpScreen() {
     );
   }
 
-  const masked = method === "sms" ? maskPhone(phone) : maskEmail(email);
-
+  const maskedEmail = maskEmail(email);
   const [otp, setOtp] = useState(["", "", "", "", ""]);
   const [status, setStatus] = useState<"default" | "success" | "error">(
     "default"
   );
+  const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const [timer, setTimer] = useState(60);
 
   useEffect(() => {
@@ -48,36 +45,78 @@ export default function OtpScreen() {
     return () => clearInterval(interval);
   }, [timer]);
 
-  const verifyCode = () => {
-    const isCorrect = otp.join("") === "12345";
-    setStatus(isCorrect ? "success" : "error");
-
-    if (isCorrect) {
-      setTimeout(() => {
-        router.push("/(auth)/create");
-      }, 700);
-    }
-  };
-
-  const resendOtp = () => {
-    if (timer === 0) {
-      setOtp(["", "", "", "", ""]);
-      setStatus("default");
-      setTimer(30);
-    }
-  };
-
   const isOtpComplete = otp.every((digit) => digit !== "");
+
+  const verifyCode = async () => {
+    if (!isOtpComplete) return;
+    setLoading(true);
+
+    try {
+      const res = await fetch(
+        `${process.env.EXPO_PUBLIC_BASE_URL}/auth/verify-otp`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, otp: otp.join("") }),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setStatus("error");
+        throw new Error(data?.message || "Invalid OTP");
+      }
+
+      setStatus("success");
+      router.push("/(auth)/modal/verified"); // next step after OTP
+    } catch (err: any) {
+      console.error("OTP verification failed:", err.message || err);
+      setStatus("error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendOtp = async () => {
+    if (timer > 0 || resending) return; // prevent multiple clicks
+
+    setResending(true);
+    setOtp(["", "", "", "", ""]);
+    setStatus("default");
+    setTimer(30); // reset countdown
+
+    try {
+      const res = await fetch(
+        `${process.env.EXPO_PUBLIC_BASE_URL}/auth/resend-otp`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        }
+      );
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || "Could not resend OTP");
+
+      console.log("OTP resent successfully");
+    } catch (err: any) {
+      console.error("Resend OTP failed:", err.message || err);
+    } finally {
+      setResending(false);
+    }
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <StatusBar
         barStyle={theme.mode === "dark" ? "light-content" : "dark-content"}
       />
+
       <View style={styles.screenHeader}>
         <BackButton />
         <Text style={[styles.title, { color: theme.text }]}>
-          Forgot Password
+          Email Verification
         </Text>
       </View>
 
@@ -93,8 +132,8 @@ export default function OtpScreen() {
           <Text style={[styles.title, { color: theme.text }]}>
             OTP Verification
           </Text>
-          <Text style={[styles.description, { color: theme.error }]}>
-            {`Code has been sent to ${masked}`}
+          <Text style={[styles.description, { color: theme.text }]}>
+            {`Enter code sent to ${maskedEmail}`}
           </Text>
         </View>
 
@@ -102,37 +141,44 @@ export default function OtpScreen() {
           <OTPField otp={otp} setOtp={setOtp} length={5} status={status} />
         </View>
 
-        <Text style={[styles.description, { color: theme.error }]}>
+        <Text style={[styles.description, { color: theme.text }]}>
           Resend code in
           <Text
-            style={[styles.termsLink, { color: theme.error }]}
+            style={[styles.termsLink, { color: theme.text }]}
           >{` ${timer} `}</Text>
           s
         </Text>
 
         <TouchableOpacity
-          disabled={!isOtpComplete}
+          onPress={verifyCode}
+          disabled={!isOtpComplete || loading}
           style={[
             styles.verifyBtn,
             {
-              opacity: isOtpComplete ? 1 : 0.5,
-              backgroundColor: theme.primary,
+              opacity: isOtpComplete && !loading ? 1 : 0.5,
+              backgroundColor: theme.quaternary,
+              flexDirection: "row",
+              justifyContent: "center",
+              alignItems: "center",
             },
           ]}
-          onPress={verifyCode}
         >
-          <Text style={[styles.verifyText, { color: theme.text }]}>Verify</Text>
+          {loading ? (
+            <ActivityIndicator size="small" color="#FFF" />
+          ) : (
+            <Text style={[styles.verifyText, { color: "#FFF" }]}>Verify</Text>
+          )}
         </TouchableOpacity>
 
         <View style={{ marginTop: 20 }}>
           {timer === 0 && (
-            <Text style={[styles.resendText, { color: theme.error }]}>
+            <Text style={[styles.resendText, { color: theme.text }]}>
               Didn't receive the code?{" "}
               <Text
-                style={[styles.termsLink, { color: theme.error }]}
+                style={[styles.termsLink, { color: theme.primary }]}
                 onPress={resendOtp}
               >
-                Click here
+                {resending ? "Resending..." : "Click here"}
               </Text>
             </Text>
           )}
@@ -155,19 +201,15 @@ const styles = StyleSheet.create({
   slideContent: { alignItems: "center" },
   imageWrapper: { height: 80, marginVertical: 30 },
   image: { width: "100%", height: "100%", aspectRatio: 1 },
-  title: { fontWeight: "600", fontSize: 28, marginBottom: 12 },
-  description: { fontSize: 18, textAlign: "center", lineHeight: 22 },
+  title: { fontWeight: "700", fontSize: 25, marginBottom: 12 },
+  description: { fontSize: 16, textAlign: "center", lineHeight: 22 },
   otpContainer: { marginVertical: 40 },
   verifyBtn: {
-    paddingVertical: 16,
-    borderRadius: 25,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 3.5,
-    elevation: 10,
+    paddingVertical: 17,
+    borderRadius: 10,
     marginVertical: 30,
     marginTop: 50,
+    alignItems: "center",
   },
   verifyText: { fontSize: 20, fontWeight: "600" },
   resendText: { textAlign: "left", fontSize: 18, lineHeight: 22 },

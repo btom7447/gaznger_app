@@ -17,6 +17,7 @@ interface SessionState {
   accessToken: string | null;
   refreshToken: string | null;
   isLoggedIn: boolean;
+  hasHydrated: boolean;
 
   login: (data: {
     user: SessionUser;
@@ -35,6 +36,7 @@ export const useSessionStore = create<SessionState>()(
       accessToken: null,
       refreshToken: null,
       isLoggedIn: false,
+      hasHydrated: false,
 
       login: ({ user, accessToken, refreshToken }) =>
         set({
@@ -61,6 +63,10 @@ export const useSessionStore = create<SessionState>()(
     {
       name: "session-store",
       storage: zustandAsyncStorage,
+      onRehydrateStorage: () => (state) => {
+        state?.hasHydrated && state.hasHydrated;
+        state && (state.hasHydrated = true);
+      },
     }
   )
 );

@@ -1,22 +1,26 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+} from "react-native";
 import FormField from "./FormField";
-import { router } from "expo-router";
+import { useRouter } from "expo-router";
 import { useSessionStore } from "@/store/useSessionStore";
 import { mapBackendUser } from "@/utils/mapBackendUser";
 import { useTheme } from "@/constants/theme";
 
-export default function SignupForm() {
+export default function LoginForm() {
   const theme = useTheme();
+  const router = useRouter();
   const loginSession = useSessionStore((state) => state.login);
 
-  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [secureEntry, setSecureEntry] = useState(true);
-  const [secureConfirm, setSecureConfirm] = useState(true);
+  const [loading, setLoading] = useState(false); // NEW: track loading state
 
   const emailStatus = !email
     ? "default"
@@ -30,62 +34,48 @@ export default function SignupForm() {
     ? "success"
     : "error";
 
-  const confirmStatus = !confirmPassword
-    ? "default"
-    : confirmPassword === password
-    ? "success"
-    : "error";
+  const goToForgotPassword = () => router.replace("/(auth)/forgot");
 
   const isButtonEnabled =
-    displayName.length > 1 &&
-    emailStatus === "success" &&
-    passwordStatus === "success" &&
-    confirmStatus === "success";
+    emailStatus === "success" && passwordStatus === "success" && !loading; // disable if loading
 
-  const signup = async () => {
+  const login = async () => {
     if (!isButtonEnabled) return;
 
+    setLoading(true); // start loading
     try {
       const res = await fetch(
-        `${process.env.EXPO_PUBLIC_API_URL}/auth/register`,
+        `${process.env.EXPO_PUBLIC_BASE_URL}/auth/login`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email,
-            phone,
-            password,
-            displayName,
-          }),
+          body: JSON.stringify({ email, password }),
         }
       );
 
-      if (!res.ok) {
-        throw new Error("Signup failed");
-      }
+      const data = await res.json(); // parse JSON
 
-      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.message || "Invalid credentials");
+      }
 
       loginSession({
         user: mapBackendUser(data.user),
         accessToken: data.accessToken,
         refreshToken: data.refreshToken,
       });
-      router.push("/(auth)/otp");
-    } catch (err) {
-      console.error("Signup error:", err);
+
+      console.log("Logged In");
+      router.replace("/(tabs)/(home)");
+    } catch (err: any) {
+      console.error("Login error:", err.message || err);
+    } finally {
+      setLoading(false); // stop loading
     }
   };
 
   return (
-    <View
-      style={{
-        paddingHorizontal: 20,
-        width: "100%",
-        flexDirection: "column",
-        gap: 20,
-      }}
-    >
+    <View style={{ width: "100%", flexDirection: "column", gap: 20 }}>
       <FormField
         title="Email"
         value={email}
@@ -95,11 +85,10 @@ export default function SignupForm() {
         autoComplete="email"
         status={emailStatus}
       />
-
       <FormField
         title="Password"
         value={password}
-        placeholder="Password"
+        placeholder="*******"
         handleChangeText={setPassword}
         secureTextEntry={secureEntry}
         toggleSecureEntry={() => setSecureEntry((prev) => !prev)}
@@ -107,37 +96,33 @@ export default function SignupForm() {
         status={passwordStatus}
       />
 
-      <FormField
-        title="Confirm Password"
-        value={confirmPassword}
-        placeholder="Confirm Password"
-        handleChangeText={setConfirmPassword}
-        secureTextEntry={secureConfirm}
-        toggleSecureEntry={() => setSecureConfirm((prev) => !prev)}
-        autoComplete="password"
-        status={confirmStatus}
-      />
+      <View style={styles(theme).forgotContainer}>
+        <Text style={styles(theme).termsLink} onPress={goToForgotPassword}>
+          Forgot your password?
+        </Text>
+      </View>
 
       <TouchableOpacity
-        onPress={signup}
+        onPress={login}
         disabled={!isButtonEnabled}
+        accessibilityState={{ disabled: !isButtonEnabled }}
         style={[
-          styles(theme).button,
+          styles(theme).buttonBase,
           {
             backgroundColor: isButtonEnabled
-              ? theme.primary
-              : theme.primary + "33",
+              ? theme.quaternary
+              : theme.quaternary + "33",
+            flexDirection: "row",
+            justifyContent: "center",
+            alignItems: "center",
           },
         ]}
       >
-        <Text
-          style={[
-            styles(theme).buttonText,
-            { opacity: isButtonEnabled ? 1 : 0.6 },
-          ]}
-        >
-          Sign Up
-        </Text>
+        {loading ? (
+          <ActivityIndicator size="small" color="#FFF" />
+        ) : (
+          <Text style={styles(theme).buttonText}>Login</Text>
+        )}
       </TouchableOpacity>
     </View>
   );
@@ -145,15 +130,24 @@ export default function SignupForm() {
 
 const styles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
-    button: {
-      marginTop: 20,
-      paddingVertical: 16,
-      borderRadius: 28,
+    buttonBase: {
+      marginTop: 10,
+      paddingVertical: 17,
+      borderRadius: 10,
       alignItems: "center",
     },
     buttonText: {
       color: "#fff",
       fontSize: 18,
       fontWeight: "600",
+    },
+    forgotContainer: {
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      alignItems: "center",
+    },
+    termsLink: {
+      color: theme.primary,
+      fontSize: 18,
     },
   });

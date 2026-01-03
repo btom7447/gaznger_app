@@ -1,29 +1,14 @@
-// app/_layout.tsx
-import React from 'react';
-import { Stack } from 'expo-router';
-import { useTheme } from '@/constants/theme';
-import { StatusBar } from 'react-native';
+import { Tabs } from "expo-router";
+import CustomTabBar from "@/components/ui/global/CustomTabBar";
 
-export default function RootLayout() {
-  const theme = useTheme();
-
+export default function TabLayout() {
   return (
-    <>
-      <StatusBar
-        barStyle={theme.mode === 'dark' ? 'light-content' : 'dark-content'}
-        backgroundColor={theme.background}
-      />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: theme.background },
-        }}
-      >
-        {/* Main navigators */}
-        <Stack.Screen name="(home)" />
-        <Stack.Screen name="(order)" />
-        <Stack.Screen name="(track)" />
-      </Stack>
-    </>
+    <Tabs
+      tabBar={(props) => <CustomTabBar {...props} />}
+      screenOptions={{
+        headerShown: false,
+        lazy: true, // This is important to keep inactive tabs from unmounting
+      }}
+    />
   );
 }

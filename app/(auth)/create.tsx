@@ -1,4 +1,4 @@
-import BackButton from "@/components/ui/BackButton";
+import BackButton from "@/components/ui/global/BackButton";
 import { router } from "expo-router";
 import {
   ScrollView,
@@ -9,7 +9,7 @@ import {
   Image,
 } from "react-native";
 import React from "react";
-import PasswordForm from "@/components/ui/PasswordForm";
+import PasswordForm from "@/components/ui/auth/PasswordForm";
 import { useTheme } from "@/constants/theme";
 
 export default function CreatePasswordScreen() {

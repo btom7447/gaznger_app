@@ -10,15 +10,16 @@ import {
   Text,
   Pressable,
 } from "react-native";
-import AuthToggle from "@/components/ui/AuthToggle";
-import LoginForm from "@/components/ui/LoginForm";
-import SignupForm from "@/components/ui/SignupForm";
-import { router, useLocalSearchParams } from "expo-router";
+import AuthToggle from "@/components/ui/auth/AuthToggle";
+import LoginForm from "@/components/ui/auth/LoginForm";
+import SignupForm from "@/components/ui/auth/SignupForm";
+import { useLocalSearchParams } from "expo-router";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
 } from "react-native-reanimated";
+import { FontAwesome, Ionicons } from "@expo/vector-icons";
 
 const { width } = Dimensions.get("window");
 
@@ -31,37 +32,65 @@ export default function AuthScreen() {
     mode ?? "login"
   );
 
+  /** slide animation */
   const translateX = useSharedValue(currentMode === "login" ? 0 : -width);
 
+  /** dynamic height handling */
+  const [loginHeight, setLoginHeight] = useState(0);
+  const [signupHeight, setSignupHeight] = useState(0);
+  const formHeight = useSharedValue(0);
+
+  /* sync route param */
   useEffect(() => {
     if (mode && mode !== currentMode) {
       setCurrentMode(mode);
-      translateX.value = withTiming(mode === "login" ? 0 : -width, {
-        duration: 300,
-      });
     }
   }, [mode]);
 
+  /* horizontal slide */
   useEffect(() => {
     translateX.value = withTiming(currentMode === "login" ? 0 : -width, {
       duration: 300,
     });
   }, [currentMode]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
+  /* height animation */
+  useEffect(() => {
+    const targetHeight = currentMode === "login" ? loginHeight : signupHeight;
+
+    if (targetHeight > 0) {
+      formHeight.value = withTiming(targetHeight, { duration: 250 });
+    }
+  }, [currentMode, loginHeight, signupHeight]);
+
+  const slideStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
+  }));
+
+  const heightStyle = useAnimatedStyle(() => ({
+    height: formHeight.value || undefined,
   }));
 
   const providers = [
     {
       id: "facebook",
-      icon: require("@/assets/icons/facebook.png"),
+      IconComponent: FontAwesome,
+      name: "facebook-f",
+      color: "#1877F2",
       show: true,
     },
-    { id: "google", icon: require("@/assets/icons/google.png"), show: true },
+    {
+      id: "google",
+      IconComponent: FontAwesome,
+      name: "google",
+      color: "#DB4437",
+      show: true,
+    },
     {
       id: "apple",
-      icon: require("@/assets/icons/apple.png"),
+      IconComponent: Ionicons,
+      name: "logo-apple",
+      color: theme.text, // black or white depending on theme
       show: Platform.OS === "ios",
     },
   ];
@@ -73,53 +102,58 @@ export default function AuthScreen() {
       </View>
 
       <ScrollView
-        style={styles(theme).scrollContainer}
+        showsVerticalScrollIndicator={false}
         contentContainerStyle={{ alignItems: "center" }}
       >
         <Text style={styles(theme).title}>
-          {currentMode === "login"
-            ? "Welcome back!"
-            : "Create an account"}
+          {currentMode === "login" ? "Welcome back!" : "Create an account"}
         </Text>
 
-        <View style={styles(theme).formWrapper}>
-          <Animated.View
-            style={[styles(theme).animatedContainer, animatedStyle]}
-          >
-            <View style={styles(theme).formContainer}>
+        {/* FORM AREA */}
+        <Animated.View style={[styles(theme).formWrapper, heightStyle]}>
+          <Animated.View style={[styles(theme).animatedContainer, slideStyle]}>
+            {/* LOGIN */}
+            <View
+              style={styles(theme).formContainer}
+              onLayout={(e) => setLoginHeight(e.nativeEvent.layout.height)}
+            >
               <LoginForm />
             </View>
-            <View style={styles(theme).formContainer}>
+
+            {/* SIGNUP */}
+            <View
+              style={styles(theme).formContainer}
+              onLayout={(e) => setSignupHeight(e.nativeEvent.layout.height)}
+            >
               <SignupForm />
             </View>
           </Animated.View>
-        </View>
+        </Animated.View>
 
+        {/* CONTINUE WITH */}
         <View style={styles(theme).continueContainer}>
           <Text style={styles(theme).subTitle}>or continue with</Text>
           <View style={styles(theme).authButtonsContainer}>
             {providers
               .filter((p) => p.show)
-              .map((p) => (
-                <Pressable
-                  key={p.id}
-                  style={({ pressed }) => [
-                    styles(theme).authButton,
-                    {
-                      borderColor: pressed ? theme.primary : theme.background,
-                      backgroundColor: pressed
-                        ? theme.secondary + "20"
-                        : theme.background,
-                    },
-                  ]}
-                >
-                  <Image
-                    source={p.icon}
-                    style={styles(theme).buttonIcon}
-                    resizeMode="contain"
-                  />
-                </Pressable>
-              ))}
+              .map((p) => {
+                const Icon = p.IconComponent;
+                return (
+                  <Pressable
+                    key={p.id}
+                    style={({ pressed }) => [
+                      styles(theme).authButton,
+                      {
+                        backgroundColor: pressed
+                          ? theme.secondary + "20"
+                          : theme.background,
+                      },
+                    ]}
+                  >
+                    <Icon name={p.name as any} size={25} color={p.color} />
+                  </Pressable>
+                );
+              })}
           </View>
         </View>
       </ScrollView>
@@ -130,56 +164,70 @@ export default function AuthScreen() {
 const styles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
     container: {
-      backgroundColor: theme.background,
       flex: 1,
+      backgroundColor: theme.background,
       alignItems: "center",
-      justifyContent: "flex-start",
       paddingTop: 100,
-      width: "100%",
     },
-    screenHeader: { paddingVertical: 10 },
-    scrollContainer: {},
+
+    screenHeader: {
+      paddingVertical: 10,
+    },
+
     title: {
-      fontWeight: "700",
       fontSize: 25,
-      textAlign: "center",
-      color: theme.text,
-      marginBottom: 5,
-      marginTop: 40,
-    },
-    subTitle: {
       fontWeight: "700",
-      fontSize: 23,
+      color: theme.text,
+      marginTop: 40,
+      marginBottom: 10,
       textAlign: "center",
+    },
+
+    subTitle: {
+      fontSize: 18,
+      fontWeight: "600",
       color: theme.text,
       marginVertical: 20,
+      textAlign: "center",
     },
-    formWrapper: { width: width, overflow: "hidden", marginTop: 30 },
-    animatedContainer: { flexDirection: "row", width: width * 2 },
-    formContainer: { width: width, paddingHorizontal: 20 },
+
+    formWrapper: {
+      width,
+      overflow: "hidden",
+      marginTop: 20,
+    },
+
+    animatedContainer: {
+      flexDirection: "row",
+      width: width * 2,
+    },
+
+    formContainer: {
+      width,
+      paddingHorizontal: 20,
+    },
+
     continueContainer: {
       width: "100%",
-      flexDirection: "column",
-      justifyContent: "center",
-      marginTop: -60,
+      marginTop: 30,
+      alignItems: "center",
     },
+
     authButtonsContainer: {
       flexDirection: "row",
-      justifyContent: "center",
-      alignItems: "center",
       gap: 30,
     },
+
     authButton: {
-      flexDirection: "row",
+      padding: 20,
+      borderRadius: 50,
       alignItems: "center",
       justifyContent: "center",
-      gap: 10,
-      padding: 20,
-      borderWidth: 1,
-      borderRadius: 50,
     },
-    authButtonText: { fontSize: 16, fontWeight: "500", color: theme.text },
-    buttonIcon: { width: 40, height: 40, objectFit: "contain", aspectRatio: 1.5 },
-    termsText: { color: theme.error, fontSize: 18, textAlign: "center" },
-    termsLink: { color: theme.primary },
+
+    buttonIcon: {
+      width: 30,
+      height: 30,
+      objectFit: "cover",
+    },
   });

@@ -8,8 +8,8 @@ import {
   Image,
   Pressable,
 } from "react-native";
-import BackButton from "@/components/ui/BackButton";
-import AuthOptionButton from "@/components/ui/AuthOptionButton";
+import BackButton from "@/components/ui/global/BackButton";
+import AuthOptionButton from "@/components/ui/auth/AuthOptionButton";
 import { router } from "expo-router";
 
 import { maskEmail, maskPhone } from "@/utils/mask";

@@ -39,17 +39,21 @@ export default function OTPField({
   const getBorderColor = (index: number) => {
     if (status === "success") return theme.secondary;
     if (status === "error") return theme.error;
-    if (focusedIndex === index || otp[index]) return theme.primary;
-    return theme.quaternary;
+    if (focusedIndex === index || otp[index]) return theme.secondary;
+    return theme.primary;
   };
 
   const getBackgroundColor = (index: number) => {
-    if (status === "success") return theme.quaternary + "0D"; // light transparent green
-    if (status === "error") return theme.error + "0D"; // light transparent red for dark/light mode
-    return theme.secondary;
+    if (status === "success") return theme.tertiary;
+    if (status === "error") return theme.background;
+    if (focusedIndex === index || otp[index]) return theme.quinest;
+    return theme.background;
   };
 
-  const getTextColor = () => {
+  const getTextColor = (index: number) => {
+    if (status === "success") return theme.quaternary;
+    if (status === "error") return theme.error;
+    if (focusedIndex === index || otp[index]) return theme.text;
     return theme.text;
   };
 
@@ -73,7 +77,7 @@ export default function OTPField({
             {
               backgroundColor: getBackgroundColor(index),
               borderColor: getBorderColor(index),
-              color: getTextColor(),
+              color: getTextColor(index),
             },
           ]}
         />
