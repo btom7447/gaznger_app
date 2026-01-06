@@ -1,10 +1,10 @@
-// app/index.tsx
 import React, { useEffect } from "react";
 import { View, Image, StyleSheet, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { useTheme } from "@/constants/theme";
 import { useAppFonts } from "@/constants/useFonts";
 import { useSessionStore } from "@/store/useSessionStore";
+
 
 export default function SplashScreen() {
   const router = useRouter();

@@ -10,6 +10,7 @@ export interface SessionUser {
   gender?: "male" | "female";
   profileImage?: string;
   points?: number;
+  defaultAddress?: string | null;
 }
 
 interface SessionState {

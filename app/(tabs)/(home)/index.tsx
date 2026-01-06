@@ -64,7 +64,7 @@ export default function HomeScreen() {
             />
           }
         >
-          <HomeHeader user={user} />
+          <HomeHeader variant="home" user={user} />
           <PointsBanner />
           <FuelGrid />
           {/* Future sections */}

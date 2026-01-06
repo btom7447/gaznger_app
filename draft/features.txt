@@ -1,0 +1,93 @@
+🧾 Order Flow – Possible Features (Before Payment)
+1. Order Review / Summary Step
+
+A dedicated summary of the user’s order before moving forward.
+
+Shows: fuel type, quantity, delivery address
+
+For gas: cylinder type, delivery type, cylinder images
+
+Helps user confirm everything before selecting a station
+
+2. Lock Order After Progressing & Persist
+
+Prevent changes once the user leaves the order step.
+
+Disable editing of fuel, quantity, and delivery type after continuing
+
+Provide a “Go back to edit order” option if needed
+
+Prevents inconsistent state (e.g. changing fuel after selecting a station)
+
+3. Quantity & Business Rule Validation
+
+Add business logic rules for valid orders.
+
+Minimum quantity per fuel type (e.g. 5L, 10L)
+
+Maximum quantity per order
+
+Step sizes (e.g. multiples of 5)
+
+Gas-specific rules:
+
+Block cylinder_swap without image (already implemented)
+
+Restrict unsupported cylinder types
+
+4. Station Filtering Readiness
+
+Prepare order data for station matching.
+Stations will be filtered using:
+
+Fuel type (fuel._id)
+
+Delivery address (location / distance)
+
+Delivery type (home_refill vs cylinder_swap)
+
+Cylinder type (if gas)
+
+5. Price Estimation Before Payment
+
+Allow users to see rough totals before paying.
+
+Estimated fuel cost
+
+Delivery fee
+
+Final estimated total
+
+Improves transparency and trust
+
+6. Navigation & Safety UX
+
+Improve user experience around navigation.
+
+Warn user before discarding an active order
+
+Reset order after successful payment
+
+Maintain hydration safety (avoid invalid state on reload)
+
+7. Station Selection Step (Next Major Feature)
+
+A new step between order and payment.
+
+Show filtered stations based on order
+
+Display station distance, availability, and pricing
+
+Allow user to choose where to buy from
+
+🚫 Features to Defer (For Later)
+
+Ideas intentionally not included yet to keep scope focused:
+
+Coupons / promo codes
+
+Scheduled delivery
+
+Multiple delivery addresses per order
+
+Complex pricing rules

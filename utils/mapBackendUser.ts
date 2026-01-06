@@ -7,5 +7,6 @@ export function mapBackendUser(user: any) {
     gender: user.gender,
     profileImage: user.profileImage,
     points: user.points,
+    defaultAddress: user.defaultAddress,
   };
 }
