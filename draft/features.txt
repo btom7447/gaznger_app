@@ -91,3 +91,8 @@ Scheduled delivery
 Multiple delivery addresses per order
 
 Complex pricing rules
+
+STATIONS FEATURES
+I can also provide a slightly more advanced version that scrolls the modal list to the selected pin, highlights it, and automatically centers the map on selection, so the UX is smoother.
+
+Fetch stations by user's current location and then by inputted address (include filter logic in endpoint)

@@ -23,9 +23,7 @@ import DeliveryTypeSelect from "@/components/ui/order/DeliveryTypeSelect";
 import DeliveryLocationSelect from "@/components/ui/order/DeliveryLocationSelect";
 import OrderSummaryModal from "./modal/order-summary";
 
-import CylinderImageModal, {
-  CylinderImageModalHandles,
-} from "@/components/ui/order/CylinderImageModa";
+import CylinderImageModal, { CylinderImageModalHandles} from "@/components/ui/order/CylinderImageModa";
 import CylinderImageUpload from "@/components/ui/order/CylinderImageUpload";
 import { router } from "expo-router";
 
@@ -78,11 +76,10 @@ export default function OrderScreen() {
     setShowSummary(true);
   };
 
-
   const handleConfirmOrder = () => {
     setShowSummary(false);
     useOrderStore.getState().setProgressStep(1); // move to payment
-    router.push("/(tabs)/(order)/stations")
+    router.push("/(tabs)/(order)/stations");
   };
 
   // console.log("User Data", user)

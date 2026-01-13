@@ -22,6 +22,7 @@ export const lightTheme = {
   tabIconDefault: "#687076",
   tabIconSelected: tintColorLight,
   tab: "#19290E",
+  aqua: "#7dedf5"
 };
 
 export const darkTheme = {
@@ -42,6 +43,7 @@ export const darkTheme = {
   tabIconDefault: "#9BA1A6",
   tabIconSelected: tintColorDark,
   tab: "#19290E",
+  aqua: "#4293e3ff",
 };
 
 // Hook to use anywhere

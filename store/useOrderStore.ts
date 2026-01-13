@@ -25,6 +25,10 @@ export interface OrderDraft {
   // common
   deliveryAddressId?: string;
   deliveryLabel?: string;
+
+  // new: selected station
+  stationId?: string;
+  stationLabel?: string;
 }
 
 interface OrderState {
@@ -46,6 +50,8 @@ interface OrderState {
   removeCylinderImage: (uri: string) => void;
   setDeliveryAddress: (id: string, label?: string) => void;
   resetOrder: () => void;
+  
+  setStation: (station: { id: string; label: string }) => void;
 
   /** ---------------- STEP ACTIONS ---------------- */
   setProgressStep: (step: number) => void;
@@ -200,7 +206,16 @@ export const useOrderStore = create<OrderState>()(
       },
 
       canEditOrder: () => get().progressStep === 0,
-    }),
+
+      setStation: (station: { id: string; label: string }) =>
+        set((state) => ({
+          order: {
+            ...state.order,
+            stationId: station.id,
+            stationLabel: station.label,
+          },
+        })),
+      }),
     {
       name: "order-store",
       storage: zustandAsyncStorage,
