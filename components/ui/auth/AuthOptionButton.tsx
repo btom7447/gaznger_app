@@ -21,10 +21,10 @@ export default function AuthOptionButton({
   const theme = useTheme();
   const iconName = type === "sms" ? "chatbubble-ellipses" : "mail";
 
-  const baseBorder = selected ? theme.primary + "33" : theme.border;
-  const baseBG = selected ? theme.secondary + "0D" : theme.card;
+  const baseBorder = selected ? theme.primary + "33" : theme.ash;
+  const baseBG = selected ? theme.secondary + "0D" : theme.quinest;
   const baseText = selected ? theme.primary : theme.text;
-  const baseIcon = selected ? theme.primary : theme.inactive;
+  const baseIcon = selected ? theme.primary : theme.icon;
 
   return (
     <Pressable

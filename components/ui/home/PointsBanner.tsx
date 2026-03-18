@@ -11,8 +11,13 @@ import {
 } from "react-native";
 import { useTheme } from "@/constants/theme";
 import { useSessionStore } from "@/store/useSessionStore";
+import { api } from "@/lib/api";
 
-export default function PointsBanner() {
+interface PointsBannerProps {
+  onOpenRedeem?: () => void;
+}
+
+export default function PointsBanner({ onOpenRedeem }: PointsBannerProps = {}) {
   const theme = useTheme();
   const user = useSessionStore((state) => state.user);
   const updateUser = useSessionStore((state) => state.updateUser);
@@ -27,20 +32,12 @@ export default function PointsBanner() {
     if (!user?.id) return;
     setLoading(true);
     try {
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_BASE_URL}/api/points/${user.id}`
-      );
-      if (!res.ok) throw new Error("Failed to fetch points");
+      const data = await api.get<{ points: number }>("/api/points");
 
-      const data = await res.json();
-
-      // Use available points
       const availablePoints = typeof data.points === "number" ? data.points : 0;
 
-      // Update store
       updateUser({ points: availablePoints });
 
-      // Animate only if points changed
       if (availablePoints !== displayPoints) {
         Animated.timing(animatedPoints, {
           toValue: availablePoints,
@@ -49,8 +46,8 @@ export default function PointsBanner() {
           useNativeDriver: false,
         }).start();
       }
-    } catch (err) {
-      console.error("Error fetching points:", err);
+    } catch {
+      // silent — points display will retain last known value
     } finally {
       setLoading(false);
     }
@@ -78,57 +75,37 @@ export default function PointsBanner() {
   const points = displayPoints;
 
   return (
-    <View
-      style={[
-        styles.container,
-        { backgroundColor: theme.background, borderColor: theme.quaternary },
-      ]}
-    >
-      {/* Left Section: Coin + Points */}
+    <View style={[styles.container, { backgroundColor: theme.primary }]}>
+      {/* Left: points */}
       <View style={styles.leftSection}>
         <Image
           source={require("../../../assets/icons/coin-icon.png")}
           style={styles.coinImage}
         />
-        <View style={styles.pointsInfo}>
+        <View>
           {loading ? (
-            <ActivityIndicator size="small" color={theme.text} />
+            <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Animated.Text
-              style={[
-                styles.pointsValue,
-                {
-                  color: theme.text,
-                  opacity: animatedPoints.interpolate({
-                    inputRange: [0, points],
-                    outputRange: [0.3, 1],
-                  }),
-                },
-              ]}
-            >
+            <Animated.Text style={styles.pointsValue}>
               {points.toLocaleString()}
             </Animated.Text>
           )}
-          <Text style={[styles.pointsLabel, { color: theme.text }]}>
-            Points
-          </Text>
+          <Text style={styles.pointsLabel}>Gaznger Points</Text>
         </View>
       </View>
 
-      {/* Right Section: Poster + Redeem Button */}
+      {/* Right: poster + redeem */}
       <View style={styles.rightSection}>
         <Image
           source={require("../../../assets/images/points/points-poster.png")}
           style={styles.posterImage}
         />
         <TouchableOpacity
-          style={[styles.redeemButton, { backgroundColor: theme.background }]}
-          onPress={async () => {
-            // Trigger fetch + animation
-            await fetchPoints();
-          }}
+          style={[styles.redeemButton, { backgroundColor: theme.accent }]}
+          onPress={onOpenRedeem}
+          activeOpacity={0.85}
         >
-          <Text style={[styles.redeemText, { color: theme.text }]}>Redeem</Text>
+          <Text style={styles.redeemText}>Redeem</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -141,44 +118,41 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 20,
-    borderWidth: 1,
-    borderRadius: 24,
+    borderRadius: 20,
     overflow: "hidden",
+    height: 100,
   },
   leftSection: {
-    flex: 6,
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    padding: 20,
+    paddingHorizontal: 18,
+    gap: 12,
   },
   coinImage: {
-    width: 80,
-    height: 40,
-    marginRight: 12,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     resizeMode: "cover",
   },
-  pointsInfo: {
-    flexDirection: "column",
-    alignItems: "center",
-  },
   pointsValue: {
-    fontSize: 24,
-    fontWeight: "600",
+    fontSize: 26,
+    fontWeight: "500",
+    color: "#FFFFFF",
+    letterSpacing: -0.3,
   },
   pointsLabel: {
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: "300",
+    color: "rgba(255,255,255,0.75)",
+    marginTop: 1,
   },
   rightSection: {
-    flex: 5,
+    width: 160,
     height: "100%",
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    alignItems: "center",
-    paddingRight: 20,
-    borderRadius: 24,
-    overflow: "hidden",
+    alignItems: "flex-end",
+    justifyContent: "center",
+    paddingRight: 16,
     position: "relative",
   },
   posterImage: {
@@ -188,20 +162,17 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
     resizeMode: "cover",
+    opacity: 0.5,
   },
   redeemButton: {
-    padding: 12,
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    paddingVertical: 9,
+    paddingHorizontal: 18,
+    borderRadius: 20,
     zIndex: 10,
-    alignSelf: "center",
   },
   redeemText: {
-    fontSize: 16,
-    fontWeight: "600",
-    textTransform: "capitalize",
+    fontSize: 13,
+    fontWeight: "500",
+    color: "#0C1A0C",
   },
 });

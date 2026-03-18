@@ -11,27 +11,42 @@ export default function SplashScreen() {
   const theme = useTheme();
   const fontsLoaded = useAppFonts();
 
-  const { isLoggedIn, hasHydrated } = useSessionStore();
+  const { isLoggedIn, hasHydrated, user, logout } = useSessionStore();
 
   /**
-   * 🔧 DEV ONLY
-   * Toggle this to force onboarding flow
+   * DEV ONLY — set true to wipe stored session and restart from login
    */
-  const FORCE_ONBOARDING = false;
+  const DEV_FORCE_LOGOUT = false;
 
   useEffect(() => {
     if (!fontsLoaded || !hasHydrated) return;
 
     const timer = setTimeout(() => {
-      if (FORCE_ONBOARDING) {
-        router.replace("/(auth)/onboarding");
+      if (DEV_FORCE_LOGOUT) {
+        logout();
+        router.replace("/(auth)/authentication");
         return;
       }
 
-      if (isLoggedIn) {
-        router.replace("/(tabs)/(home)");
+      if (!isLoggedIn) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        router.replace("/(auth)/role-select" as any);
+        return;
+      }
+
+      const role = user?.role ?? "customer";
+      const isOnboarded = user?.isOnboarded ?? false;
+
+      if (role === "vendor") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        router.replace((isOnboarded ? "/(vendor)/(dashboard)" : "/(vendor)/onboarding") as any);
+      } else if (role === "rider") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        router.replace((isOnboarded ? "/(rider)/(queue)" : "/(rider)/onboarding") as any);
       } else {
-        router.replace("/(auth)/onboarding");
+        // customer and admin both go to customer home for now
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        router.replace("/(customer)/(home)" as any);
       }
     }, 2000);
 

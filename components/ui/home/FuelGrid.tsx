@@ -1,14 +1,23 @@
 import React, { memo, useCallback, useMemo } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, Image } from "react-native";
 import { useRouter } from "expo-router";
+import { toast } from "sonner-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/constants/theme";
 import { useOrderStore, FuelType } from "@/store/useOrderStore";
+import SkeletonBox from "@/components/ui/skeletons/SkeletonBox";
+import { useActiveOrder } from "@/hooks/useActiveOrder";
 
 /* Skeleton Card for loading state */
 const SkeletonCard = memo(() => {
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  return <View style={styles.skeletonCard} />;
+  return (
+    <View style={[styles.card, { borderColor: theme.ash }]}>
+      <SkeletonBox width={68} height={68} borderRadius={34} style={{ marginBottom: 12 }} />
+      <SkeletonBox width={72} height={12} borderRadius={6} />
+    </View>
+  );
 });
 
 export default function FuelGrid() {
@@ -20,10 +29,20 @@ export default function FuelGrid() {
   const currentFuelId = useOrderStore((s) => s.order.fuel?._id);
   const setFuel = useOrderStore((s) => s.setFuel);
   const setProgressStep = useOrderStore((s) => s.setProgressStep);
+  const { hasActiveOrder } = useActiveOrder();
 
   const handleSelect = useCallback(
     (fuel: FuelType) => {
       if (!fuel) return;
+
+      if (hasActiveOrder) {
+        toast.error("You have an active order", {
+          description: "Track your current order first",
+        });
+        router.push("/(customer)/(track)" as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+        return;
+      }
+
       if (fuel._id === currentFuelId) return;
 
       // Set fuel in store and reset progress step
@@ -31,9 +50,9 @@ export default function FuelGrid() {
       setProgressStep(0);
 
       // Navigate to order screen
-      router.push("/(tabs)/(order)");
+      router.push("/(customer)/(order)" as any); // eslint-disable-line @typescript-eslint/no-explicit-any
     },
-    [currentFuelId, setFuel, setProgressStep, router]
+    [hasActiveOrder, currentFuelId, setFuel, setProgressStep, router]
   );
 
   if (!fuelTypes.length) {
@@ -49,7 +68,7 @@ export default function FuelGrid() {
   return (
     <View style={styles.container}>
       {fuelTypes.map((fuel) => (
-        <FuelCard key={fuel._id} fuel={fuel} onSelect={handleSelect} />
+        <FuelCard key={fuel._id} fuel={fuel} onSelect={handleSelect} locked={hasActiveOrder} />
       ))}
     </View>
   );
@@ -59,9 +78,10 @@ export default function FuelGrid() {
 interface FuelCardProps {
   fuel: FuelType;
   onSelect: (fuel: FuelType) => void;
+  locked?: boolean;
 }
 
-const FuelCard = memo(({ fuel, onSelect }: FuelCardProps) => {
+const FuelCard = memo(({ fuel, onSelect, locked }: FuelCardProps) => {
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
@@ -69,16 +89,19 @@ const FuelCard = memo(({ fuel, onSelect }: FuelCardProps) => {
     <TouchableOpacity
       activeOpacity={0.85}
       onPress={() => onSelect(fuel)}
-      style={styles.card}
+      style={[styles.card, locked && { opacity: 0.5 }]}
     >
-      {fuel.icon ? (
-        <Image
-          source={{ uri: fuel.icon }}
-          style={styles.icon}
-          resizeMode="contain"
-        />
-      ) : null}
+      <View style={styles.iconWrap}>
+        {fuel.icon ? (
+          <Image source={{ uri: fuel.icon }} style={styles.icon} resizeMode="contain" />
+        ) : null}
+      </View>
       <Text style={styles.text}>{fuel.name}</Text>
+      {locked && (
+        <View style={styles.lockOverlay}>
+          <Ionicons name="lock-closed" size={14} color={theme.icon} />
+        </View>
+      )}
     </TouchableOpacity>
   );
 });
@@ -89,31 +112,37 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     container: {
       flexDirection: "row",
       flexWrap: "wrap",
-      gap: 20,
+      gap: 14,
       justifyContent: "center",
       alignItems: "center",
-      paddingVertical: 10,
+      paddingVertical: 8,
+      marginBottom: 10,
     },
     card: {
-      width: "45%",
-      paddingVertical: 30,
-      paddingHorizontal: 10,
-      borderRadius: 20,
+      width: "48%",
+      paddingVertical: 24,
+      paddingHorizontal: 14,
+      borderRadius: 18,
       alignItems: "center",
-      backgroundColor: theme.background,
-      shadowColor: "#000",
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.2,
-      shadowRadius: 3,
-      elevation: 4,
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.ash,
     },
-    text: { marginTop: 10, fontSize: 16, fontWeight: "600", color: theme.text },
-    icon: { width: 80, height: 80 },
-    skeletonCard: {
-      width: "45%",
-      height: 110,
-      borderRadius: 20,
-      backgroundColor: theme.secondary,
-      opacity: 0.4,
+    iconWrap: {
+      width: 68,
+      height: 68,
+      borderRadius: 34,
+      backgroundColor: theme.tertiary,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 12,
+    },
+    icon: { width: 55, height: 55 },
+    text: { fontSize: 15, fontWeight: "400", color: theme.text, textAlign: "center" },
+    subtext: { fontSize: 12, fontWeight: "300", color: theme.icon, marginTop: 4 },
+    lockOverlay: {
+      position: "absolute",
+      top: 8,
+      right: 8,
     },
   });

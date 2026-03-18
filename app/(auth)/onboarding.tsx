@@ -1,269 +1,442 @@
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
-  FlatList,
-  Image,
-  Dimensions,
-  Pressable,
   StyleSheet,
-  StatusBar,
-  useColorScheme,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  Image,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+import { toast } from "sonner-native";
+import { useSessionStore } from "@/store/useSessionStore";
 import { useTheme } from "@/constants/theme";
+import { api } from "@/lib/api";
+import FormField from "@/components/ui/auth/FormField";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-
-const onboardingSlides = [
-  {
-    key: "slide-1",
-    image: require("@/assets/images/onboarding/onboarding-one.png"),
-    title: "Fuel at your fingertips",
-    description: "Skip the station, order fuel from your phone",
-  },
-  {
-    key: "slide-2",
-    image: require("@/assets/images/onboarding/onboarding-two.png"),
-    title: "Fast Trusted Delivery",
-    description: "Verified riders deliver your fuel with care",
-  },
-  {
-    key: "slide-3",
-    image: require("@/assets/images/onboarding/onboarding-three.png"),
-    title: "You're In Control!",
-    description: "Follow orders and make secure payments easily",
-  },
-];
+const TOTAL_STEPS = 3;
 
 export default function OnboardingScreen() {
-  const router = useRouter();
   const theme = useTheme();
-  const [currentIndex, setCurrentIndex] = useState<number>(0);
-  const flatListRef = useRef<FlatList<any> | null>(null);
+  const { user, updateUser } = useSessionStore();
+  const [step, setStep] = useState(0);
 
-  const onMomentumScrollEnd = (ev: any) => {
-    const offsetX = ev.nativeEvent.contentOffset.x;
-    const newIndex = Math.round(offsetX / SCREEN_WIDTH);
-    setCurrentIndex(newIndex);
-  };
+  // Slide 1
+  const [displayName, setDisplayName] = useState(user?.displayName ?? "");
+  const [phone, setPhone] = useState(user?.phone ?? "");
+  const [profileImage, setProfileImage] = useState<string | null>(user?.profileImage ?? null);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
-  const goToLogin = () =>
-    router.push({
-      pathname: "/(auth)/authentication",
-      params: { mode: "login" },
+  // Slide 2
+  const [gender, setGender] = useState<"male" | "female" | "">((user?.gender as "male" | "female") ?? "");
+
+  // Slide 3
+  const [label, setLabel] = useState("");
+  const [street, setStreet] = useState("");
+  const [city, setCity] = useState("");
+  const [addressState, setAddressState] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const canNext = [
+    displayName.trim().length > 0,
+    gender !== "",
+    label.trim().length > 0,
+  ][step];
+
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
     });
-  const goToSignUp = () =>
-    router.push({
-      pathname: "/(auth)/authentication",
-      params: { mode: "signup" },
-    });
-  const openTerms = () => router.push("/(legal)/terms");
-  const openPrivacy = () => router.push("/(legal)/privacy");
-
-  const handleNext = () => {
-    if (currentIndex < onboardingSlides.length - 1) {
-      const nextIndex = currentIndex + 1;
-      flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
-      setCurrentIndex(nextIndex);
+    if (result.canceled) return;
+    const uri = result.assets[0].uri;
+    setUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", { uri, name: "profile.jpg", type: "image/jpeg" } as any);
+      const res = await fetch(`${process.env.EXPO_PUBLIC_BASE_URL}/api/upload/image`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${useSessionStore.getState().accessToken}` },
+        body: formData,
+      });
+      if (!res.ok) throw new Error("Upload failed");
+      const data = await res.json();
+      setProfileImage(data.url);
+    } catch (err: any) {
+      toast.error("Photo upload failed", { description: err.message });
+    } finally {
+      setUploadingImage(false);
     }
   };
 
-  const renderItem = ({
-    item,
-  }: {
-    item: (typeof onboardingSlides)[number];
-    index: number;
-  }) => (
-    <View style={styles(theme).slideWrapper}>
-      <View style={styles(theme).slideContent}>
-        <Text style={styles(theme).title}>{item.title}</Text>
-        <Text style={styles(theme).description}>{item.description}</Text>
+  const handleFinish = async () => {
+    setSaving(true);
+    console.log("[onboarding] token:", useSessionStore.getState().accessToken?.slice(0, 20));
+    try {
+      const profilePayload: Record<string, string> = { displayName };
+      if (phone.trim()) profilePayload.phone = phone.trim();
+      if (gender) profilePayload.gender = gender;
+      if (profileImage) profilePayload.profileImage = profileImage;
 
-        <Image
-          source={item.image}
-          style={styles(theme).image}
-          resizeMode="contain"
-        />
+      const data = await api.put<any>("/auth/me", profilePayload);
+      updateUser({
+        displayName: data.displayName,
+        phone: data.phone,
+        gender: data.gender,
+        profileImage: data.profileImage,
+      });
 
-        <View style={styles(theme).pagination}>
-          {onboardingSlides.map((_, i) => (
-            <View
-              key={`dot-${i}`}
-              style={[
-                styles(theme).dot,
-                i === currentIndex
-                  ? styles(theme).dotActive
-                  : styles(theme).dotInactive,
-              ]}
-            />
-          ))}
-        </View>
-      </View>
-    </View>
-  );
+      await api.post("/api/address-book", {
+        label: label.trim(),
+        street: street.trim(),
+        city: city.trim(),
+        state: addressState.trim(),
+      });
+
+      router.replace("/(customer)/(home)" as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error("Setup failed", { description: err.message });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <View style={styles(theme).container}>
-      <StatusBar
-        barStyle={theme.mode === "dark" ? "light-content" : "dark-content"}
-      />
-
-      <FlatList
-        ref={flatListRef}
-        data={onboardingSlides}
-        keyExtractor={(item) => item.key}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        renderItem={renderItem}
-        onMomentumScrollEnd={onMomentumScrollEnd}
-        contentContainerStyle={{ flexGrow: 1 }}
-      />
-
-      {currentIndex === onboardingSlides.length - 1 ? (
-        <View style={styles(theme).bottomArea}>
-          <Pressable style={styles(theme).primaryButton} onPress={goToLogin}>
-            <Text style={styles(theme).primaryButtonText}>Log In</Text>
-          </Pressable>
-          <Pressable style={styles(theme).secondaryButton} onPress={goToSignUp}>
-            <Text style={styles(theme).secondaryButtonText}>Sign Up</Text>
-          </Pressable>
-          <Text style={styles(theme).termsText}>
-            By continuing you agree to{" "}
-            <Text style={styles(theme).termsLink} onPress={openTerms}>
-              Terms of Service
-            </Text>{" "}
-            and{" "}
-            <Text style={styles(theme).termsLink} onPress={openPrivacy}>
-              Privacy Policy
-            </Text>
-          </Text>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        {/* Back arrow — only on steps > 0 */}
+        <View style={styles.topBar}>
+          {step > 0 ? (
+            <TouchableOpacity onPress={() => setStep((s) => s - 1)} style={styles.backBtn}>
+              <Ionicons name="arrow-back-outline" size={24} color={theme.text} />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.backBtn} />
+          )}
         </View>
-      ) : (
-        <View style={styles(theme).nextRow}>
-          <View style={{ flex: 1 }} />
-          <Pressable style={styles(theme).nextButton} onPress={handleNext}>
-            <Ionicons
-              name="chevron-forward-outline"
-              size={20}
-              color={theme.quinest}
-              style={styles(theme).nextIcon}
-            />
-          </Pressable>
+
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* ── SLIDE 1: Name & Photo ── */}
+          {step === 0 && (
+            <View style={styles.slide}>
+              <TouchableOpacity onPress={pickImage} disabled={uploadingImage} style={styles.avatarBtn}>
+                {uploadingImage ? (
+                  <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: theme.tertiary }]}>
+                    <ActivityIndicator size="large" color={theme.quaternary} />
+                  </View>
+                ) : profileImage ? (
+                  <Image source={{ uri: profileImage }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: theme.tertiary }]}>
+                    <Ionicons name="person" size={44} color={theme.quaternary} />
+                  </View>
+                )}
+                <View style={[styles.cameraBadge, { backgroundColor: theme.quaternary }]}>
+                  <Ionicons name="camera" size={13} color="#fff" />
+                </View>
+              </TouchableOpacity>
+              <Text style={[styles.avatarHint, { color: theme.icon }]}>Add a photo (optional)</Text>
+
+              <Text style={[styles.heading, { color: theme.text }]}>What's your name?</Text>
+              <Text style={[styles.sub, { color: theme.icon }]}>
+                This is how you'll appear in the app.
+              </Text>
+
+              <View style={styles.fields}>
+                <FormField
+                  title="Full Name"
+                  value={displayName}
+                  placeholder="e.g. John Doe"
+                  handleChangeText={setDisplayName}
+                  status={displayName.trim().length > 0 ? "success" : "default"}
+                />
+                <FormField
+                  title="Phone Number"
+                  value={phone}
+                  placeholder="+234 800 000 0000"
+                  handleChangeText={setPhone}
+                  keyboardType="phone-pad"
+                  status="default"
+                />
+              </View>
+            </View>
+          )}
+
+          {/* ── SLIDE 2: Gender ── */}
+          {step === 1 && (
+            <View style={styles.slide}>
+              <Text style={[styles.heading, { color: theme.text }]}>How do you identify?</Text>
+              <Text style={[styles.sub, { color: theme.icon }]}>
+                Helps us personalise your experience.
+              </Text>
+
+              <View style={styles.genderRow}>
+                {(["male", "female"] as const).map((g) => {
+                  const active = gender === g;
+                  return (
+                    <TouchableOpacity
+                      key={g}
+                      onPress={() => setGender(g)}
+                      activeOpacity={0.8}
+                      style={[
+                        styles.genderCard,
+                        {
+                          borderColor: active ? theme.quaternary : theme.ash,
+                          backgroundColor: active ? theme.quaternary + "12" : theme.quinest,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.genderIconCircle,
+                          { backgroundColor: active ? theme.quaternary : theme.ash },
+                        ]}
+                      >
+                        <Ionicons
+                          name={g === "male" ? "male" : "female"}
+                          size={30}
+                          color={active ? "#fff" : theme.icon}
+                        />
+                      </View>
+                      <Text
+                        style={[
+                          styles.genderLabel,
+                          { color: active ? theme.quaternary : theme.text },
+                        ]}
+                      >
+                        {g.charAt(0).toUpperCase() + g.slice(1)}
+                      </Text>
+                      {active && (
+                        <View style={[styles.genderCheck, { backgroundColor: theme.quaternary }]}>
+                          <Ionicons name="checkmark" size={11} color="#fff" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {/* ── SLIDE 3: Address ── */}
+          {step === 2 && (
+            <View style={styles.slide}>
+              <Text style={[styles.heading, { color: theme.text }]}>Where do you deliver?</Text>
+              <Text style={[styles.sub, { color: theme.icon }]}>
+                Add your default delivery address. You can save more later.
+              </Text>
+
+              {/* Live preview card */}
+              {label.trim().length > 0 && (
+                <View style={[styles.addressCard, { backgroundColor: theme.quinest, borderColor: theme.quaternary }]}>
+                  <View style={styles.addressCardMain}>
+                    <View style={[styles.addressIconBox, { backgroundColor: theme.quaternary + "18" }]}>
+                      <Ionicons name="location-sharp" size={22} color={theme.quaternary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.addressCardLabel, { color: theme.text }]}>{label}</Text>
+                      {(street || city) && (
+                        <Text style={[styles.addressCardSub, { color: theme.icon }]}>
+                          {[street, city, addressState].filter(Boolean).join(", ")}
+                        </Text>
+                      )}
+                      <Text style={[styles.addressDefaultTag, { color: theme.quaternary }]}>Default</Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              <View style={styles.fields}>
+                {[
+                  { title: "Label", value: label, onChange: setLabel, placeholder: "e.g. Home, Office", required: true },
+                  { title: "Street", value: street, onChange: setStreet, placeholder: "Street address", required: false },
+                  { title: "City", value: city, onChange: setCity, placeholder: "City", required: false },
+                  { title: "State", value: addressState, onChange: setAddressState, placeholder: "State", required: false },
+                ].map((field) => (
+                  <View key={field.title} style={styles.fieldGroup}>
+                    <Text style={[styles.fieldLabel, { color: theme.icon }]}>
+                      {field.title}{field.required ? " *" : ""}
+                    </Text>
+                    <TextInput
+                      value={field.value}
+                      onChangeText={field.onChange}
+                      placeholder={field.placeholder}
+                      placeholderTextColor={theme.icon}
+                      style={[
+                        styles.textInput,
+                        { color: theme.text, borderColor: theme.ash, backgroundColor: theme.quinest },
+                      ]}
+                    />
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Footer */}
+        <View style={styles.footer}>
+          {/* Step dots */}
+          <View style={styles.dots}>
+            {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.dot,
+                  {
+                    backgroundColor: i <= step ? theme.quaternary : theme.ash,
+                    width: i === step ? 24 : 8,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+
+          <TouchableOpacity
+            onPress={step < TOTAL_STEPS - 1 ? () => setStep((s) => s + 1) : handleFinish}
+            disabled={!canNext || saving}
+            style={[
+              styles.nextBtn,
+              { backgroundColor: canNext ? theme.quaternary : theme.quaternary + "40" },
+            ]}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.nextBtnText}>
+                {step < TOTAL_STEPS - 1 ? "Continue" : "Get Started"}
+              </Text>
+            )}
+          </TouchableOpacity>
         </View>
-      )}
-    </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
-const styles = (theme: ReturnType<typeof useTheme>) =>
-  StyleSheet.create({
-    container: { flex: 1, backgroundColor: theme.background, flexDirection: "column", justifyContent: "center", alignItems: "center" },
-    slideWrapper: {
-      width: SCREEN_WIDTH,
-      flex: 1,
-      paddingHorizontal: 20,
-      paddingTop: 150,
-      justifyContent: "flex-start",
-    },
-    slideContent: {
-      alignItems: "center",
-    },
-    image: {
-      width: "100%",
-      height: undefined,
-      aspectRatio: 1.5,
-      marginTop: 30,
-    },
-    title: {
-      fontWeight: "700",
-      fontSize: 25,
-      textAlign: "center",
-      color: theme.text,
-      marginBottom: 5,
-    },
-    description: {
-      fontSize: 16,
-      textAlign: "center",
-      color: theme.text,
-      lineHeight: 22,
-      paddingHorizontal: 8,
-    },
-    pagination: {
-      flexDirection: "row",
-      justifyContent: "center",
-      alignItems: "center",
-      marginTop: 20,
-    },
-    dot: { height: 5, borderRadius: 8, marginHorizontal: 3 },
-    dotActive: {
-      backgroundColor: theme.text,
-      width: 50,
-      borderRadius: 10,
-    },
-    dotInactive: { width: 5, backgroundColor: theme.text + "80" },
-    bottomArea: {
-      width: "100%",
-      paddingHorizontal: 20,
-      paddingBottom: 20,
-      height: "30%",
-    },
-    nextRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "flex-end",
-      paddingHorizontal: 20,
-      paddingVertical: 40,
-    },
-    nextButton: {
-      backgroundColor: theme.quaternary,
-      padding: 10,
-      width: 50,
-      height: 50,
-      flexDirection: "row",
-      justifyContent: "center",
-      alignItems: "center",
-      borderRadius: 10,
-    },
-    nextIcon: {
-      fontSize: 30,
-    },
-    primaryButton: {
-      width: "100%",
-      backgroundColor: theme.quaternary,
-      paddingVertical: 17,
-      borderRadius: 10,
-      marginBottom: 20,
-      alignItems: "center",
-    },
-    primaryButtonText: {
-      color: theme.quinest,
-      fontSize: 20,
-      fontWeight: "600",
-    },
-    secondaryButton: {
-      width: "100%",
-      borderWidth: 1,
-      backgroundColor: theme.tertiary,
-      borderColor: theme.secondary,
-      paddingVertical: 15,
-      borderRadius: 10,
-      marginBottom: 12,
-      alignItems: "center",
-    },
-    secondaryButtonText: {
-      color: theme.secondary,
-      fontSize: 20,
-      fontWeight: "600",
-    },
-    termsText: {
-      color: theme.ash,
-      fontSize: 18,
-      lineHeight: 22,
-    },
-    termsLink: {
-      color: theme.error,
-    },
-  });
+const styles = StyleSheet.create({
+  safe: { flex: 1 },
+
+  topBar: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  backBtn: { width: 40, height: 40, justifyContent: "center" },
+
+  scroll: { flexGrow: 1, paddingHorizontal: 28, paddingBottom: 16 },
+  slide: { flex: 1, paddingTop: 12 },
+
+  heading: { fontSize: 28, fontWeight: "700", marginBottom: 8, marginTop: 8 },
+  sub: { fontSize: 15, lineHeight: 22, marginBottom: 36 },
+
+  // Avatar
+  avatarBtn: { alignSelf: "center", position: "relative", marginBottom: 10, marginTop: 8 },
+  avatar: { width: 96, height: 96, borderRadius: 48 },
+  avatarFallback: { justifyContent: "center", alignItems: "center" },
+  cameraBadge: {
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  avatarHint: { textAlign: "center", fontSize: 13, marginBottom: 28 },
+
+  fields: { gap: 4 },
+
+  // Gender
+  genderRow: { flexDirection: "row", gap: 14 },
+  genderCard: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 36,
+    borderRadius: 20,
+    borderWidth: 2,
+    gap: 14,
+    position: "relative",
+  },
+  genderIconCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  genderLabel: { fontSize: 16, fontWeight: "600" },
+  genderCheck: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  // Address card preview
+  addressCard: {
+    borderWidth: 1.5,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 24,
+  },
+  addressCardMain: { flexDirection: "row", alignItems: "center", gap: 12 },
+  addressIconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  addressCardLabel: { fontSize: 15, fontWeight: "600" },
+  addressCardSub: { fontSize: 13, marginTop: 2 },
+  addressDefaultTag: { fontSize: 12, fontWeight: "600", marginTop: 4 },
+
+  // Address fields
+  fieldGroup: { marginBottom: 14 },
+  fieldLabel: { fontSize: 13, marginBottom: 6 },
+  textInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 15,
+  },
+
+  // Footer
+  footer: {
+    paddingHorizontal: 28,
+    paddingBottom: 20,
+    paddingTop: 12,
+    gap: 16,
+  },
+  dots: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6 },
+  dot: { height: 8, borderRadius: 4 },
+  nextBtn: {
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: "center",
+  },
+  nextBtnText: { color: "#fff", fontSize: 17, fontWeight: "600" },
+});

@@ -1,19 +1,23 @@
 import React, { useEffect, useRef } from "react";
-import { View, Image } from "react-native";
+import { View, StyleSheet } from "react-native";
 import MapView, { Marker, Region, Circle } from "react-native-maps";
 import { useTheme } from "@/constants/theme";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { Station } from "@/types";
 
 interface StationsMapProps {
   userLocation: { lat: number; lng: number };
-  stations: any[];
-  selectedStation: any;
-  onSelectStation: (station: any) => void;
+  centerLocation?: { lat: number; lng: number };
+  stations: Station[];
+  selectedStation: Station | null;
+  onSelectStation: (station: Station) => void;
   radiusKm?: number;
   showRadius?: boolean;
 }
 
 export default function StationsMap({
   userLocation,
+  centerLocation,
   stations,
   selectedStation,
   onSelectStation,
@@ -23,39 +27,31 @@ export default function StationsMap({
   const theme = useTheme();
   const mapRef = useRef<MapView>(null);
 
-  /** Initial region (fallback) */
+  // Use centerLocation (searched location) if provided, else fall back to userLocation
+  const radiusCenter = centerLocation ?? userLocation;
+
   const initialRegion: Region = {
-    latitude: userLocation.lat,
-    longitude: userLocation.lng,
+    latitude: radiusCenter.lat,
+    longitude: radiusCenter.lng,
     latitudeDelta: 0.05,
     longitudeDelta: 0.05,
   };
 
-  /** Fit radius into ~70% of screen on first render */
   useEffect(() => {
-    if (!mapRef.current || !userLocation || !showRadius) return;
-
-    const lat = userLocation.lat;
-    const lng = userLocation.lng;
-
+    if (!mapRef.current || !showRadius) return;
     const radiusInMeters = radiusKm * 1000;
-    const delta = (radiusInMeters / 111000) * 0.5; // 🔥 zoom in more
-
+    const delta = (radiusInMeters / 111000) * 0.5;
     mapRef.current.fitToCoordinates(
       [
-        { latitude: lat + delta, longitude: lng },
-        { latitude: lat - delta, longitude: lng },
-        { latitude: lat, longitude: lng + delta },
-        { latitude: lat, longitude: lng - delta },
+        { latitude: radiusCenter.lat + delta, longitude: radiusCenter.lng },
+        { latitude: radiusCenter.lat - delta, longitude: radiusCenter.lng },
+        { latitude: radiusCenter.lat, longitude: radiusCenter.lng + delta },
+        { latitude: radiusCenter.lat, longitude: radiusCenter.lng - delta },
       ],
-      {
-        edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
-        animated: true,
-      }
+      { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true }
     );
-  }, [userLocation, radiusKm, showRadius]);
+  }, [radiusCenter.lat, radiusCenter.lng, radiusKm, showRadius]);
 
-  /** Animate to selected station */
   useEffect(() => {
     if (selectedStation && mapRef.current) {
       mapRef.current.animateToRegion(
@@ -70,6 +66,8 @@ export default function StationsMap({
     }
   }, [selectedStation]);
 
+  const s = styles(theme);
+
   return (
     <View style={{ flex: 1, overflow: "hidden", zIndex: 1 }}>
       <MapView
@@ -77,7 +75,7 @@ export default function StationsMap({
         provider="google"
         style={{ flex: 1 }}
         initialRegion={initialRegion}
-        customMapStyle={getMapStyle(theme)}
+        customMapStyle={mapStyle(theme)}
         showsPointsOfInterest={false}
         showsBuildings={false}
         showsTraffic={false}
@@ -86,58 +84,54 @@ export default function StationsMap({
         {/* USER RADIUS */}
         {showRadius && (
           <Circle
-            center={{
-              latitude: userLocation.lat,
-              longitude: userLocation.lng,
-            }}
+            center={{ latitude: radiusCenter.lat, longitude: radiusCenter.lng }}
             radius={radiusKm * 1000}
             strokeWidth={1}
             strokeColor={theme.quaternary}
-            fillColor={`${theme.quinary}40`}
+            fillColor={`${theme.quinary}30`}
           />
         )}
 
         {/* USER LOCATION PIN */}
         <Marker
-          coordinate={{
-            latitude: userLocation.lat,
-            longitude: userLocation.lng,
-          }}
+          coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }}
           title="Your location"
           anchor={{ x: 0.5, y: 0.5 }}
         >
-          <Image
-            source={require("@/assets/icons/map/pin-icon.png")}
-            style={{ width: 40, height: 40 }}
-            resizeMode="contain"
-          />
+          <View style={s.userPin}>
+            <Ionicons name="home" size={14} color="#fff" />
+          </View>
         </Marker>
 
         {/* STATION PINS */}
         {stations.map((station) => {
           const isSelected = selectedStation?._id === station._id;
-
           return (
             <Marker
               key={station._id}
-              coordinate={{
-                latitude: station.location.lat,
-                longitude: station.location.lng,
-              }}
+              coordinate={{ latitude: station.location.lat, longitude: station.location.lng }}
               onPress={() => onSelectStation(station)}
               anchor={{ x: 0.5, y: 1 }}
             >
-              <Image
-                source={
-                  require("@/assets/icons/map/station-icon.png")
-                }
-                style={{
-                  width: isSelected ? 30 : 20,
-                  height: isSelected ? 30 : 20,
-                  transform: [{ scale: isSelected ? 1.05 : 1 }],
-                }}
-                resizeMode="contain"
-              />
+              <View style={s.pinWrapper}>
+                <View style={[
+                  s.pinBubble,
+                  isSelected
+                    ? { backgroundColor: theme.primary, borderColor: "#fff", borderWidth: 2 }
+                    : { backgroundColor: "#fff", borderColor: theme.primary, borderWidth: 1.5 },
+                ]}>
+                  <MaterialIcons
+                    name="local-gas-station"
+                    size={isSelected ? 18 : 15}
+                    color={isSelected ? "#fff" : theme.primary}
+                  />
+                </View>
+                {/* Pin pointer */}
+                <View style={[
+                  s.pinTail,
+                  { borderTopColor: isSelected ? theme.primary : "#fff" },
+                ]} />
+              </View>
             </Marker>
           );
         })}
@@ -146,39 +140,38 @@ export default function StationsMap({
   );
 }
 
-/** Uber/Bolt style using your brand colors */
-const getMapStyle = (theme: ReturnType<typeof useTheme>) => [
-  {
-    featureType: "poi.business",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "transit",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry",
-    stylers: [{ color: theme.background }],
-  },
-  {
-    featureType: "road",
-    elementType: "labels.text.fill",
-    stylers: [{ color: theme.text }],
-  },
-  {
-    featureType: "water",
-    elementType: "geometry",
-    stylers: [{ color: theme.tertiary }],
-  },
-  {
-    featureType: "landscape",
-    elementType: "geometry",
-    stylers: [{ color: theme.quinest }],
-  },
-  {
-    featureType: "administrative",
-    elementType: "labels.text.fill",
-    stylers: [{ color: theme.text }],
-  },
+const styles = (theme: ReturnType<typeof useTheme>) =>
+  StyleSheet.create({
+    userPin: {
+      width: 32, height: 32, borderRadius: 16,
+      backgroundColor: "#1A6B1A",
+      justifyContent: "center", alignItems: "center",
+      borderWidth: 2, borderColor: "#fff",
+      shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.2, shadowRadius: 4, elevation: 4,
+    },
+    pinWrapper: { alignItems: "center" },
+    pinBubble: {
+      width: 38, height: 38, borderRadius: 12,
+      justifyContent: "center", alignItems: "center",
+      shadowColor: "#000", shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.18, shadowRadius: 6, elevation: 6,
+    },
+    pinTail: {
+      width: 0, height: 0,
+      borderLeftWidth: 5, borderRightWidth: 5,
+      borderTopWidth: 7,
+      borderLeftColor: "transparent", borderRightColor: "transparent",
+      marginTop: -1,
+    },
+  });
+
+const mapStyle = (theme: ReturnType<typeof useTheme>) => [
+  { featureType: "poi.business", stylers: [{ visibility: "off" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: theme.background }] },
+  { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: theme.text }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: theme.tertiary }] },
+  { featureType: "landscape", elementType: "geometry", stylers: [{ color: theme.quinest }] },
+  { featureType: "administrative", elementType: "labels.text.fill", stylers: [{ color: theme.text }] },
 ];

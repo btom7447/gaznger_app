@@ -5,33 +5,43 @@ import {
   View,
   StyleSheet,
   StatusBar,
-  Image,
   Pressable,
+  ActivityIndicator,
 } from "react-native";
 import BackButton from "@/components/ui/global/BackButton";
-import AuthOptionButton from "@/components/ui/auth/AuthOptionButton";
 import { router } from "expo-router";
-
-import { maskEmail, maskPhone } from "@/utils/mask";
 import { useTheme } from "@/constants/theme";
+import { api } from "@/lib/api";
+import { toast } from "sonner-native";
+import FormField from "@/components/ui/auth/FormField";
 
 export default function ForgotPasswordScreen() {
   const theme = useTheme();
-  const [selected, setSelected] = useState<"sms" | "email" | null>(null);
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const user = {
-    name: "Benjamin Tom",
-    email: "benjamintom7447@gmail.com",
-    phone: "+2349155674236",
-  };
+  const emailStatus = !email
+    ? "default"
+    : /^\S+@\S+\.\S+$/.test(email)
+    ? "success"
+    : "error";
 
-  const otpTrigger = () => {
-    if (!selected) return;
-    router.push(
-      `/(auth)/otp?method=${selected}&email=${encodeURIComponent(
-        user.email
-      )}&phone=${encodeURIComponent(user.phone)}`
-    );
+  const isButtonEnabled = emailStatus === "success" && !loading;
+
+  const sendOtp = async () => {
+    if (!isButtonEnabled) return;
+    setLoading(true);
+    try {
+      await api.post("/auth/forgot-password", { email });
+      router.push({
+        pathname: "/(auth)/otp",
+        params: { email, type: "reset" },
+      });
+    } catch (err: any) {
+      toast.error("Failed to send OTP", { description: err.message });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -49,41 +59,44 @@ export default function ForgotPasswordScreen() {
 
       <ScrollView style={styles.scrollView}>
         <View style={styles.slideContent}>
-          <Text style={[styles.description, { color: theme.error }]}>
-            Select which contact detail to reset your password
+          <Text style={[styles.description, { color: theme.text }]}>
+            Enter your email address and we'll send you a code to reset your password.
           </Text>
         </View>
 
         <View style={styles.bottomArea}>
-          <View style={styles.optionsContainer}>
-            <AuthOptionButton
-              type="sms"
-              maskedValue={maskPhone(user.phone)}
-              selected={selected === "sms"}
-              onPress={() => setSelected("sms")}
-            />
-            <AuthOptionButton
-              type="email"
-              maskedValue={maskEmail(user.email)}
-              selected={selected === "email"}
-              onPress={() => setSelected("email")}
-            />
-          </View>
+          <FormField
+            title="Email"
+            value={email}
+            placeholder="johndoe@gmail.com"
+            handleChangeText={setEmail}
+            keyboardType="email-address"
+            autoComplete="email"
+            status={emailStatus}
+          />
 
           <Pressable
             style={[
               styles.primaryButton,
               {
                 backgroundColor: theme.primary,
-                opacity: selected ? 1 : 0.5,
+                opacity: isButtonEnabled ? 1 : 0.5,
+                marginTop: 30,
+                flexDirection: "row",
+                justifyContent: "center",
+                alignItems: "center",
               },
             ]}
-            onPress={otpTrigger}
-            disabled={!selected}
+            onPress={sendOtp}
+            disabled={!isButtonEnabled}
           >
-            <Text style={[styles.primaryButtonText, { color: "#fff" }]}>
-              Continue
-            </Text>
+            {loading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={[styles.primaryButtonText, { color: "#fff" }]}>
+                Send OTP
+              </Text>
+            )}
           </Pressable>
         </View>
       </ScrollView>
@@ -104,29 +117,19 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingHorizontal: 20,
   },
-  slideContent: { alignItems: "center", marginBottom: 20 },
-  imageWrapper: { height: 300 },
-  image: { width: "100%", height: "100%", aspectRatio: 1.2 },
+  slideContent: { marginBottom: 30 },
   title: {
     fontWeight: "600",
     fontSize: 28,
     marginBottom: 12,
   },
   description: {
-    fontSize: 18,
-    textAlign: "center",
-    lineHeight: 22,
-    paddingHorizontal: 8,
-  },
-  optionsContainer: {
-    width: "100%",
-    marginBottom: 30,
-    gap: 20,
+    fontSize: 16,
+    lineHeight: 24,
   },
   bottomArea: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 4,
     paddingBottom: 20,
-    minHeight: "30%",
   },
   primaryButton: {
     width: "100%",

@@ -29,25 +29,16 @@ export default function ProfileCard({ image, onPress }: ProfileCardProps) {
 
 const styles = StyleSheet.create({
   wrapper: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     overflow: "hidden",
-    shadowColor: "#a0a0a0ff",
-    shadowOffset: {
-      width: 0,
-      height: 0.5,
-    },
-    shadowOpacity: 0.5,
-    shadowRadius: 2,
-    elevation: 5,
   },
   image: {
     width: "100%",
     height: "100%",
-    objectFit: "cover"
   },
   imageStyle: {
-    borderRadius: 10,
+    borderRadius: 12,
   },
 });

@@ -64,15 +64,15 @@ function SelectService() {
           style={[
             styles.item,
             {
-              backgroundColor: isSelected ? theme.tertiary : theme.background,
-              borderColor: isSelected ? theme.tint : "transparent",
+              backgroundColor: isSelected ? theme.tertiary : theme.surface,
+              borderColor: isSelected ? theme.primary : theme.ash,
             },
           ]}
         >
-          {item.icon && (
-            <Image source={{ uri: item.icon }} style={styles.icon} />
-          )}
-          <Text style={[styles.text, { color: theme.text }]}>{item.name}</Text>
+          {item.icon && <Image source={{ uri: item.icon }} style={styles.icon} />}
+          <Text style={[styles.text, { color: isSelected ? theme.primary : theme.text }]}>
+            {item.name}
+          </Text>
         </TouchableOpacity>
       );
     },
@@ -82,12 +82,9 @@ function SelectService() {
   if (!fuelTypes.length) return null;
 
   return (
-    <View style={[ { marginTop: 20 }]}>
+    <View style={{ marginTop: 16 }}>
       <Text style={[styles.title, { color: theme.text }]}>Select Service</Text>
-      <View
-        style={[styles.listWrapper, { backgroundColor: theme.background }]}
-        onLayout={() => setListReady(true)}
-      >
+      <View onLayout={() => setListReady(true)}>
         <FlatList
           ref={listRef}
           horizontal
@@ -95,6 +92,7 @@ function SelectService() {
           keyExtractor={(item) => item._id}
           renderItem={renderItem}
           showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingVertical: 4 }}
           getItemLayout={(_, index) => ({
             length: ITEM_WIDTH,
             offset: ITEM_WIDTH * index,
@@ -115,24 +113,16 @@ function SelectService() {
 export default memo(SelectService);
 
 const styles = StyleSheet.create({
-  title: { fontSize: 20, fontWeight: "600", marginBottom: 10 },
-  listWrapper: {
-    padding: 20,
-    borderRadius: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 4,
-  },
+  title: { fontSize: 13, fontWeight: "400", marginBottom: 10, letterSpacing: 0.1 },
   item: {
     width: ITEM_WIDTH,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 16,
     alignItems: "center",
-    borderWidth: 1,
+    borderWidth: 1.5,
+    marginRight: 10,
   },
-  icon: { width: 50, height: 60, resizeMode: "contain", marginBottom: 5 },
-  text: { fontSize: 18, fontWeight: "600", textTransform: "capitalize" },
+  icon: { width: 48, height: 52, resizeMode: "contain", marginBottom: 6 },
+  text: { fontSize: 12, fontWeight: "400", textTransform: "capitalize" },
 });

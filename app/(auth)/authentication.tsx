@@ -25,8 +25,8 @@ const { width } = Dimensions.get("window");
 
 export default function AuthScreen() {
   const theme = useTheme();
-  const params = useLocalSearchParams<{ mode?: "login" | "signup" }>();
-  const { mode } = params;
+  const params = useLocalSearchParams<{ mode?: "login" | "signup"; role?: string }>();
+  const { mode, role } = params;
 
   const [currentMode, setCurrentMode] = useState<"login" | "signup">(
     mode ?? "login"
@@ -125,7 +125,7 @@ export default function AuthScreen() {
               style={styles(theme).formContainer}
               onLayout={(e) => setSignupHeight(e.nativeEvent.layout.height)}
             >
-              <SignupForm />
+              <SignupForm role={role} />
             </View>
           </Animated.View>
         </Animated.View>

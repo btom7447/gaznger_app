@@ -9,7 +9,7 @@ export default function CompleteModal() {
 
 
   const handleDone = () => {
-    router.replace("/(tabs)/(home)");
+    router.replace("/(customer)/(home)" as any); // eslint-disable-line @typescript-eslint/no-explicit-any
   };
 
   return (

@@ -6,7 +6,7 @@ interface OTPFieldProps {
   otp: string[];
   setOtp: (value: string[]) => void;
   length?: number;
-  status?: "default" | "success" | "error"; // controls colors
+  status?: "default" | "success" | "error";
 }
 
 export default function OTPField({
@@ -20,6 +20,17 @@ export default function OTPField({
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 
   const handleChange = (text: string, index: number) => {
+    // Autofill / paste — full code arrives as a multi-character string
+    if (text.length > 1) {
+      const digits = text.replace(/\D/g, "").slice(0, length).split("");
+      const updated = Array(length).fill("");
+      digits.forEach((d, i) => { updated[i] = d; });
+      setOtp(updated);
+      const lastFilled = Math.min(digits.length - 1, length - 1);
+      inputRefs.current[lastFilled]?.focus();
+      return;
+    }
+
     if (/^\d?$/.test(text)) {
       const updated = [...otp];
       updated[index] = text;
@@ -39,22 +50,17 @@ export default function OTPField({
   const getBorderColor = (index: number) => {
     if (status === "success") return theme.secondary;
     if (status === "error") return theme.error;
-    if (focusedIndex === index || otp[index]) return theme.secondary;
-    return theme.primary;
+    if (focusedIndex === index) return theme.secondary;
+    if (otp[index]) return theme.secondary + "80";
+    return theme.mode === "dark" ? "#ffffff30" : "#00000020";
   };
 
   const getBackgroundColor = (index: number) => {
     if (status === "success") return theme.tertiary;
-    if (status === "error") return theme.background;
-    if (focusedIndex === index || otp[index]) return theme.quinest;
-    return theme.background;
-  };
-
-  const getTextColor = (index: number) => {
-    if (status === "success") return theme.quaternary;
-    if (status === "error") return theme.error;
-    if (focusedIndex === index || otp[index]) return theme.text;
-    return theme.text;
+    if (status === "error") return theme.mode === "dark" ? "#ff000015" : theme.background;
+    if (focusedIndex === index) return theme.quinest;
+    if (otp[index]) return theme.mode === "dark" ? "#ffffff10" : theme.quinest;
+    return theme.mode === "dark" ? "#ffffff08" : theme.background;
   };
 
   return (
@@ -62,12 +68,12 @@ export default function OTPField({
       {Array.from({ length }).map((_, index) => (
         <TextInput
           key={index}
-          ref={(el) => {
-            inputRefs.current[index] = el!;
-          }}
+          ref={(el) => { inputRefs.current[index] = el!; }}
           value={otp[index]}
-          maxLength={1}
-          keyboardType="numeric"
+          maxLength={length}
+          keyboardType="number-pad"
+          textContentType="oneTimeCode"
+          autoComplete="one-time-code"
           onFocus={() => setFocusedIndex(index)}
           onBlur={() => setFocusedIndex(null)}
           onChangeText={(t) => handleChange(t, index)}
@@ -77,7 +83,7 @@ export default function OTPField({
             {
               backgroundColor: getBackgroundColor(index),
               borderColor: getBorderColor(index),
-              color: getTextColor(index),
+              color: theme.text,
             },
           ]}
         />
@@ -95,7 +101,7 @@ const styles = StyleSheet.create({
   input: {
     width: 60,
     height: 60,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderRadius: 15,
     textAlign: "center",
     fontSize: 28,

@@ -8,11 +8,17 @@ import {
 } from "react-native";
 import FormField from "./FormField";
 import { router } from "expo-router";
+import { useTheme } from "@/constants/theme";
+import { api } from "@/lib/api";
+import { toast } from "sonner-native";
 import { useSessionStore } from "@/store/useSessionStore";
 import { mapBackendUser } from "@/utils/mapBackendUser";
-import { useTheme } from "@/constants/theme";
 
-export default function SignupForm() {
+interface SignupFormProps {
+  role?: string;
+}
+
+export default function SignupForm({ role }: SignupFormProps) {
   const theme = useTheme();
   const loginSession = useSessionStore((state) => state.login);
 
@@ -23,7 +29,7 @@ export default function SignupForm() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [secureEntry, setSecureEntry] = useState(true);
   const [secureConfirm, setSecureConfirm] = useState(true);
-  const [loading, setLoading] = useState(false); // NEW: track loading state
+  const [loading, setLoading] = useState(false);
 
   const emailStatus = !email
     ? "default"
@@ -33,7 +39,7 @@ export default function SignupForm() {
 
   const passwordStatus = !password
     ? "default"
-    : password.length >= 6
+    : password.length >= 8
     ? "success"
     : "error";
 
@@ -47,44 +53,38 @@ export default function SignupForm() {
     emailStatus === "success" &&
     passwordStatus === "success" &&
     confirmStatus === "success" &&
-    !loading; // disable if loading
+    !loading;
 
   const signup = async () => {
     if (!isButtonEnabled) return;
-
-    setLoading(true); // start loading
+    setLoading(true);
     try {
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_BASE_URL}/auth/register`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email,
-            phone,
-            password,
-            displayName,
-          }),
-        }
-      );
+      const data = await api.post<{
+        user: any;
+        accessToken: string;
+        refreshToken: string;
+      }>("/auth/register", {
+        email,
+        phone,
+        password,
+        displayName,
+        role: role ?? "customer",
+      });
 
-      const data = await res.json();
+      loginSession({
+        user: mapBackendUser(data.user),
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+      });
 
-      if (!res.ok) {
-        throw new Error(data?.message || "Signup failed");
-      }
-
-      console.log("User Registered, navigate to OTP");
-
-      // Navigate to OTP screen with email param
       router.push({
         pathname: "/(auth)/otp",
-        params: { email: data.user.email }, // pass email
+        params: { email: data.user.email, role: role ?? "customer" },
       });
     } catch (err: any) {
-      console.error("Signup error:", err.message || err);
+      toast.error("Sign up failed", { description: err.message });
     } finally {
-      setLoading(false); // stop loading
+      setLoading(false);
     }
   };
 
@@ -145,7 +145,7 @@ export default function SignupForm() {
         ]}
       >
         {loading ? (
-          <ActivityIndicator color="#FFF" size="small" /> // show loader
+          <ActivityIndicator color="#FFF" size="small" />
         ) : (
           <Text
             style={[
