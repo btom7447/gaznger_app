@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { View, StyleSheet, ScrollView, RefreshControl } from "react-native";
+import { api } from "@/lib/api";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ScreenBackground from "@/components/ui/global/ScreenBackground";
 import { useSessionStore } from "@/store/useSessionStore";
@@ -8,6 +9,14 @@ import { useTheme } from "@/constants/theme";
 import HomeHeader from "@/components/ui/home/HomeHeader";
 import PointsBanner from "@/components/ui/home/PointsBanner";
 import FuelGrid from "@/components/ui/home/FuelGrid";
+import ActiveOrderBanner from "@/components/ui/home/ActiveOrderBanner";
+import RecentOrders from "@/components/ui/home/RecentOrders";
+import FuelPriceTicker from "@/components/ui/home/FuelPriceTicker";
+import PromoBanner from "@/components/ui/home/PromoBanner";
+import RedeemModal, { RedeemModalHandles } from "@/components/ui/home/RedeemModal";
+import HomeHeaderSkeleton from "@/components/ui/skeletons/HomeHeaderSkeleton";
+import PointsBannerSkeleton from "@/components/ui/skeletons/PointsBannerSkeleton";
+import FuelGridSkeleton from "@/components/ui/skeletons/FuelGridSkeleton";
 
 export default function HomeScreen() {
   const theme = useTheme();
@@ -18,6 +27,7 @@ export default function HomeScreen() {
   const fuelTypes = useOrderStore((s) => s.fuelTypes);
   const hasHydrated = useOrderStore((s) => s.hasHydrated);
 
+  const redeemModalRef = useRef<RedeemModalHandles>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   // Fetch fuel types once after hydration
@@ -33,17 +43,14 @@ export default function HomeScreen() {
 
     setRefreshing(true);
     try {
-      const [fuelData, pointsRes] = await Promise.all([
+      const [, pointsData] = await Promise.all([
         fetchFuelTypes(),
-        fetch(`${process.env.EXPO_PUBLIC_BASE_URL}/api/points/${user.id}`),
+        api.get<{ points: number }>("/api/points"),
       ]);
 
-      const pointsData = await pointsRes.json();
-      if (pointsRes.ok) {
-        updateUser({ points: pointsData.points });
-      }
+      updateUser({ points: pointsData.points });
     } catch (err) {
-      console.error("HomeScreen refresh failed:", err);
+      // silent — PointsBanner handles its own error state
     } finally {
       setRefreshing(false);
     }
@@ -64,12 +71,24 @@ export default function HomeScreen() {
             />
           }
         >
-          <HomeHeader variant="home" user={user} />
-          <PointsBanner />
-          <FuelGrid />
-          {/* Future sections */}
+          {!hasHydrated ? <HomeHeaderSkeleton /> : <HomeHeader variant="home" user={user} />}
+          {!hasHydrated ? <PointsBannerSkeleton /> : <PointsBanner onOpenRedeem={() => redeemModalRef.current?.open()} />}
+          {isFetchingFuelTypes && !fuelTypes.length ? <FuelGridSkeleton /> : <FuelGrid />}
+
+          {/* Promo banners */}
+          <PromoBanner />
+
+          {/* Active order */}
+          {hasHydrated && <ActiveOrderBanner />}
+
+          {/* Fuel price ticker */}
+          {!!fuelTypes.length && <FuelPriceTicker />}
+
+          {/* Recent orders */}
+          {hasHydrated && <RecentOrders />}
         </ScrollView>
       </SafeAreaView>
+      <RedeemModal ref={redeemModalRef} />
     </ScreenBackground>
   );
 }
@@ -79,7 +98,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 10,
-    paddingTop: 10,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 24,
   },
 });

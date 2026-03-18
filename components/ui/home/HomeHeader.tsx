@@ -32,13 +32,13 @@ export default function HomeHeader({
 
     if (variant === "home") {
       return (
-        <Text style={[styles.greeting, { color: theme.text }]}>
-          Hello {firstName}!
-        </Text>
+        <View>
+          <Text style={[styles.greetingSub, { color: theme.icon }]}>Good day 👋</Text>
+          <Text style={[styles.greeting, { color: theme.text }]}>{firstName}</Text>
+        </View>
       );
     }
 
-    // order / default → keep spacing, render nothing
     return <View />;
   };
 
@@ -48,8 +48,7 @@ export default function HomeHeader({
 
       <View style={styles.right}>
         <NotificationButton
-          count={3}
-          onPress={() => router.push("/notification")}
+          onPress={() => router.push("/(screens)/notification")}
         />
 
         <ProfileCard
@@ -63,7 +62,7 @@ export default function HomeHeader({
 
 const styles = StyleSheet.create({
   header: {
-    marginBottom: 24,
+    marginBottom: 20,
     flexDirection: "row",
     alignItems: "center",
   },
@@ -74,10 +73,17 @@ const styles = StyleSheet.create({
   right: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
+  },
+  greetingSub: {
+    fontSize: 13,
+    fontWeight: "300",
+    marginBottom: 2,
+    letterSpacing: 0.2,
   },
   greeting: {
-    fontSize: 28,
-    fontWeight: "700",
+    fontSize: 26,
+    fontWeight: "500",
+    letterSpacing: -0.3,
   },
 });

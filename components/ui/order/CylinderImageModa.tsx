@@ -1,5 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useRef } from "react";
-import { View, Text, TouchableOpacity, Alert } from "react-native";
+import { View, Text, TouchableOpacity, Alert, StyleSheet } from "react-native";
 import { Modalize } from "react-native-modalize";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
@@ -76,42 +76,43 @@ const CylinderImageModal = forwardRef<CylinderImageModalHandles, Props>(
       <Modalize
         ref={modalRef}
         adjustToContentHeight
-        handlePosition="inside"
-        withHandle
-        panGestureEnabled
+        panGestureEnabled={false}
+        withHandle={false}
         modalStyle={{
+          backgroundColor: theme.background,
           borderTopLeftRadius: 24,
           borderTopRightRadius: 24,
         }}
       >
+        {/* Header */}
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingTop: 20, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.ash }}>
+          <Text style={{ fontSize: 17, fontWeight: "600", color: theme.text }}>Upload Image</Text>
+          <TouchableOpacity
+            onPress={() => modalRef.current?.close()}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: theme.surface, alignItems: "center", justifyContent: "center" }}
+          >
+            <Ionicons name="close" size={16} color={theme.text} />
+          </TouchableOpacity>
+        </View>
+
         <View
           style={{
             paddingHorizontal: 20,
-            paddingVertical: 50,
+            paddingVertical: 28,
             marginBottom: 0,
           }}
         >
           <Text
             style={{
-              fontSize: 20,
-              fontWeight: "600",
-              color: theme.text,
-              textAlign: "center",
-              marginBottom: 10,
-            }}
-          >
-            Upload Image
-          </Text>
-          <Text
-            style={{
-              fontSize: 18,
-              fontWeight: "400",
-              color: theme.text,
-              marginBottom: 25,
+              fontSize: 14,
+              fontWeight: "300",
+              color: theme.icon,
+              marginBottom: 24,
               textAlign: "center",
             }}
           >
-            Upload clear image of your cylinder
+            Upload a clear image of your cylinder
           </Text>
 
           <View

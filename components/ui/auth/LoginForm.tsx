@@ -11,6 +11,8 @@ import { useRouter } from "expo-router";
 import { useSessionStore } from "@/store/useSessionStore";
 import { mapBackendUser } from "@/utils/mapBackendUser";
 import { useTheme } from "@/constants/theme";
+import { api } from "@/lib/api";
+import { toast } from "sonner-native";
 
 export default function LoginForm() {
   const theme = useTheme();
@@ -20,7 +22,7 @@ export default function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [secureEntry, setSecureEntry] = useState(true);
-  const [loading, setLoading] = useState(false); // NEW: track loading state
+  const [loading, setLoading] = useState(false);
 
   const emailStatus = !email
     ? "default"
@@ -37,27 +39,17 @@ export default function LoginForm() {
   const goToForgotPassword = () => router.replace("/(auth)/forgot");
 
   const isButtonEnabled =
-    emailStatus === "success" && passwordStatus === "success" && !loading; // disable if loading
+    emailStatus === "success" && passwordStatus === "success" && !loading;
 
   const login = async () => {
     if (!isButtonEnabled) return;
-
-    setLoading(true); // start loading
+    setLoading(true);
     try {
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_BASE_URL}/auth/login`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
-        }
-      );
-
-      const data = await res.json(); // parse JSON
-
-      if (!res.ok) {
-        throw new Error(data?.message || "Invalid credentials");
-      }
+      const data = await api.post<{
+        user: any;
+        accessToken: string;
+        refreshToken: string;
+      }>("/auth/login", { email, password });
 
       loginSession({
         user: mapBackendUser(data.user),
@@ -65,12 +57,11 @@ export default function LoginForm() {
         refreshToken: data.refreshToken,
       });
 
-      console.log("Logged In");
-      router.replace("/(tabs)/(home)");
+      router.replace("/(customer)/(home)" as any); // eslint-disable-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
-      console.error("Login error:", err.message || err);
+      toast.error("Login failed", { description: err.message });
     } finally {
-      setLoading(false); // stop loading
+      setLoading(false);
     }
   };
 

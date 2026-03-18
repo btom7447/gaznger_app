@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { zustandAsyncStorage } from "./ZustandAsyncStorage";
+import { secureStorage } from "./secureStorage";
+
+export type UserRole = "customer" | "vendor" | "rider" | "admin";
 
 export interface SessionUser {
   id: string;
@@ -11,6 +13,8 @@ export interface SessionUser {
   profileImage?: string;
   points?: number;
   defaultAddress?: string | null;
+  role: UserRole;
+  isOnboarded: boolean;
 }
 
 interface SessionState {
@@ -28,6 +32,7 @@ interface SessionState {
 
   logout: () => void;
   updateUser: (fields: Partial<SessionUser>) => void;
+  setTokens: (tokens: { accessToken: string; refreshToken: string }) => void;
 }
 
 export const useSessionStore = create<SessionState>()(
@@ -60,12 +65,14 @@ export const useSessionStore = create<SessionState>()(
         if (!current) return;
         set({ user: { ...current, ...fields } });
       },
+
+      setTokens: ({ accessToken, refreshToken }) =>
+        set({ accessToken, refreshToken }),
     }),
     {
       name: "session-store",
-      storage: zustandAsyncStorage,
+      storage: secureStorage,
       onRehydrateStorage: () => (state) => {
-        state?.hasHydrated && state.hasHydrated;
         state && (state.hasHydrated = true);
       },
     }

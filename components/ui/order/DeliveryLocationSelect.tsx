@@ -1,23 +1,26 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
   FlatList,
   TouchableOpacity,
-  ActivityIndicator,
   StyleSheet,
 } from "react-native";
+import SkeletonBox from "@/components/ui/skeletons/SkeletonBox";
 import { Ionicons } from "@expo/vector-icons";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useOrderStore } from "@/store/useOrderStore";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useTheme } from "@/constants/theme";
+import { api } from "@/lib/api";
 
 interface Address {
   _id: string;
   label: string;
   icon?: string;
   default?: boolean;
+  latitude?: number;
+  longitude?: number;
 }
 
 export default function DeliveryLocationSelect() {
@@ -31,55 +34,50 @@ export default function DeliveryLocationSelect() {
   const [loading, setLoading] = useState(false);
   const listRef = useRef<FlatList>(null);
 
-  // Fetch addresses
-  useEffect(() => {
+  // Fetch addresses — runs on mount and every time the screen regains focus
+  // (covers the case where user edits/adds an address in the address-book screen)
+  const fetchAddresses = useCallback(async () => {
     if (!user) return;
+    setLoading(true);
+    try {
+      // Backend now returns isDefault per address
+      const data = await api.get<Address[]>("/api/address-book");
 
-    const fetchAddresses = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(
-          `${process.env.EXPO_PUBLIC_BASE_URL}/api/address-book/${user.id}`
-        );
-        if (!res.ok) throw new Error("Failed to fetch addresses");
-        const data: Address[] = await res.json();
+      // Reorder: default first
+      const defaultIndex = data.findIndex((addr) => (addr as any).isDefault);
+      const orderedAddresses =
+        defaultIndex !== -1
+          ? [data[defaultIndex], ...data.filter((_, i) => i !== defaultIndex)]
+          : data;
 
-        // Mark default
-        const addressesWithDefault = data.map((addr) => ({
-          ...addr,
-          default: addr._id === user.defaultAddress,
-        }));
+      // Map to local Address shape (default field for backward compat)
+      const mapped = orderedAddresses.map((addr) => ({
+        ...addr,
+        default: !!(addr as any).isDefault,
+      }));
 
-        // Reorder: default first
-        const defaultIndex = addressesWithDefault.findIndex(
-          (addr) => addr.default
-        );
-        const orderedAddresses =
-          defaultIndex !== -1
-            ? [
-                addressesWithDefault[defaultIndex],
-                ...addressesWithDefault.filter((_, i) => i !== defaultIndex),
-              ]
-            : addressesWithDefault;
+      setAddresses(mapped);
 
-        setAddresses(orderedAddresses);
-
-        // ✅ Use reordered array to set default
-        if (!deliveryAddressId && orderedAddresses.length > 0) {
-          const defaultAddr =
-            orderedAddresses.find((addr) => addr.default) ||
-            orderedAddresses[0];
-          setDeliveryAddress(defaultAddr._id, defaultAddr.label);
-        }
-      } catch (err) {
-        console.error("fetchAddresses error:", err);
-      } finally {
-        setLoading(false);
+      if (!deliveryAddressId && mapped.length > 0) {
+        const defaultAddr = mapped.find((a) => a.default) || mapped[0];
+        const coords = defaultAddr.latitude && defaultAddr.longitude
+          ? { lat: defaultAddr.latitude, lng: defaultAddr.longitude }
+          : undefined;
+        setDeliveryAddress(defaultAddr._id, defaultAddr.label, coords);
       }
-    };
-
-    fetchAddresses();
+    } catch {
+      // address list remains empty on error
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
+
+  // Initial fetch
+  useEffect(() => { fetchAddresses(); }, [user]);
+
+  // Re-fetch whenever the parent screen comes back into focus
+  // (e.g. user navigated to address-book, changed an icon, and returned)
+  useFocusEffect(useCallback(() => { fetchAddresses(); }, [fetchAddresses]));
 
 
   // Add “Add new address”
@@ -97,12 +95,11 @@ export default function DeliveryLocationSelect() {
       (addr) => addr._id === userDefaultAddressId
     );
 
-    if (defaultAddr) {
-      setDeliveryAddress(defaultAddr._id, defaultAddr.label);
-    } else {
-      const firstAddr = addresses[0];
-      setDeliveryAddress(firstAddr._id, firstAddr.label);
-    }
+    const toSelect = defaultAddr || addresses[0];
+    const coords = toSelect.latitude && toSelect.longitude
+      ? { lat: toSelect.latitude, lng: toSelect.longitude }
+      : undefined;
+    setDeliveryAddress(toSelect._id, toSelect.label, coords);
   }, [addresses, user]);
 
   // Scroll to selected
@@ -124,7 +121,10 @@ export default function DeliveryLocationSelect() {
       router.push("/(screens)/address-book");
       return;
     }
-    setDeliveryAddress(item._id, item.label); // ✅ pass label
+    const coords = item.latitude && item.longitude
+      ? { lat: item.latitude, lng: item.longitude }
+      : undefined;
+    setDeliveryAddress(item._id, item.label, coords);
     listRef.current?.scrollToIndex({ index, animated: true });
   };
 
@@ -178,7 +178,26 @@ export default function DeliveryLocationSelect() {
   };
 
   if (loading) {
-    return <ActivityIndicator size="large" style={{ marginVertical: 20 }} />;
+    const PillSkeleton = ({ textWidth }: { textWidth: number }) => (
+      <View style={{
+        flexDirection: "row", alignItems: "center",
+        height: 44, borderRadius: 12, borderWidth: 1, borderColor: theme.ash,
+        backgroundColor: theme.surface, paddingHorizontal: 14, gap: 8, marginRight: 10,
+      }}>
+        <SkeletonBox width={20} height={20} borderRadius={10} />
+        <SkeletonBox width={textWidth} height={12} borderRadius={6} />
+      </View>
+    );
+    return (
+      <View style={{ marginBottom: 20 }}>
+        <Text style={styles(theme).label}>Delivery Location</Text>
+        <View style={{ flexDirection: "row", paddingVertical: 5 }}>
+          <PillSkeleton textWidth={72} />
+          <PillSkeleton textWidth={56} />
+          <PillSkeleton textWidth={64} />
+        </View>
+      </View>
+    );
   }
 
   return (
@@ -200,22 +219,23 @@ export default function DeliveryLocationSelect() {
 const styles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
     label: {
-      fontSize: 20,
-      fontWeight: "600",
-      marginBottom: 12,
+      fontSize: 16,
+      fontWeight: "700",
+      marginBottom: 10,
       color: theme.text,
+      letterSpacing: 0.1,
     },
     pill: {
       flexDirection: "row",
       alignItems: "center",
       paddingVertical: 10,
-      paddingHorizontal: 16,
-      borderRadius: 10,
-      marginRight: 12,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      marginRight: 10,
     },
     pillText: {
       marginLeft: 8,
-      fontSize: 16,
-      fontWeight: "500",
+      fontSize: 13,
+      fontWeight: "600",
     },
   });

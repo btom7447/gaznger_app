@@ -20,17 +20,8 @@ export default function ScreenBackground({
 }: ScreenBackgroundProps) {
   const theme = useTheme();
 
-  const lightGradient: GradientColors = [
-    "rgba(255, 255, 255, 0.6)",
-    "rgba(207, 238, 173, 0.35)",
-    "rgba(255, 255, 255, 0.5)",
-  ];
-
-  const darkGradient: GradientColors = [
-    "rgba(29, 51, 6, 1)",
-    "rgba(39, 82, 39, 1)",
-    "rgba(29, 51, 6, 1)",
-  ];
+  const lightGradient: GradientColors = ["#FFFFFF", "#F2F8F2", "#FFFFFF"];
+  const darkGradient: GradientColors = ["#090F09", "#0D170D", "#090F09"];
 
   const resolvedColors =
     colors ?? (theme.mode === "dark" ? darkGradient : lightGradient);

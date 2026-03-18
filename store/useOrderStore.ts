@@ -2,14 +2,10 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { zustandAsyncStorage } from "./ZustandAsyncStorage";
 import { MIN_QUANTITY } from "@/constants/orderOptions";
+import { api } from "@/lib/api";
+import { FuelType } from "@/types";
 
-/** ---------------- TYPES ---------------- */
-export interface FuelType {
-  _id: string;
-  name: string;
-  unit: string;
-  icon?: string;
-}
+export type { FuelType };
 
 export type DeliveryType = "cylinder_swap" | "home_refill";
 
@@ -25,6 +21,7 @@ export interface OrderDraft {
   // common
   deliveryAddressId?: string;
   deliveryLabel?: string;
+  deliveryCoords?: { lat: number; lng: number };
 
   // new: selected station
   stationId?: string;
@@ -48,7 +45,7 @@ interface OrderState {
   setDeliveryType: (type: DeliveryType) => void;
   addCylinderImage: (uri: string) => void;
   removeCylinderImage: (uri: string) => void;
-  setDeliveryAddress: (id: string, label?: string) => void;
+  setDeliveryAddress: (id: string, label?: string, coords?: { lat: number; lng: number }) => void;
   resetOrder: () => void;
   
   setStation: (station: { id: string; label: string }) => void;
@@ -87,14 +84,10 @@ export const useOrderStore = create<OrderState>()(
         if (get().fuelTypes.length || get().isFetchingFuelTypes) return;
         set({ isFetchingFuelTypes: true });
         try {
-          const res = await fetch(
-            `${process.env.EXPO_PUBLIC_BASE_URL}/api/fuel-types`
-          );
-          if (!res.ok) throw new Error("Failed to fetch fuel types");
-          const data: FuelType[] = await res.json();
+          const data = await api.get<FuelType[]>("/api/fuel-types");
           set({ fuelTypes: data });
-        } catch (err) {
-          console.error("fetchFuelTypes error:", err);
+        } catch {
+          // fuelTypes stays empty — FuelGrid will show empty state
         } finally {
           set({ isFetchingFuelTypes: false });
         }
@@ -152,12 +145,13 @@ export const useOrderStore = create<OrderState>()(
             cylinderImages: state.order.cylinderImages.filter((i) => i !== uri),
           },
         })),
-      setDeliveryAddress: (id: string, label?: string) =>
+      setDeliveryAddress: (id: string, label?: string, coords?: { lat: number; lng: number }) =>
         set((state) => ({
           order: {
             ...state.order,
             deliveryAddressId: id,
             deliveryLabel: label,
+            deliveryCoords: coords,
           },
         })),
       resetOrder: () => set({ order: emptyOrder, progressStep: 0 }),
@@ -169,31 +163,20 @@ export const useOrderStore = create<OrderState>()(
         set((state) => ({ progressStep: Math.max(state.progressStep - 1, 0) })),
 
       /** ---------------- COMPUTED ---------------- */
+      // Screen 1: fuel + qty + cylinder fields only (no address — that's screen 2)
       canContinue: () => {
         const { hasHydrated, order } = get();
 
         if (!hasHydrated) return false;
 
-        const {
-          fuel,
-          quantity,
-          deliveryAddressId,
-          cylinderType,
-          deliveryType,
-          cylinderImages,
-        } = order;
+        const { fuel, quantity, cylinderType, deliveryType, cylinderImages } = order;
 
         if (!fuel) return false;
         if (!quantity || quantity <= 0) return false;
 
         // ✅ Business rule: minimum quantity per fuel
         const minQty = MIN_QUANTITY[fuel.name.toLowerCase()];
-        if (minQty && quantity < minQty) {
-          console.log(`canContinue ❌: quantity below minimum (${minQty})`);
-          return false;
-        }
-
-        if (!deliveryAddressId) return false;
+        if (minQty && quantity < minQty) return false;
 
         if (isGasFuel(fuel)) {
           if (!cylinderType) return false;
@@ -223,7 +206,6 @@ export const useOrderStore = create<OrderState>()(
         if (state) {
           // ❗ IMPORTANT: must update via set, not mutation
           useOrderStore.setState({ hasHydrated: true });
-          console.log("Order store hydrated ✅");
         }
       },
     }

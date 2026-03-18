@@ -14,11 +14,14 @@ import BackButton from "@/components/ui/global/BackButton";
 import { router, useLocalSearchParams } from "expo-router";
 import { maskEmail } from "@/utils/mask";
 import { useTheme } from "@/constants/theme";
+import { api } from "@/lib/api";
+import { toast } from "sonner-native";
 
 export default function OtpScreen() {
   const theme = useTheme();
-  const params = useLocalSearchParams<{ email: string }>();
-  const { email } = params;
+  const params = useLocalSearchParams<{ email: string; type?: string; role?: string }>();
+  const { email, type, role } = params;
+  const isReset = type === "reset";
 
   if (!email) {
     return (
@@ -31,10 +34,8 @@ export default function OtpScreen() {
   }
 
   const maskedEmail = maskEmail(email);
-  const [otp, setOtp] = useState(["", "", "", "", ""]);
-  const [status, setStatus] = useState<"default" | "success" | "error">(
-    "default"
-  );
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  const [status, setStatus] = useState<"default" | "success" | "error">("default");
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [timer, setTimer] = useState(60);
@@ -46,62 +47,54 @@ export default function OtpScreen() {
   }, [timer]);
 
   const isOtpComplete = otp.every((digit) => digit !== "");
+  const otpString = otp.join("");
 
   const verifyCode = async () => {
     if (!isOtpComplete) return;
     setLoading(true);
 
     try {
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_BASE_URL}/auth/verify-otp`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, otp: otp.join("") }),
+      if (isReset) {
+        // For password reset: pass otp + email directly to create screen
+        // (actual verification happens server-side at reset-password endpoint)
+        setStatus("success");
+        router.push({
+          pathname: "/(auth)/create",
+          params: { email, otp: otpString },
+        });
+      } else {
+        await api.post("/auth/verify-otp", { email, otp: otpString });
+        setStatus("success");
+        if (role === "vendor") {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          router.replace("/(vendor)/onboarding" as any);
+        } else if (role === "rider") {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          router.replace("/(rider)/onboarding" as any);
+        } else {
+          router.replace("/(auth)/onboarding");
         }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setStatus("error");
-        throw new Error(data?.message || "Invalid OTP");
       }
-
-      setStatus("success");
-      router.push("/(auth)/modal/verified"); // next step after OTP
     } catch (err: any) {
-      console.error("OTP verification failed:", err.message || err);
       setStatus("error");
+      toast.error("Verification failed", { description: err.message });
     } finally {
       setLoading(false);
     }
   };
 
   const resendOtp = async () => {
-    if (timer > 0 || resending) return; // prevent multiple clicks
+    if (timer > 0 || resending) return;
 
     setResending(true);
-    setOtp(["", "", "", "", ""]);
+    setOtp(["", "", "", "", "", ""]);
     setStatus("default");
-    setTimer(30); // reset countdown
+    setTimer(30);
 
     try {
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_BASE_URL}/auth/resend-otp`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email }),
-        }
-      );
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.message || "Could not resend OTP");
-
-      console.log("OTP resent successfully");
+      await api.post("/auth/resend-otp", { email });
     } catch (err: any) {
-      console.error("Resend OTP failed:", err.message || err);
+      toast.error("Could not resend OTP", { description: err.message });
     } finally {
       setResending(false);
     }
@@ -116,7 +109,7 @@ export default function OtpScreen() {
       <View style={styles.screenHeader}>
         <BackButton />
         <Text style={[styles.title, { color: theme.text }]}>
-          Email Verification
+          {isReset ? "Reset Password" : "Email Verification"}
         </Text>
       </View>
 
@@ -138,14 +131,12 @@ export default function OtpScreen() {
         </View>
 
         <View style={styles.otpContainer}>
-          <OTPField otp={otp} setOtp={setOtp} length={5} status={status} />
+          <OTPField otp={otp} setOtp={setOtp} length={6} status={status} />
         </View>
 
         <Text style={[styles.description, { color: theme.text }]}>
           Resend code in
-          <Text
-            style={[styles.termsLink, { color: theme.text }]}
-          >{` ${timer} `}</Text>
+          <Text style={[styles.termsLink, { color: theme.text }]}>{` ${timer} `}</Text>
           s
         </Text>
 
@@ -166,7 +157,9 @@ export default function OtpScreen() {
           {loading ? (
             <ActivityIndicator size="small" color="#FFF" />
           ) : (
-            <Text style={[styles.verifyText, { color: "#FFF" }]}>Verify</Text>
+            <Text style={[styles.verifyText, { color: "#FFF" }]}>
+              {isReset ? "Continue" : "Verify"}
+            </Text>
           )}
         </TouchableOpacity>
 

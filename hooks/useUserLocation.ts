@@ -27,8 +27,8 @@ export function useUserLocation() {
           lat: loc.coords.latitude,
           lng: loc.coords.longitude,
         });
-      } catch (err) {
-        console.error("Location error:", err);
+      } catch {
+        // location unavailable — permissionDenied or device error
       } finally {
         setLoading(false);
       }

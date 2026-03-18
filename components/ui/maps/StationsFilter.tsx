@@ -1,57 +1,102 @@
 import React from "react";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/constants/theme";
 
+const RADIUS_OPTIONS = [3, 5, 10];
+
 interface FilterBarProps {
-  filters: any;
-  onChangeFilter: (key: string, value: any) => void;
+  filters: Record<string, string>;
+  onChangeFilter: (key: string, value: string) => void;
   sort: string;
   onSortChange: (value: string) => void;
+  radius?: number;
+  onRadiusChange?: (km: number) => void;
 }
 
+const SORT_OPTIONS = [
+  { key: "closest", label: "Closest", icon: "navigate-outline" as const },
+  { key: "rating",  label: "Rating",  icon: "star-outline" as const },
+  { key: "price",   label: "Cheapest", icon: "pricetag-outline" as const },
+];
+
 export default function StationsFilterBar({
-  filters,
-  onChangeFilter,
   sort,
   onSortChange,
+  radius = 5,
+  onRadiusChange,
 }: FilterBarProps) {
   const theme = useTheme();
 
+  const handleRadiusTap = () => {
+    const idx = RADIUS_OPTIONS.indexOf(radius);
+    const next = RADIUS_OPTIONS[(idx + 1) % RADIUS_OPTIONS.length];
+    onRadiusChange?.(next);
+  };
+
   return (
-    <View style={styles(theme).container}>
-      <View style={styles(theme).filtersRow}>
+    <View style={styles.container}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.row}
+      >
+        {SORT_OPTIONS.map((opt) => {
+          const active = sort === opt.key;
+          return (
+            <TouchableOpacity
+              key={opt.key}
+              onPress={() => onSortChange(opt.key)}
+              activeOpacity={0.75}
+              style={[
+                styles.chip,
+                active
+                  ? { backgroundColor: theme.quaternary, borderColor: theme.quaternary }
+                  : { backgroundColor: "transparent", borderColor: theme.ash },
+              ]}
+            >
+              <Ionicons
+                name={opt.icon}
+                size={13}
+                color={active ? "#fff" : theme.icon}
+                style={{ marginRight: 5 }}
+              />
+              <Text style={[styles.chipLabel, { color: active ? "#fff" : theme.text }]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+
+        {/* Radius chip — cycles 3→5→10 */}
         <TouchableOpacity
-          style={styles(theme).filterBtn}
-          onPress={() => onSortChange("closest")}
+          onPress={handleRadiusTap}
+          activeOpacity={0.75}
+          style={[styles.chip, { backgroundColor: "transparent", borderColor: theme.ash }]}
         >
-          <Text style={styles(theme).filterText}>Closest</Text>
+          <Ionicons
+            name="radio-outline"
+            size={13}
+            color={theme.icon}
+            style={{ marginRight: 5 }}
+          />
+          <Text style={[styles.chipLabel, { color: theme.text }]}>{radius} km</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles(theme).filterBtn}
-          onPress={() => onSortChange("rating")}
-        >
-          <Text style={styles(theme).filterText}>Highest Rating</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles(theme).filterBtn}
-          onPress={() => onSortChange("price")}
-        >
-          <Text style={styles(theme).filterText}>Cheapest</Text>
-        </TouchableOpacity>
-      </View>
+      </ScrollView>
     </View>
   );
 }
 
-const styles = (theme: ReturnType<typeof useTheme>) =>
-  StyleSheet.create({
-    container: { padding: 12, paddingTop: 30,  backgroundColor: theme.background },
-    filtersRow: { flexDirection: "row", justifyContent: "space-around" },
-    filterBtn: {
-      padding: 8,
-      borderRadius: 8,
-      borderWidth: 1,
-      borderColor: theme.ash,
-    },
-    filterText: { color: theme.text, fontWeight: "600" },
-  });
+const styles = StyleSheet.create({
+  container: { paddingVertical: 10 },
+  row: { flexDirection: "row", paddingHorizontal: 4, gap: 8 },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  chipLabel: { fontSize: 13, fontWeight: "500" },
+});

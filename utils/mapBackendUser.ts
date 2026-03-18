@@ -8,5 +8,7 @@ export function mapBackendUser(user: any) {
     profileImage: user.profileImage,
     points: user.points,
     defaultAddress: user.defaultAddress,
+    role: user.role ?? "customer",
+    isOnboarded: user.isOnboarded ?? false,
   };
 }
