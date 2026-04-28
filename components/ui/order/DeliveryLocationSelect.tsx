@@ -28,8 +28,6 @@ export default function DeliveryLocationSelect() {
   const user = useSessionStore((s) => s.user);
   const deliveryAddressId = useOrderStore((s) => s.order.deliveryAddressId);
   const setDeliveryAddress = useOrderStore((s) => s.setDeliveryAddress);
-  const canEditOrder = useOrderStore((s) => s.canEditOrder());
-
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(false);
   const listRef = useRef<FlatList>(null);
@@ -138,7 +136,7 @@ export default function DeliveryLocationSelect() {
 
     return (
       <TouchableOpacity
-        disabled={!canEditOrder && !isAdd}
+        disabled={false}
         onPress={() => handleSelect(item, index)}
         style={[
           styles(theme).pill,
@@ -190,7 +188,9 @@ export default function DeliveryLocationSelect() {
     );
     return (
       <View style={{ marginBottom: 20 }}>
-        <Text style={styles(theme).label}>Delivery Location</Text>
+        <Text style={[styles(theme).title, { color: theme.text }]}>
+          Delivery Location
+        </Text>
         <View style={{ flexDirection: "row", paddingVertical: 5 }}>
           <PillSkeleton textWidth={72} />
           <PillSkeleton textWidth={56} />
@@ -202,7 +202,7 @@ export default function DeliveryLocationSelect() {
 
   return (
     <View style={{ marginBottom: 20 }}>
-      <Text style={styles(theme).label}>Delivery Location</Text>
+      <Text style={[styles(theme).title, { color: theme.text }]}>Delivery Location</Text>
       <FlatList
         ref={listRef}
         data={extendedData}
@@ -219,10 +219,17 @@ export default function DeliveryLocationSelect() {
 const styles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
     label: {
-      fontSize: 16,
-      fontWeight: "700",
-      marginBottom: 10,
-      color: theme.text,
+      fontSize: 11,
+      fontWeight: "600",
+      marginBottom: 12,
+      color: theme.icon,
+      letterSpacing: 0.9,
+      textTransform: "uppercase",
+    },
+    title: {
+      fontSize: 13,
+      fontWeight: "500",
+      marginBottom: 12,
       letterSpacing: 0.1,
     },
     pill: {

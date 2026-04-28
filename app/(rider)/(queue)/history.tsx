@@ -9,8 +9,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
+import { getSocket } from "@/lib/socket";
+import NotificationButton from "@/components/ui/global/NotificationButton";
+import ProfileButton from "@/components/ui/global/ProfileButton";
+import Skeleton from "@/components/ui/global/Skeleton";
 
 type DeliveryStatus = "pending" | "accepted" | "picked_up" | "delivered" | "failed";
 
@@ -68,6 +73,7 @@ function fmtDate(dateStr: string) {
 
 export default function RiderHistory() {
   const theme = useTheme();
+  const router = useRouter();
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -94,7 +100,15 @@ export default function RiderHistory() {
     }
   }, []);
 
-  useEffect(() => { load(1); }, [load]);
+  useFocusEffect(useCallback(() => { load(1); }, [load]));
+
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const handler = () => load(1);
+    socket.on("earnings:settled", handler);
+    return () => { socket.off("earnings:settled", handler); };
+  }, [load]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -106,6 +120,50 @@ export default function RiderHistory() {
     setLoadingMore(true);
     load(page + 1, true);
   }, [loadingMore, page, pages, load]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={[s.safe, { backgroundColor: theme.background }]}>
+        <View style={{ padding: 20, gap: 10 }}>
+          {/* Header skeleton */}
+          <View style={s.pageHeader}>
+            <View style={{ gap: 6 }}>
+              <Skeleton width={160} height={22} borderRadius={7} color={theme.ash} />
+              <Skeleton width={90} height={13} borderRadius={5} color={theme.ash} />
+            </View>
+            <View style={s.headerRight}>
+              <Skeleton width={40} height={40} borderRadius={12} color={theme.ash} />
+              <Skeleton width={40} height={40} borderRadius={12} color={theme.ash} />
+            </View>
+          </View>
+          {/* Card skeletons */}
+          {[...Array(5)].map((_, i) => (
+            <View key={i} style={[s.card, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
+              <View style={s.cardTop}>
+                <View style={s.cardLeft}>
+                  <Skeleton width={40} height={40} borderRadius={12} color={theme.ash} />
+                  <View style={{ gap: 6 }}>
+                    <Skeleton width={110} height={14} borderRadius={5} color={theme.ash} />
+                    <Skeleton width={70} height={12} borderRadius={4} color={theme.ash} />
+                  </View>
+                </View>
+                <Skeleton width={64} height={22} borderRadius={8} color={theme.ash} />
+              </View>
+              <View style={[s.divider, { backgroundColor: theme.ash }]} />
+              <View style={s.cardBottom}>
+                <Skeleton width="50%" height={13} borderRadius={5} color={theme.ash} />
+                <Skeleton width="38%" height={13} borderRadius={5} color={theme.ash} />
+                <View style={s.earningRow}>
+                  <Skeleton width="35%" height={13} borderRadius={5} color={theme.ash} />
+                  <Skeleton width="22%" height={15} borderRadius={5} color={theme.ash} />
+                </View>
+              </View>
+            </View>
+          ))}
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const renderItem = ({ item }: { item: DeliveryRecord }) => {
     const color = STATUS_COLOR[item.status];
@@ -158,16 +216,6 @@ export default function RiderHistory() {
     );
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={[s.safe, { backgroundColor: theme.background }]}>
-        <View style={s.center}>
-          <ActivityIndicator size="large" color={theme.primary} />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: theme.background }]}>
       <FlatList
@@ -182,11 +230,19 @@ export default function RiderHistory() {
         onEndReached={loadMore}
         onEndReachedThreshold={0.3}
         ListHeaderComponent={
-          <View style={s.listHeader}>
-            <Text style={[s.pageTitle, { color: theme.text }]}>Delivery History</Text>
-            <Text style={[s.pageSubtitle, { color: theme.icon }]}>
-              {total} trip{total !== 1 ? "s" : ""} total
-            </Text>
+          <View style={{ gap: 4, marginBottom: 8 }}>
+            <View style={s.pageHeader}>
+              <View>
+                <Text style={[s.pageTitle, { color: theme.text }]}>Delivery History</Text>
+                <Text style={[s.pageSubtitle, { color: theme.icon }]}>
+                  {total} trip{total !== 1 ? "s" : ""} total
+                </Text>
+              </View>
+              <View style={s.headerRight}>
+                <NotificationButton onPress={() => router.push("/(screens)/notification" as any)} />
+                <ProfileButton onPress={() => router.push("/(rider)/(queue)/profile" as any)} size={36} />
+              </View>
+            </View>
           </View>
         }
         ListEmptyComponent={
@@ -210,8 +266,8 @@ export default function RiderHistory() {
 
 const s = StyleSheet.create({
   safe: { flex: 1 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  listHeader: { marginBottom: 8 },
+  pageHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  headerRight: { flexDirection: "row", gap: 8, alignItems: "center" },
   pageTitle: { fontSize: 22, fontWeight: "700" },
   pageSubtitle: { fontSize: 13, marginTop: 2 },
   card: { borderRadius: 14, borderWidth: 1, padding: 14, gap: 10 },

@@ -40,7 +40,7 @@ export default function StationsMap({
   useEffect(() => {
     if (!mapRef.current || !showRadius) return;
     const radiusInMeters = radiusKm * 1000;
-    const delta = (radiusInMeters / 111000) * 0.5;
+    const delta = (radiusInMeters / 111000) * 2.4;
     mapRef.current.fitToCoordinates(
       [
         { latitude: radiusCenter.lat + delta, longitude: radiusCenter.lng },
@@ -86,9 +86,9 @@ export default function StationsMap({
           <Circle
             center={{ latitude: radiusCenter.lat, longitude: radiusCenter.lng }}
             radius={radiusKm * 1000}
-            strokeWidth={1}
-            strokeColor={theme.quaternary}
-            fillColor={`${theme.quinary}30`}
+            strokeWidth={1.5}
+            strokeColor={theme.primary + "60"}
+            fillColor={theme.primary + "0C"}
           />
         )}
 

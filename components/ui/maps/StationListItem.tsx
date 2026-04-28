@@ -1,15 +1,15 @@
-import React, { useEffect, useRef } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   Image,
-  Animated,
 } from "react-native";
+import { Ionicons, MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { useTheme } from "@/constants/theme";
-import { MaterialIcons } from "@expo/vector-icons";
 import { Station } from "@/types";
+import { getStationLocalImage } from "@/utils/stationImage";
 
 interface StationListItemProps {
   station: Station;
@@ -27,139 +27,200 @@ export default function StationListItem({
   distance,
 }: StationListItemProps) {
   const theme = useTheme();
-  const scaleAnim = useRef(new Animated.Value(selected ? 1.05 : 1)).current;
-  const opacityAnim = useRef(new Animated.Value(selected ? 1 : 0.9)).current;
+  const s = styles(theme);
+  const [imgFailed, setImgFailed] = useState(false);
 
-  useEffect(() => {
-    Animated.spring(scaleAnim, {
-      toValue: selected ? 1.05 : 1,
-      useNativeDriver: true,
-      stiffness: 120,
-      damping: 12,
-    }).start();
-
-    Animated.timing(opacityAnim, {
-      toValue: selected ? 1 : 0.9,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-  }, [selected]);
+  const localFallback = getStationLocalImage(station.name);
+  const imageSource = station.image && !imgFailed
+    ? { uri: station.image }
+    : localFallback;
 
   return (
-    <Animated.View
-      style={{ transform: [{ scale: scaleAnim }], opacity: opacityAnim }}
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.75}
+      style={[
+        s.card,
+        selected && {
+          borderColor: theme.primary,
+          backgroundColor: theme.tertiary + "40",
+        },
+      ]}
     >
-      <TouchableOpacity
-        onPress={onPress}
-        style={[
-          styles(theme).container,
-          selected && {
-            borderColor: theme.quaternary,
-            borderWidth: 1,
-            backgroundColor: theme.quinest,
-          },
-        ]}
-        activeOpacity={0.8}
-      >
-        {/* LEFT COLUMN */}
-        <View style={styles(theme).leftCol}>
-          <View style={styles(theme).titleRow}>
-            <Text style={styles(theme).name}>{station.name}</Text>
-            <MaterialIcons
-              name="verified"
-              size={16}
-              color={station.verified ? theme.quaternary : theme.ash}
-              style={{ marginLeft: 6 }}
-            />
+      {/* Station image */}
+      <View style={{ flexShrink: 0 }}>
+        <View style={s.imageWrap}>
+          <Image
+            source={imageSource}
+            style={s.image}
+            resizeMode="cover"
+            onError={() => setImgFailed(true)}
+          />
+        </View>
+        {station.isPartner && (
+          <View
+            style={[s.dot, s.leftDot, { backgroundColor: theme.background }]}
+          >
+            <Ionicons name="ribbon-outline" size={12} color={theme.primary} />
           </View>
+        )}
 
-          <View style={styles(theme).titleRow}>
-            <MaterialIcons
-              name="place"
-              size={16}
-              color={theme.text}
-              style={{ marginRight: 6 }}
-            />
-            <Text style={styles(theme).address} numberOfLines={1}>
-              {station.address}
-            </Text>
+        {station.verified && (
+          <View
+            style={[s.dot, s.rightDot, { backgroundColor: theme.background }]}
+          >
+            <MaterialIcons name="verified" size={12} color="#22C55E" />
           </View>
+        )}
+      </View>
 
+      {/* Content */}
+      <View style={s.content}>
+        <View style={s.titleRow}>
+          <Text style={[s.name, { color: theme.text }]} numberOfLines={1}>
+            {station.name}
+          </Text>
+
+          {station.isOpen !== false && (
+            <View style={[s.openBadge, { backgroundColor: "#22C55E18" }]}>
+              <Text style={[s.openText, { color: "#22C55E" }]}>Open</Text>
+            </View>
+          )}
+        </View>
+
+        <Text style={[s.address, { color: theme.icon }]} numberOfLines={1}>
+          {station.address}
+        </Text>
+
+        <View style={s.metaRow}>
           {distance !== undefined && (
-            <View style={styles(theme).titleRow}>
-              <MaterialIcons
-                name="near-me"
-                size={16}
-                color={theme.text}
-                style={{ marginRight: 6 }}
-              />
-              <Text style={styles(theme).address}>
-                {distance.toFixed(2)} km
+            <View style={s.metaChip}>
+              <Ionicons name="navigate-outline" size={11} color={theme.icon} />
+              <Text style={[s.metaText, { color: theme.icon }]}>
+                {distance.toFixed(1)} km
               </Text>
             </View>
           )}
-
-          <View style={styles(theme).titleRow}>
-            <MaterialIcons
-              name="star-rate"
-              size={16}
-              color={theme.text}
-              style={{ marginRight: 6 }}
-            />
-            <Text style={styles(theme).meta}>
-              {station.rating?.toFixed(1) || "0.0"}
-            </Text>
-          </View>
+          {price !== undefined && price > 0 && (
+            <View style={s.metaChip}>
+              <Ionicons name="pricetag-outline" size={11} color={theme.icon} />
+              <Text style={[s.metaText, { color: theme.icon }]}>
+                ₦{price.toLocaleString()}/unit
+              </Text>
+            </View>
+          )}
+          {station.rating !== undefined && station.rating > 0 && (
+            <View style={s.metaChip}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <Ionicons
+                  key={star}
+                  name={
+                    star <= Math.round(station.rating) ? "star" : "star-outline"
+                  }
+                  size={10}
+                  color="#F59E0B"
+                />
+              ))}
+              <Text style={[s.metaText, { color: theme.icon, marginLeft: 2 }]}>
+                {station.rating.toFixed(1)}
+              </Text>
+            </View>
+          )}
         </View>
+      </View>
 
-        {/* RIGHT COLUMN (IMAGE) */}
-        <View style={styles(theme).rightCol}>
-          <Image
-            source={{ uri: station.image }}
-            style={styles(theme).image}
-            resizeMode="cover"
-          />
-        </View>
-      </TouchableOpacity>
-    </Animated.View>
+      {/* Select indicator */}
+      <View
+        style={[s.selector, selected && { backgroundColor: theme.primary }]}
+      >
+        {selected && <Ionicons name="checkmark" size={14} color="#fff" />}
+      </View>
+    </TouchableOpacity>
   );
 }
 
 const styles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
-    container: {
+    card: {
       flexDirection: "row",
       alignItems: "center",
-      padding: 10,
+      padding: 12,
+      gap: 12,
       borderRadius: 16,
-      backgroundColor: theme.background,
       borderWidth: 1,
       borderColor: theme.ash,
-      marginVertical: 5,
-      height: 110,
+      backgroundColor: theme.background,
+      marginVertical: 4,
     },
-    leftCol: {
-      flex: 1,
-      paddingRight: 10,
-      flexDirection: "column",
-      justifyContent: "flex-start",
-      alignItems: "flex-start",
-    },
-    rightCol: {
-      width: 130,
-      height: 88,
-      borderRadius: 12,
+    imageWrap: {
+      width: 52,
+      height: 52,
+      borderRadius: 14,
       overflow: "hidden",
-      backgroundColor: theme.skeleton,
     },
-    image: { width: "100%", height: "100%", borderRadius: 12 },
-    titleRow: {
+    image: {
+      width: "100%",
+      height: "100%",
+    },
+    verifiedDot: {
+      position: "absolute",
+      bottom: -3,
+      right: -3,
+      borderRadius: 8,
+      padding: 1,
+      borderWidth: 1.5,
+      borderColor: theme.background,
+    },
+    dot: {
+      position: "absolute",
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1.5,
+      borderColor: theme.background,
+    },
+
+    leftDot: {
+      left: -4,
+      bottom: -4,
+    },
+
+    rightDot: {
+      right: -4,
+      bottom: -4,
+    },
+    content: { flex: 1, gap: 3 },
+    titleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+    name: { fontSize: 14, fontWeight: "500", flex: 1 },
+    openBadge: {
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 6,
+    },
+    openText: { fontSize: 10, fontWeight: "600" },
+    address: { fontSize: 12, fontWeight: "300" },
+    metaRow: { flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 2 },
+    metaChip: { flexDirection: "row", alignItems: "center", gap: 2 },
+    metaText: { fontSize: 11, fontWeight: "300" },
+    partnerBadge: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "flex-start",
-      marginBottom: 8,
+      gap: 3,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 8,
     },
-    name: { fontWeight: "500", fontSize: 15, color: theme.text },
-    address: { color: theme.icon, fontSize: 12, fontWeight: "300", marginTop: 1 },
-    meta: { fontSize: 12, fontWeight: "300", color: theme.icon },
+    partnerText: { fontSize: 10, fontWeight: "600" },
+    selector: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: theme.ash,
+      justifyContent: "center",
+      alignItems: "center",
+      flexShrink: 0,
+    },
   });

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { useFocusEffect } from "expo-router";
 import {
   View,
   Text,
@@ -18,6 +19,8 @@ import { useSessionStore } from "@/store/useSessionStore";
 import { api } from "@/lib/api";
 import BackButton from "@/components/ui/global/BackButton";
 import NotificationListSkeleton from "@/components/ui/skeletons/NotificationListSkeleton";
+import { getSocket } from "@/lib/socket";
+import { useNotificationStore } from "@/store/useNotificationStore";
 
 interface Notification {
   _id: string;
@@ -95,7 +98,17 @@ export default function NotificationScreen() {
     }
   }, []);
 
-  useEffect(() => { fetchNotifications(1, true); }, []);
+  // Refetch when screen comes into focus (marks-as-read state stays fresh)
+  useFocusEffect(useCallback(() => { fetchNotifications(1, true); }, [fetchNotifications]));
+
+  // Real-time: prepend new notification without re-fetching
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const handler = (n: Notification) => setItems((prev) => [n, ...prev]);
+    socket.on("notification:new", handler);
+    return () => { socket.off("notification:new", handler); };
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -111,6 +124,9 @@ export default function NotificationScreen() {
     try {
       await api.patch(`/api/notifications/${id}/read`);
       setItems((prev) => prev.map((n) => (n._id === id ? { ...n, read: true } : n)));
+      // Decrement badge (min 0)
+      const store = useNotificationStore.getState();
+      store.setUnreadCount(Math.max(0, store.unreadCount - 1));
     } catch {}
   };
 
@@ -175,6 +191,8 @@ export default function NotificationScreen() {
     try {
       await api.patch("/api/notifications/read-all");
       setItems((prev) => prev.map((n) => ({ ...n, read: true })));
+      // Instantly clear the badge on all NotificationButtons
+      useNotificationStore.getState().markAllRead();
     } catch (err: any) {
       toast.error("Failed", { description: err.message });
     } finally {

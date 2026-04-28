@@ -1,24 +1,60 @@
 import React, { useCallback } from "react";
 import { Tabs } from "expo-router";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, TouchableOpacity, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { MaterialIcons } from "@expo/vector-icons";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { useTheme } from "@/constants/theme";
 
 type TabConfig = {
   route: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  iconFocused: keyof typeof Ionicons.glyphMap;
+  icon: keyof typeof MaterialIcons.glyphMap;
+  iconFocused: keyof typeof MaterialIcons.glyphMap;
   label: string;
 };
 
+// Profile is intentionally excluded — it lives behind the header avatar button.
+// Plant is last (far right) per product spec.
 const TABS: TabConfig[] = [
-  { route: "index", icon: "home-outline", iconFocused: "home", label: "Overview" },
-  { route: "orders", icon: "receipt-outline", iconFocused: "receipt", label: "Orders" },
-  { route: "inventory", icon: "cube-outline", iconFocused: "cube", label: "Inventory" },
-  { route: "earnings", icon: "wallet-outline", iconFocused: "wallet", label: "Earnings" },
+  {
+    route: "index",
+    icon: "grid-view",
+    iconFocused: "grid-view",
+    label: "Overview",
+  },
+  {
+    route: "orders",
+    icon: "receipt-long",
+    iconFocused: "receipt-long",
+    label: "Orders",
+  },
+  {
+    route: "inventory",
+    icon: "inventory",
+    iconFocused: "inventory",
+    label: "Inventory",
+  },
+  {
+    route: "earnings",
+    icon: "account-balance-wallet",
+    iconFocused: "account-balance-wallet",
+    label: "Earnings",
+  },
+  {
+    route: "payout",
+    icon: "payments",
+    iconFocused: "payments",
+    label: "Payout",
+  },
+
+  {
+    route: "plant",
+    icon: "oil-barrel",
+    iconFocused: "oil-barrel",
+    label: "Plant",
+  },
 ];
+
 
 interface TabItemProps {
   route: { key: string; name: string };
@@ -48,24 +84,15 @@ function VendorTabItem({ route, isFocused, navigation }: TabItemProps) {
       activeOpacity={0.8}
       style={styles.tabItem}
     >
-      <View style={[styles.pill, isFocused && { backgroundColor: theme.primary }]}>
-        <Ionicons
-          name={isFocused ? tab.iconFocused : tab.icon}
-          size={20}
-          color={isFocused ? "#FFFFFF" : theme.tabIconDefault}
-        />
+      <View style={styles.iconPillClip}>
+        <View style={[styles.iconPill, isFocused && { backgroundColor: theme.primary }]}>
+          <MaterialIcons
+            name={isFocused ? tab.iconFocused : tab.icon}
+            size={20}
+            color={isFocused ? "#FFFFFF" : theme.tabIconDefault}
+          />
+        </View>
       </View>
-      <Text
-        style={[
-          styles.label,
-          {
-            color: isFocused ? "#FFFFFF" : theme.tabIconDefault,
-            fontWeight: isFocused ? "700" : "400",
-          },
-        ]}
-      >
-        {tab.label}
-      </Text>
     </TouchableOpacity>
   );
 }
@@ -74,19 +101,18 @@ function VendorTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const theme = useTheme();
 
+  // Only render routes that are explicitly listed in TABS (hides profile, etc.)
+const visibleRoutes = TABS.map((tab) =>
+  state.routes.find((r) => r.name === tab.route),
+).filter(Boolean) as typeof state.routes;
   return (
-    <View
-      style={[
-        styles.outerWrap,
-        { backgroundColor: theme.tab, paddingBottom: Math.max(insets.bottom, 10) },
-      ]}
-    >
-      <View style={styles.bar}>
-        {state.routes.map((route, index) => (
+    <View style={[styles.outerWrap, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      <View style={[styles.pill, { backgroundColor: theme.tab }]}>
+        {visibleRoutes.map((route) => (
           <VendorTabItem
             key={route.key}
             route={route}
-            isFocused={state.index === index}
+            isFocused={state.routes[state.index].name === route.name}
             navigation={navigation}
           />
         ))}
@@ -105,9 +131,20 @@ export default function VendorDashboardLayout() {
 }
 
 const styles = StyleSheet.create({
-  outerWrap: { paddingTop: 10 },
-  bar: { flexDirection: "row", marginHorizontal: 16, borderRadius: 18, overflow: "hidden" },
-  tabItem: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 6 },
-  pill: { width: 46, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
-  label: { marginTop: 3, fontSize: 11, letterSpacing: 0.2 },
+  outerWrap: { position: "absolute", bottom: 0, left: 0, right: 0, alignItems: "center" },
+  pill: {
+    flexDirection: "row",
+    borderRadius: 40,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    gap: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  tabItem: { alignItems: "center", justifyContent: "center" },
+  iconPillClip: { borderRadius: 17, overflow: "hidden" },
+  iconPill: { width: 44, height: 34, alignItems: "center", justifyContent: "center" },
 });

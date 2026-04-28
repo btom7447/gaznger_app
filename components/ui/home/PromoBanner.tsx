@@ -7,13 +7,13 @@ import {
   StyleSheet,
   Animated,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const BANNER_WIDTH = SCREEN_WIDTH - 32;
 const AUTO_SCROLL_MS = 4500;
 
-type IoniconsName = React.ComponentProps<typeof Ionicons>["name"];
+type IoniconsName = React.ComponentProps<typeof MaterialIcons>["name"];
 
 interface Banner {
   id: string;
@@ -39,7 +39,7 @@ const BANNERS: Banner[] = [
     iconColor: "rgba(255,255,255,0.90)",
     labelBg: "rgba(255,255,255,0.18)",
     labelText: "#FFFFFF",
-    icon: "flash-outline",
+    icon: "local-shipping",
   },
   {
     id: "2",
@@ -63,7 +63,7 @@ const BANNERS: Banner[] = [
     iconColor: "rgba(255,255,255,0.90)",
     labelBg: "rgba(255,255,255,0.18)",
     labelText: "#FFFFFF",
-    icon: "shield-checkmark-outline",
+    icon: "verified",
   },
 ];
 
@@ -150,7 +150,7 @@ export default function PromoBanner() {
               </View>
 
               <View style={styles.iconWrap}>
-                <Ionicons name={banner.icon} size={48} color={banner.iconColor} />
+                <MaterialIcons name={banner.icon} size={48} color={banner.iconColor} />
               </View>
             </View>
           </View>

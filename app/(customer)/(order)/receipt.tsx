@@ -9,12 +9,14 @@ import {
   ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { toast } from "sonner-native";
 import { useTheme } from "@/constants/theme";
 export default function ReceiptScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const { orderId, totalPrice, fuelName, quantity, unit } = useLocalSearchParams<{
     orderId: string;
     totalPrice: string;
@@ -113,8 +115,8 @@ export default function ReceiptScreen() {
 
       </ScrollView>
 
-      {/* Track Order button */}
-      <View style={s.footer}>
+      {/* Track Order button — clears floating tab bar */}
+      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 62 }]}>
         <TouchableOpacity style={[s.doneBtn, { backgroundColor: theme.primary }]} onPress={handleTrackOrder}>
           <Ionicons name="navigate-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
           <Text style={s.doneBtnText}>Track Order</Text>
@@ -166,7 +168,7 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
       padding: 16, borderRadius: 16, borderWidth: 1,
     },
     rateBtnText: { flex: 1, fontSize: 14, fontWeight: "400" },
-    footer: { padding: 16, paddingBottom: 28 },
+    footer: { paddingHorizontal: 16, paddingTop: 16 },
     doneBtn: { paddingVertical: 16, borderRadius: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", },
     doneBtnText: { color: "#fff", fontSize: 15, fontWeight: "500" },
   });

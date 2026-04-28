@@ -6,10 +6,11 @@ import {
   StyleSheet,
   ScrollView,
   StatusBar,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useTheme } from "@/constants/theme";
 import type { UserRole } from "@/store/useSessionStore";
 
@@ -20,7 +21,7 @@ interface RoleCard {
   title: string;
   subtitle: string;
   description: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: keyof typeof MaterialIcons.glyphMap;
 }
 
 const ROLES: RoleCard[] = [
@@ -29,21 +30,21 @@ const ROLES: RoleCard[] = [
     title: "Buying Fuel",
     subtitle: "I need fuel delivered",
     description: "Order petrol, diesel, LPG and more — delivered to your home or business.",
-    icon: "flame-outline",
+    icon: "local-fire-department",
   },
   {
     role: "vendor",
     title: "I Own a Station",
     subtitle: "I sell and supply fuel",
     description: "List your station, manage orders, track inventory and receive payouts.",
-    icon: "storefront-outline",
+    icon: "local-gas-station",
   },
   {
     role: "rider",
     title: "Delivery Rider",
     subtitle: "I deliver fuel orders",
     description: "Accept delivery jobs near you, earn per delivery and track your income.",
-    icon: "bicycle-outline",
+    icon: "two-wheeler",
   },
 ];
 
@@ -68,7 +69,11 @@ export default function RoleSelectScreen() {
         {/* Header */}
         <View style={s.header}>
           <View style={[s.logoMark, { backgroundColor: theme.primary }]}>
-            <Ionicons name="flame" size={28} color="#fff" />
+            <Image
+              source={require("../../assets/images/gaznger_logo.png")}
+              style={s.image}
+              resizeMode="contain"
+            />
           </View>
           <Text style={[s.title, { color: theme.text }]}>Welcome to Gaznger</Text>
           <Text style={[s.subtitle, { color: theme.icon }]}>
@@ -86,7 +91,7 @@ export default function RoleSelectScreen() {
               activeOpacity={0.85}
             >
               <View style={[s.iconWrap, { backgroundColor: theme.tertiary }]}>
-                <Ionicons name={item.icon} size={28} color={theme.primary} />
+                <MaterialIcons name={item.icon} size={28} color={theme.primary} />
               </View>
               <View style={s.cardBody}>
                 <Text style={[s.cardTitle, { color: theme.text }]}>{item.title}</Text>
@@ -121,20 +126,46 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
 
     header: { alignItems: "center", paddingTop: 40, paddingBottom: 36 },
     logoMark: {
-      width: 60, height: 60, borderRadius: 18,
-      justifyContent: "center", alignItems: "center", marginBottom: 20,
+      width: 60,
+      height: 60,
+      borderRadius: 18,
+      justifyContent: "center",
+      alignItems: "center",
+      marginBottom: 20,
     },
-    title: { fontSize: 26, fontWeight: "700", marginBottom: 8, textAlign: "center" },
-    subtitle: { fontSize: 15, fontWeight: "400", textAlign: "center", lineHeight: 22 },
+    image: {
+      width: 40,
+      height: 40,
+    },
+    title: {
+      fontSize: 26,
+      fontWeight: "700",
+      marginBottom: 8,
+      textAlign: "center",
+    },
+    subtitle: {
+      fontSize: 15,
+      fontWeight: "400",
+      textAlign: "center",
+      lineHeight: 22,
+    },
 
     cards: { gap: 14 },
     card: {
-      flexDirection: "row", alignItems: "center", gap: 14,
-      borderRadius: 18, borderWidth: 1, padding: 18,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 14,
+      borderRadius: 18,
+      borderWidth: 1,
+      padding: 18,
     },
     iconWrap: {
-      width: 52, height: 52, borderRadius: 14,
-      justifyContent: "center", alignItems: "center", flexShrink: 0,
+      width: 52,
+      height: 52,
+      borderRadius: 14,
+      justifyContent: "center",
+      alignItems: "center",
+      flexShrink: 0,
     },
     cardBody: { flex: 1 },
     cardTitle: { fontSize: 16, fontWeight: "600", marginBottom: 2 },
@@ -142,7 +173,9 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
     cardDesc: { fontSize: 13, fontWeight: "300", lineHeight: 18 },
 
     loginRow: {
-      flexDirection: "row", justifyContent: "center", alignItems: "center",
+      flexDirection: "row",
+      justifyContent: "center",
+      alignItems: "center",
       marginTop: 36,
     },
     loginText: { fontSize: 14 },

@@ -4,6 +4,7 @@ import {
   Text,
   FlatList,
   Image,
+  ImageSourcePropType,
   TouchableOpacity,
   StyleSheet,
   ListRenderItemInfo,
@@ -12,7 +13,15 @@ import {
 import { useTheme } from "@/constants/theme";
 import { useOrderStore, FuelType } from "@/store/useOrderStore";
 
-const ITEM_WIDTH = 100;
+const ITEM_WIDTH = 110;
+
+// Local fuel icons — same as FuelGrid, always available
+const FUEL_LOCAL_ICON: Record<string, ImageSourcePropType> = {
+  petrol: require("../../../assets/icons/fuel/petrol-icon.png"),
+  diesel: require("../../../assets/icons/fuel/diesel-icon.png"),
+  gas:    require("../../../assets/icons/fuel/gas-icon.png"),
+  oil:    require("../../../assets/icons/fuel/oil-icon.png"),
+};
 
 function SelectService() {
   const theme = useTheme();
@@ -57,6 +66,7 @@ function SelectService() {
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<FuelType>) => {
       const isSelected = item._id === selectedFuelId;
+      const localIcon = FUEL_LOCAL_ICON[item.name.toLowerCase()] ?? FUEL_LOCAL_ICON.petrol;
       return (
         <TouchableOpacity
           onPress={() => onSelect(item)}
@@ -66,10 +76,17 @@ function SelectService() {
             {
               backgroundColor: isSelected ? theme.tertiary : theme.surface,
               borderColor: isSelected ? theme.primary : theme.ash,
+              borderWidth: isSelected ? 2 : 1.5,
             },
           ]}
         >
-          {item.icon && <Image source={{ uri: item.icon }} style={styles.icon} />}
+          <View style={[styles.iconWrap, { backgroundColor: isSelected ? theme.primary + "18" : theme.background }]}>
+            <Image
+              source={item.icon ? { uri: item.icon } : localIcon}
+              style={styles.icon}
+              resizeMode="contain"
+            />
+          </View>
           <Text style={[styles.text, { color: isSelected ? theme.primary : theme.text }]}>
             {item.name}
           </Text>
@@ -113,16 +130,24 @@ function SelectService() {
 export default memo(SelectService);
 
 const styles = StyleSheet.create({
-  title: { fontSize: 13, fontWeight: "400", marginBottom: 10, letterSpacing: 0.1 },
+  title: { fontSize: 13, fontWeight: "500", marginBottom: 12, letterSpacing: 0.1 },
   item: {
     width: ITEM_WIDTH,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 10,
+    borderRadius: 18,
+    alignItems: "center",
+    marginRight: 10,
+    gap: 6,
+  },
+  iconWrap: {
+    width: 60,
+    height: 60,
     borderRadius: 16,
     alignItems: "center",
-    borderWidth: 1.5,
-    marginRight: 10,
+    justifyContent: "center",
+    marginBottom: 4,
   },
-  icon: { width: 48, height: 52, resizeMode: "contain", marginBottom: 6 },
-  text: { fontSize: 12, fontWeight: "400", textTransform: "capitalize" },
+  icon: { width: 44, height: 44, resizeMode: "contain" },
+  text: { fontSize: 13, fontWeight: "500", textTransform: "capitalize", textAlign: "center" },
 });

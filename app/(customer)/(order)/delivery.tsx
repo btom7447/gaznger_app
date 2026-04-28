@@ -5,11 +5,17 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  Image,
+  ImageSourcePropType,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { toast } from "sonner-native";
+import NotificationButton from "@/components/ui/global/NotificationButton";
+import ProfileCard from "@/components/ui/global/ProfileCard";
+import { useSessionStore } from "@/store/useSessionStore";
 
 import { useTheme } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
@@ -18,8 +24,17 @@ import OrderProgressBar from "@/components/ui/global/OrderProgressBar";
 import DeliveryLocationSelect from "@/components/ui/order/DeliveryLocationSelect";
 import OrderSummaryModal from "./modal/order-summary";
 
+const FUEL_LOCAL_ICON: Record<string, ImageSourcePropType> = {
+  petrol: require("../../../assets/icons/fuel/petrol-icon.png"),
+  diesel: require("../../../assets/icons/fuel/diesel-icon.png"),
+  gas:    require("../../../assets/icons/fuel/gas-icon.png"),
+  oil:    require("../../../assets/icons/fuel/oil-icon.png"),
+};
+
 export default function DeliveryScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const user = useSessionStore((s) => s.user);
   const { fuel, quantity, cylinderType, deliveryType, deliveryAddressId } =
     useOrderStore((s) => s.order);
 
@@ -49,17 +64,40 @@ export default function DeliveryScreen() {
   };
 
   const s = styles(theme);
+  const fuelKey = fuel?.name?.toLowerCase() ?? "";
+  const localIcon = FUEL_LOCAL_ICON[fuelKey] ?? FUEL_LOCAL_ICON.petrol;
+
+  // Build order recap chips
+  const recapChips: string[] = [];
+  if (fuel?.name) recapChips.push(fuel.name);
+  if (quantity && fuel?.unit) recapChips.push(`${quantity} ${fuel.unit}`);
+  if (cylinderType) recapChips.push(cylinderType);
+  if (deliveryType) recapChips.push(deliveryType === "cylinder_swap" ? "Swap" : "Top Up");
 
   return (
     <SafeAreaView style={s.safe}>
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={handleBack} style={s.backBtn} activeOpacity={0.7}>
+        <TouchableOpacity
+          onPress={handleBack}
+          style={[s.backBtn, { borderColor: theme.ash }]}
+          activeOpacity={0.7}
+        >
           <Ionicons name="chevron-back" size={20} color={theme.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={s.headerSub}>Delivery Details</Text>
-          <Text style={s.headerTitle}>{fuel?.name ?? "Order Fuel"}</Text>
+          <Text style={[s.headerSub, { color: theme.icon }]}>Step 2 of 3</Text>
+          <Text style={[s.headerTitle, { color: theme.text }]}>
+            Delivery Details
+          </Text>
+        </View>
+        <View style={s.headerRight}>
+          <NotificationButton onPress={() => router.push("/(screens)/notification" as any)} />
+          <ProfileCard
+            image={user?.profileImage}
+            initials={user?.displayName?.split(" ").map((w) => w[0]).join("").slice(0, 2)}
+            onPress={() => router.push("/(screens)/profile" as any)}
+          />
         </View>
       </View>
 
@@ -70,34 +108,53 @@ export default function DeliveryScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Order summary row */}
-        <View style={[s.summaryCard, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
-          <Text style={[s.summaryTitle, { color: theme.text }]}>Your Order</Text>
-          <SummaryRow label="Fuel" value={fuel?.name ?? "—"} theme={theme} />
-          <SummaryRow label="Quantity" value={`${quantity} ${fuel?.unit ?? ""}`.trim()} theme={theme} />
-          {cylinderType && <SummaryRow label="Cylinder" value={cylinderType} theme={theme} />}
-          {deliveryType && (
-            <SummaryRow
-              label="Delivery"
-              value={deliveryType.split("_").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ")}
-              theme={theme}
+        {/* Compact order recap row */}
+        <View
+          style={[
+            s.recapRow,
+            { backgroundColor: theme.surface, borderColor: theme.ash },
+          ]}
+        >
+          <View style={[s.recapIconWrap, { backgroundColor: theme.tertiary }]}>
+            <Image
+              source={fuel?.icon ? { uri: fuel.icon } : localIcon}
+              style={s.recapIcon}
+              resizeMode="contain"
             />
-          )}
+          </View>
+          <View style={s.recapChips}>
+            {recapChips.map((chip, i) => (
+              <React.Fragment key={chip}>
+                <Text style={[s.recapChipText, { color: theme.text }]}>
+                  {chip}
+                </Text>
+                {i < recapChips.length - 1 && (
+                  <Text style={[s.recapDot, { color: theme.ash }]}>·</Text>
+                )}
+              </React.Fragment>
+            ))}
+          </View>
         </View>
 
+        {/* Divider */}
+        <View style={[s.divider, { backgroundColor: theme.ash }]} />
+
+        {/* Delivery address section */}
         <DeliveryLocationSelect />
       </ScrollView>
 
-      {/* Fixed CTA */}
-      <View style={s.ctaBar}>
+      {/* Fixed CTA — paddingBottom clears floating pill tab bar */}
+      <View
+        style={[
+          s.ctaBar,
+          { borderTopColor: theme.ash, backgroundColor: theme.background, paddingBottom: Math.max(insets.bottom, 12) + 62 },
+        ]}
+      >
         <TouchableOpacity
           onPress={handleReview}
           style={[
             s.continueBtn,
-            {
-              backgroundColor: canReview ? theme.primary : theme.ash,
-              opacity: canReview ? 1 : 0.7,
-            },
+            { backgroundColor: theme.primary, opacity: canReview ? 1 : 0.4 },
           ]}
           activeOpacity={0.85}
         >
@@ -120,23 +177,6 @@ export default function DeliveryScreen() {
   );
 }
 
-function SummaryRow({
-  label,
-  value,
-  theme,
-}: {
-  label: string;
-  value: string;
-  theme: ReturnType<typeof useTheme>;
-}) {
-  return (
-    <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 }}>
-      <Text style={{ fontSize: 13, color: theme.icon, fontWeight: "300" }}>{label}</Text>
-      <Text style={{ fontSize: 13, color: theme.text, fontWeight: "400" }}>{value}</Text>
-    </View>
-  );
-}
-
 const styles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
     safe: { flex: 1, backgroundColor: theme.background },
@@ -153,26 +193,64 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
       height: 36,
       borderRadius: 10,
       borderWidth: 1,
-      borderColor: theme.ash,
       alignItems: "center",
       justifyContent: "center",
     },
-    headerSub: { fontSize: 12, fontWeight: "300", color: theme.icon, marginBottom: 1 },
-    headerTitle: { fontSize: 20, fontWeight: "500", color: theme.text },
-    scrollContent: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 16 },
-    summaryCard: {
-      borderRadius: 16,
-      borderWidth: 1,
-      padding: 16,
-      marginBottom: 16,
+    headerSub: { fontSize: 11, fontWeight: "300", marginBottom: 1 },
+    headerTitle: { fontSize: 20, fontWeight: "600" },
+    headerRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+    scrollContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20 },
+    title: {
+      fontSize: 13,
+      fontWeight: "500",
+      marginBottom: 12,
+      letterSpacing: 0.1,
     },
-    summaryTitle: { fontSize: 14, fontWeight: "500", marginBottom: 8 },
+    // Recap row
+    recapRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      padding: 12,
+      borderRadius: 14,
+      borderWidth: 1,
+      marginBottom: 20,
+    },
+    recapIconWrap: {
+      width: 52,
+      height: 52,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
+    recapIcon: { width: 38, height: 38 },
+    recapChips: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 4,
+    },
+    recapChipText: { fontSize: 13, fontWeight: "500" },
+    recapDot: { fontSize: 14, fontWeight: "300" },
+    payBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
+    payBadgeText: { fontSize: 11, fontWeight: "600", color: "#22C55E" },
+
+    divider: { height: StyleSheet.hairlineWidth, marginBottom: 20 },
+
+    sectionLabel: {
+      fontSize: 11,
+      fontWeight: "600",
+      letterSpacing: 0.9,
+      textTransform: "uppercase",
+      marginBottom: 12,
+    },
+
     ctaBar: {
       paddingHorizontal: 16,
       paddingVertical: 12,
       borderTopWidth: 1,
-      borderTopColor: theme.ash,
-      backgroundColor: theme.background,
     },
     continueBtn: {
       paddingVertical: 16,

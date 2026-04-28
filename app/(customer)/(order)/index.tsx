@@ -7,16 +7,20 @@ import {
   StyleSheet,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { router, useFocusEffect } from "expo-router";
 
 import { useTheme } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
 import { useSessionStore } from "@/store/useSessionStore";
+import { useActiveOrder } from "@/hooks/useActiveOrder";
 import { MIN_QUANTITY } from "@/constants/orderOptions";
 
+import { Ionicons } from "@expo/vector-icons";
 import NotificationButton from "@/components/ui/global/NotificationButton";
 import ProfileCard from "@/components/ui/global/ProfileCard";
+import BackButton from "@/components/ui/global/BackButton";
 import OrderProgressBar from "@/components/ui/global/OrderProgressBar";
 import SelectService from "@/components/ui/order/SelectService";
 import QuantitySelect from "@/components/ui/order/QuantitySelect";
@@ -29,22 +33,30 @@ const isGasFuel = (fuel: any) => !!fuel && fuel.name.toLowerCase().includes("gas
 
 export default function OrderScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const user = useSessionStore((s) => s.user);
 
   const { fuel, quantity, deliveryType } = useOrderStore((s) => s.order);
   const canContinue = useOrderStore((s) => s.canContinue);
+  const { hasActiveOrder } = useActiveOrder();
 
   const modalRef = useRef<CylinderImageModalHandles>(null);
   const addImage = useOrderStore((s) => s.addCylinderImage);
 
-  // Guard: if user left mid-flow (tab-switch) and returns, restore their position
+  // Guard: redirect if active order exists or user left mid-flow
   useFocusEffect(useCallback(() => {
+    if (hasActiveOrder) {
+      toast.error("You have an active order", { description: "Track your current order first" });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      router.replace("/(customer)/(track)" as any);
+      return;
+    }
     const step = useOrderStore.getState().progressStep;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (step === 1) router.replace("/(customer)/(order)/delivery" as any);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     else if (step === 2) router.replace("/(customer)/(order)/stations" as any);
-  }, []));
+  }, [hasActiveOrder]));
 
   const handleContinue = () => {
     const orderState = useOrderStore.getState();
@@ -69,14 +81,16 @@ export default function OrderScreen() {
     <SafeAreaView style={s.safe}>
       {/* Header */}
       <View style={s.header}>
-        <View>
-          <Text style={s.headerSub}>New Order</Text>
+        <BackButton onPress={() => router.push("/(customer)/(home)" as any)} />
+        <View style={{ flex: 1 }}>
+          <Text style={s.headerSub}>Step 1 of 3</Text>
           <Text style={s.headerTitle}>{fuel ? fuel.name : "Order Fuel"}</Text>
         </View>
         <View style={s.headerRight}>
           <NotificationButton onPress={() => router.push("/(screens)/notification")} />
           <ProfileCard
             image={user?.profileImage}
+            initials={user?.displayName?.split(" ").map((w) => w[0]).join("").slice(0, 2)}
             onPress={() => router.push("/(screens)/profile")}
           />
         </View>
@@ -103,21 +117,15 @@ export default function OrderScreen() {
         )}
       </ScrollView>
 
-      {/* Fixed CTA */}
-      <View style={s.ctaBar}>
+      {/* Fixed CTA — extra paddingBottom clears the floating pill tab bar */}
+      <View style={[s.ctaBar, { paddingBottom: Math.max(insets.bottom, 12) + 62 }]}>
         <TouchableOpacity
           onPress={handleContinue}
-          style={[
-            s.continueBtn,
-            {
-              backgroundColor: canContinue() ? theme.primary : theme.ash,
-              opacity: canContinue() ? 1 : 0.7,
-            },
-          ]}
+          style={[s.continueBtn, { backgroundColor: theme.primary, opacity: canContinue() ? 1 : 0.4 }]}
           activeOpacity={0.85}
         >
           <Text style={s.continueText}>
-            {canContinue() ? "Next" : "Complete All Fields"}
+            {canContinue() ? "Continue" : "Complete All Fields"}
           </Text>
         </TouchableOpacity>
       </View>
@@ -139,7 +147,7 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
     headerRight: { flexDirection: "row", alignItems: "center", gap: 8 },
     scrollContent: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 16 },
     ctaBar: {
-      paddingHorizontal: 16, paddingVertical: 12,
+      paddingHorizontal: 16, paddingTop: 12,
       borderTopWidth: 1, borderTopColor: theme.ash,
       backgroundColor: theme.background,
     },

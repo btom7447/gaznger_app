@@ -3,13 +3,13 @@ import {
   View,
   TouchableOpacity,
   Image,
-  Text,
   StyleSheet,
   ImageSourcePropType,
   Animated,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/constants/theme";
 import { useActiveOrder } from "@/hooks/useActiveOrder";
 
@@ -22,20 +22,18 @@ const icons: Record<string, ImageSourcePropType> = {
   trackFilled: require("../../../assets/icons/tab/delivery-fill.png"),
 };
 
-const getIcon = (name: string, focused: boolean): ImageSourcePropType => {
+const getIcon = (name: string, focused: boolean): ImageSourcePropType | null => {
   const n = name.toLowerCase();
   if (n.includes("home")) return focused ? icons.homeFilled : icons.home;
   if (n.includes("order")) return focused ? icons.orderFilled : icons.order;
   if (n.includes("track")) return focused ? icons.trackFilled : icons.track;
-  return icons.home;
+  return null; // Use Ionicons fallback
 };
 
-const getLabel = (name: string): string => {
+const getIonicon = (name: string, focused: boolean): keyof typeof Ionicons.glyphMap => {
   const n = name.toLowerCase();
-  if (n.includes("home")) return "Home";
-  if (n.includes("order")) return "Order";
-  if (n.includes("track")) return "Track";
-  return "";
+  if (n.includes("history")) return focused ? "time" : "time-outline";
+  return focused ? "home" : "home-outline";
 };
 
 function PulsingDot() {
@@ -56,11 +54,11 @@ function PulsingDot() {
     <Animated.View
       style={{
         position: "absolute",
-        top: -2,
-        right: -2,
-        width: 9,
-        height: 9,
-        borderRadius: 5,
+        top: 4,
+        right: 4,
+        width: 8,
+        height: 8,
+        borderRadius: 4,
         backgroundColor: "#F97316",
         opacity,
       }}
@@ -74,13 +72,10 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const { hasActiveOrder } = useActiveOrder();
 
   return (
-    <View style={[styles.outerWrap, { backgroundColor: theme.tab, paddingBottom: Math.max(insets.bottom, 10) }]}>
-      <View style={styles.bar}>
+    <View style={[styles.outerWrap, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      <View style={[styles.pill, { backgroundColor: theme.tab }]}>
         {state.routes.map((route, index) => {
           const isFocused = state.index === index;
-          const icon = getIcon(route.name, isFocused);
-          const label = getLabel(route.name);
-
           const onPress = useCallback(() => {
             const event = navigation.emit({
               type: "tabPress",
@@ -94,6 +89,7 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
 
           const isTrack = route.name.toLowerCase().includes("track");
           const showBadge = isTrack && hasActiveOrder;
+          const imageIcon = getIcon(route.name, isFocused);
 
           return (
             <TouchableOpacity
@@ -102,19 +98,24 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
               activeOpacity={0.8}
               style={styles.tabItem}
             >
-              <View style={{ position: "relative" }}>
-                <View style={[styles.pill, isFocused && { backgroundColor: theme.primary }]}>
-                  <Image
-                    source={icon}
-                    resizeMode="contain"
-                    style={[styles.icon, { tintColor: isFocused ? "#FFFFFF" : theme.tabIconDefault }]}
-                  />
+              <View style={styles.iconPillClip}>
+                <View style={[styles.iconPill, isFocused && { backgroundColor: theme.primary }]}>
+                  {imageIcon ? (
+                    <Image
+                      source={imageIcon}
+                      resizeMode="contain"
+                      style={[styles.icon, { tintColor: isFocused ? "#FFFFFF" : theme.tabIconDefault }]}
+                    />
+                  ) : (
+                    <Ionicons
+                      name={getIonicon(route.name, isFocused)}
+                      size={20}
+                      color={isFocused ? "#FFFFFF" : theme.tabIconDefault}
+                    />
+                  )}
+                  {showBadge && <PulsingDot />}
                 </View>
-                {showBadge && <PulsingDot />}
               </View>
-              <Text style={[styles.label, { color: isFocused ? "#FFFFFF" : theme.tabIconDefault, fontWeight: isFocused ? "700" : "400" }]}>
-                {label}
-              </Text>
             </TouchableOpacity>
           );
         })}
@@ -125,34 +126,37 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
 
 const styles = StyleSheet.create({
   outerWrap: {
-    paddingTop: 10,
-  },
-  bar: {
-    flexDirection: "row",
-    marginHorizontal: 16,
-    borderRadius: 18,
-    overflow: "hidden",
-  },
-  tabItem: {
-    flex: 1,
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
     alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 6,
   },
   pill: {
-    width: 46,
-    height: 30,
-    borderRadius: 15,
+    flexDirection: "row",
+    borderRadius: 40,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    gap: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  tabItem: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconPillClip: { borderRadius: 17, overflow: "hidden" },
+  iconPill: {
+    width: 48,
+    height: 34,
     alignItems: "center",
     justifyContent: "center",
   },
   icon: {
     width: 22,
     height: 22,
-  },
-  label: {
-    marginTop: 3,
-    fontSize: 11,
-    letterSpacing: 0.2,
   },
 });

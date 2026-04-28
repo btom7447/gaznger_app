@@ -4,7 +4,6 @@ export interface FuelType {
   description?: string;
   icon?: string;
   unit: string;
-  pricePerUnit?: number;
 }
 
 export interface StationFuel {
@@ -24,6 +23,8 @@ export interface Station {
   state?: string;
   lga?: string;
   verified?: boolean;
+  isOpen?: boolean;
+  isPartner?: boolean;
   /** computed on client — distance in km from the user */
   distance?: number;
   /** computed on client — price for the selected fuel type */

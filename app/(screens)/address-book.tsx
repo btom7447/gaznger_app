@@ -85,6 +85,7 @@ export default function AddressBookScreen() {
   const [geocoding, setGeocoding] = useState(false);
   const [isDefaultToggle, setIsDefaultToggle] = useState(false);
 
+  const [mapReady, setMapReady] = useState(false);
   const mapRef = useRef<MapView>(null);
 
   /* ── Data ── */
@@ -378,6 +379,7 @@ export default function AddressBookScreen() {
                     style={StyleSheet.absoluteFillObject}
                     provider="google"
                     initialRegion={mapRegion}
+                    onMapReady={() => setMapReady(true)}
                     onPress={handleMapPress}
                     showsPointsOfInterest={false}
                     showsBuildings={false}
@@ -399,6 +401,13 @@ export default function AddressBookScreen() {
                       </Marker>
                     )}
                   </MapView>
+
+                  {/* Loading overlay until map tiles load */}
+                  {!mapReady && (
+                    <View style={[StyleSheet.absoluteFillObject, { backgroundColor: theme.surface, justifyContent: "center", alignItems: "center", borderRadius: 16 }]}>
+                      <ActivityIndicator size="large" color={theme.primary} />
+                    </View>
+                  )}
 
                   {/* Tooltip — shown only before any pin is dropped */}
                     <View style={[s.mapTooltip, { backgroundColor: theme.background + "EE" }]}>

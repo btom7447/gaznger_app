@@ -8,34 +8,61 @@ import {
 } from "react-native";
 import { useOrderStore } from "@/store/useOrderStore";
 import { useTheme } from "@/constants/theme";
+import { MIN_QUANTITY } from "@/constants/orderOptions";
 
 export default function QuantitySelect() {
   const { quantity, fuel } = useOrderStore((s) => s.order);
   const setQuantity = useOrderStore((s) => s.setQuantity);
-
   const theme = useTheme();
   const inputRef = useRef<TextInput>(null);
 
+  const fuelKey = fuel?.name?.toLowerCase() ?? "";
+  const minQty = MIN_QUANTITY[fuelKey] ?? 0;
+  const unit = fuel?.unit ?? "";
+
   return (
     <View style={styles(theme).fieldContainer}>
-      <Text style={styles(theme).label}>Select your Quantity</Text>
+      {/* Label + min badge inline */}
+      <View style={styles(theme).labelRow}>
+        <Text style={styles(theme).label}>Quantity</Text>
+        {minQty > 0 && (
+          <View style={[styles(theme).minBadge, { backgroundColor: theme.tertiary, borderColor: theme.ash }]}>
+            <Text style={[styles(theme).minBadgeText, { color: theme.primary }]}>
+              min {minQty} {unit}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {/* Input with prefix + vertical demarcation */}
       <TouchableOpacity
         activeOpacity={1}
-        style={styles(theme).inputWrapper}
+        style={[styles(theme).inputWrapper, { borderColor: theme.ash, backgroundColor: theme.surface }]}
         onPress={() => inputRef.current?.focus()}
       >
+        {/* Left prefix */}
+        <View style={styles(theme).prefixWrap}>
+          <Text style={[styles(theme).prefix, { color: theme.primary }]}>
+            {unit || "qty"}
+          </Text>
+        </View>
+
+        {/* Vertical divider */}
+        <View style={[styles(theme).vDivider, { backgroundColor: theme.ash }]} />
+
+        {/* Numeric input */}
         <TextInput
           ref={inputRef}
-          style={styles(theme).input}
+          style={[styles(theme).input, { color: theme.text }]}
           keyboardType="numeric"
-          value={quantity?.toString() || ""}
-          placeholder="Enter quantity"
+          value={quantity > 0 ? quantity.toString() : ""}
+          placeholder="Enter amount"
+          placeholderTextColor={theme.icon}
           onChangeText={(text) => {
             const value = Number(text);
             setQuantity(Number.isNaN(value) ? 0 : value);
           }}
         />
-        <Text style={styles(theme).unitText}>{fuel?.unit || ""}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -44,38 +71,52 @@ export default function QuantitySelect() {
 const styles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
     fieldContainer: { marginVertical: 16 },
+    labelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      marginBottom: 10,
+    },
     label: {
       fontSize: 13,
-      fontWeight: "400",
-      marginBottom: 8,
-      color: theme.icon,
+      fontWeight: "500",
+      color: theme.text,
       letterSpacing: 0.1,
     },
+    minBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 8,
+      borderWidth: 1,
+    },
+    minBadgeText: { fontSize: 11, fontWeight: "500" },
     inputWrapper: {
       flexDirection: "row",
       alignItems: "center",
       borderWidth: 1.5,
-      borderColor: theme.ash,
       borderRadius: 14,
-      backgroundColor: theme.surface,
-      paddingHorizontal: 14,
-      height: 54,
+      height: 56,
+      overflow: "hidden",
+    },
+    prefixWrap: {
+      width: 54,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    prefix: {
+      fontSize: 14,
+      fontWeight: "600",
+      letterSpacing: 0.2,
+    },
+    vDivider: {
+      width: 1,
+      height: 28,
     },
     input: {
       flex: 1,
       fontSize: 16,
-      fontWeight: "300",
-      color: theme.text,
-      paddingVertical: 10,
-    },
-    unitText: {
-      fontSize: 13,
       fontWeight: "400",
-      color: theme.primary,
-      marginLeft: 10,
-      backgroundColor: theme.tertiary,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 8,
+      paddingHorizontal: 16,
+      paddingVertical: 0,
     },
   });

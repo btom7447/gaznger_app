@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/constants/theme";
 import { useThemeStore, ColorSchemeOverride } from "@/store/useThemeStore";
 import BackButton from "@/components/ui/global/BackButton";
+import { toast } from "sonner-native";
 
 interface ToggleSetting {
   id: string;
@@ -127,13 +128,17 @@ export default function SettingsScreen() {
 
         {/* ── App ────────────────────────────────────────────── */}
         <Text style={[s.sectionTitle, { marginTop: 24 }]}>App</Text>
-        <TouchableOpacity style={[s.row, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
+        <TouchableOpacity
+          style={[s.row, { backgroundColor: theme.surface, borderColor: theme.ash }]}
+          onPress={() => toast.info("Language", { description: "Multi-language support is coming soon" })}
+          activeOpacity={0.75}
+        >
           <View style={[s.iconWrap, { backgroundColor: theme.tertiary }]}>
             <Ionicons name="language-outline" size={20} color={theme.primary} />
           </View>
           <View style={s.rowText}>
             <Text style={[s.rowLabel, { color: theme.text }]}>Language</Text>
-            <Text style={[s.rowDesc, { color: theme.icon }]}>English</Text>
+            <Text style={[s.rowDesc, { color: theme.icon }]}>English (Coming Soon)</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={theme.icon} />
         </TouchableOpacity>

@@ -8,11 +8,17 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Share,
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
+import NotificationButton from "@/components/ui/global/NotificationButton";
+import ProfileButton from "@/components/ui/global/ProfileButton";
+import { getSocket } from "@/lib/socket";
 
 type OrderStatus = "pending" | "confirmed" | "assigned" | "in-transit" | "delivered" | "cancelled";
 
@@ -56,8 +62,41 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+function getDateBucket(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today.getTime() - 86400000);
+  const thisWeekStart = new Date(today.getTime() - today.getDay() * 86400000);
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const orderDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+  if (orderDay >= today) return "Today";
+  if (orderDay >= yesterday) return "Yesterday";
+  if (orderDay >= thisWeekStart) return "This Week";
+  if (orderDay >= thisMonthStart) return "This Month";
+  return d.toLocaleDateString("en-NG", { month: "long", year: "numeric" });
+}
+
+type ListItem = { type: "header"; label: string } | { type: "order"; data: VendorOrder };
+
+function buildGroupedList(orders: VendorOrder[]): ListItem[] {
+  const result: ListItem[] = [];
+  let lastBucket = "";
+  for (const order of orders) {
+    const bucket = getDateBucket(order.createdAt);
+    if (bucket !== lastBucket) {
+      result.push({ type: "header", label: bucket });
+      lastBucket = bucket;
+    }
+    result.push({ type: "order", data: order });
+  }
+  return result;
+}
+
 export default function VendorOrders() {
   const theme = useTheme();
+  const router = useRouter();
   const [orders, setOrders] = useState<VendorOrder[]>([]);
   const [activeFilter, setActiveFilter] = useState("");
   const [loading, setLoading] = useState(true);
@@ -78,6 +117,29 @@ export default function VendorOrders() {
   }, []);
 
   useEffect(() => { load(activeFilter); }, [activeFilter, load]);
+
+  // Refetch when navigating back to this screen
+  useFocusEffect(useCallback(() => { load(activeFilter); }, [activeFilter, load]));
+
+  // Real-time: new order or status update
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleNewOrder = () => load(activeFilter);
+    const handleOrderUpdate = ({ orderId, status }: { orderId: string; status: string }) => {
+      setOrders((prev) =>
+        prev.map((o) => (o._id === orderId ? { ...o, status: status as VendorOrder["status"] } : o))
+      );
+    };
+
+    socket.on("order:new", handleNewOrder);
+    socket.on("order:update", handleOrderUpdate);
+    return () => {
+      socket.off("order:new", handleNewOrder);
+      socket.off("order:update", handleOrderUpdate);
+    };
+  }, [activeFilter, load]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -123,6 +185,40 @@ export default function VendorOrders() {
 
   const fmtCurrency = (n: number) => "₦" + n.toLocaleString("en-NG");
 
+  const openOptions = useCallback((order: VendorOrder) => {
+    const summary = [
+      `Order ID: ${order._id}`,
+      `Customer: ${order.user?.displayName ?? "—"}`,
+      `Fuel: ${order.quantity} ${order.fuel?.unit} ${order.fuel?.name}`,
+      `Fuel Cost: ₦${order.fuelCost.toLocaleString("en-NG")}`,
+      `Delivery: ₦${order.deliveryFee.toLocaleString("en-NG")}`,
+      `Total: ₦${order.totalPrice.toLocaleString("en-NG")}`,
+      `Status: ${order.status}`,
+    ].join("\n");
+
+    Alert.alert("Order Options", undefined, [
+      {
+        text: "Copy Order ID",
+        onPress: async () => {
+          await Clipboard.setStringAsync(order._id);
+          Alert.alert("Copied", "Order ID copied to clipboard");
+        },
+      },
+      {
+        text: "Copy Summary",
+        onPress: async () => {
+          await Clipboard.setStringAsync(summary);
+          Alert.alert("Copied", "Order summary copied to clipboard");
+        },
+      },
+      {
+        text: "Share",
+        onPress: () => Share.share({ message: summary, title: "Order Details" }),
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, []);
+
   const renderOrder = ({ item }: { item: VendorOrder }) => {
     const color = STATUS_COLOR[item.status];
     const isPending = item.status === "pending";
@@ -140,8 +236,13 @@ export default function VendorOrders() {
             </Text>
           </View>
           <View style={s.cardRight}>
-            <View style={[s.statusBadge, { backgroundColor: color + "22" }]}>
-              <Text style={[s.statusText, { color }]}>{item.status}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <View style={[s.statusBadge, { backgroundColor: color + "22" }]}>
+                <Text style={[s.statusText, { color }]}>{item.status}</Text>
+              </View>
+              <TouchableOpacity onPress={() => openOptions(item)} hitSlop={8}>
+                <Ionicons name="ellipsis-vertical" size={16} color={theme.icon} />
+              </TouchableOpacity>
             </View>
             <Text style={[s.timeAgo, { color: theme.icon }]}>{timeAgo(item.createdAt)}</Text>
           </View>
@@ -194,8 +295,28 @@ export default function VendorOrders() {
     );
   };
 
+  const activeLabel = STATUS_FILTERS.find((f) => f.value === activeFilter)?.label ?? "All";
+  const groupedList = buildGroupedList(orders);
+
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: theme.background }]}>
+      {/* Page header */}
+      <View style={[s.pageHeader, { borderBottomColor: theme.ash }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={[s.pageTitle, { color: theme.text }]}>Orders</Text>
+          <Text style={[s.pageSubtitle, { color: theme.icon }]}>
+            {orders.length} {activeLabel !== "All" ? activeLabel.toLowerCase() : ""} order{orders.length !== 1 ? "s" : ""}
+          </Text>
+        </View>
+        <View style={s.headerRight}>
+          <NotificationButton onPress={() => router.push("/(screens)/notification" as any)} />
+          <ProfileButton
+            onPress={() => router.push("/(vendor)/(dashboard)/profile" as any)}
+            size={36}
+          />
+        </View>
+      </View>
+
       {/* Filter chips */}
       <View style={s.filterWrap}>
         <FlatList
@@ -206,6 +327,7 @@ export default function VendorOrders() {
           contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
           renderItem={({ item }) => {
             const active = activeFilter === item.value;
+            const dotColor = item.value ? STATUS_COLOR[item.value as OrderStatus] : undefined;
             return (
               <TouchableOpacity
                 style={[
@@ -217,6 +339,9 @@ export default function VendorOrders() {
                 ]}
                 onPress={() => { setLoading(true); setActiveFilter(item.value); }}
               >
+                {dotColor && !active && (
+                  <View style={[s.chipDot, { backgroundColor: dotColor }]} />
+                )}
                 <Text style={[s.chipText, { color: active ? "#fff" : theme.text }]}>
                   {item.label}
                 </Text>
@@ -237,10 +362,20 @@ export default function VendorOrders() {
         </View>
       ) : (
         <FlatList
-          data={orders}
-          keyExtractor={(o) => o._id}
-          renderItem={renderOrder}
-          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}
+          data={groupedList}
+          keyExtractor={(item, idx) => item.type === "header" ? `header-${item.label}` : item.data._id}
+          renderItem={({ item }) => {
+            if (item.type === "header") {
+              return (
+                <View style={s.dateHeader}>
+                  <Text style={[s.dateHeaderText, { color: theme.icon }]}>{item.label}</Text>
+                  <View style={[s.dateHeaderLine, { backgroundColor: theme.ash }]} />
+                </View>
+              );
+            }
+            return renderOrder({ item: item.data });
+          }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
           }
@@ -254,10 +389,16 @@ export default function VendorOrders() {
 const s = StyleSheet.create({
   safe: { flex: 1 },
   center: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
-  filterWrap: { paddingVertical: 12 },
-  chip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1 },
+  pageHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 1 },
+  pageTitle: { fontSize: 22, fontWeight: "700" },
+  pageSubtitle: { fontSize: 13, marginTop: 2 },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  avatarWrap: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 2, overflow: "hidden" },
+  filterWrap: { paddingVertical: 10 },
+  chip: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
+  chipDot: { width: 7, height: 7, borderRadius: 4 },
   chipText: { fontSize: 13, fontWeight: "500" },
-  card: { borderRadius: 14, borderWidth: 1, padding: 14, gap: 10 },
+  card: { borderRadius: 14, borderWidth: 1, padding: 14, gap: 10, marginBottom: 10, },
   cardTop: { flexDirection: "row", justifyContent: "space-between" },
   cardLeft: { flex: 1 },
   cardRight: { alignItems: "flex-end", gap: 4 },
@@ -279,4 +420,7 @@ const s = StyleSheet.create({
   confirmBtn: { flex: 2, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   confirmText: { color: "#fff", fontSize: 14, fontWeight: "700" },
   emptyText: { fontSize: 14, marginTop: 8 },
+  dateHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 16, marginBottom: 8 },
+  dateHeaderText: { fontSize: 11, fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" },
+  dateHeaderLine: { flex: 1, height: 1 },
 });

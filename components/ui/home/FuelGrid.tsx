@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useMemo } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Image } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Image, ImageSourcePropType } from "react-native";
 import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -7,6 +7,14 @@ import { useTheme } from "@/constants/theme";
 import { useOrderStore, FuelType } from "@/store/useOrderStore";
 import SkeletonBox from "@/components/ui/skeletons/SkeletonBox";
 import { useActiveOrder } from "@/hooks/useActiveOrder";
+
+// Local fuel icons — always available, no network dependency
+const FUEL_LOCAL_ICON: Record<string, ImageSourcePropType> = {
+  petrol: require("../../../assets/icons/fuel/petrol-icon.png"),
+  diesel: require("../../../assets/icons/fuel/diesel-icon.png"),
+  gas:    require("../../../assets/icons/fuel/gas-icon.png"),
+  oil:    require("../../../assets/icons/fuel/oil-icon.png"),
+};
 
 /* Skeleton Card for loading state */
 const SkeletonCard = memo(() => {
@@ -26,6 +34,7 @@ export default function FuelGrid() {
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   const fuelTypes = useOrderStore((s) => s.fuelTypes);
+  const isFetchingFuelTypes = useOrderStore((s) => s.isFetchingFuelTypes);
   const currentFuelId = useOrderStore((s) => s.order.fuel?._id);
   const setFuel = useOrderStore((s) => s.setFuel);
   const setProgressStep = useOrderStore((s) => s.setProgressStep);
@@ -55,12 +64,22 @@ export default function FuelGrid() {
     [hasActiveOrder, currentFuelId, setFuel, setProgressStep, router]
   );
 
-  if (!fuelTypes.length) {
+  if (isFetchingFuelTypes && !fuelTypes.length) {
     return (
       <View style={styles.container}>
         {Array.from({ length: 4 }).map((_, i) => (
           <SkeletonCard key={i} />
         ))}
+      </View>
+    );
+  }
+
+  if (!fuelTypes.length) {
+    return (
+      <View style={[styles.container, { justifyContent: "center", paddingVertical: 32 }]}>
+        <Text style={{ color: theme.icon, fontSize: 14, textAlign: "center" }}>
+          No fuel types available
+        </Text>
       </View>
     );
   }
@@ -92,9 +111,15 @@ const FuelCard = memo(({ fuel, onSelect, locked }: FuelCardProps) => {
       style={[styles.card, locked && { opacity: 0.5 }]}
     >
       <View style={styles.iconWrap}>
-        {fuel.icon ? (
-          <Image source={{ uri: fuel.icon }} style={styles.icon} resizeMode="contain" />
-        ) : null}
+        <Image
+          source={
+            fuel.icon
+              ? { uri: fuel.icon }
+              : (FUEL_LOCAL_ICON[fuel.name.toLowerCase()] ?? FUEL_LOCAL_ICON.petrol)
+          }
+          style={styles.icon}
+          resizeMode="contain"
+        />
       </View>
       <Text style={styles.text}>{fuel.name}</Text>
       {locked && (

@@ -31,11 +31,15 @@ export default function OnboardingScreen() {
   // Slide 1
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [phone, setPhone] = useState(user?.phone ?? "");
-  const [profileImage, setProfileImage] = useState<string | null>(user?.profileImage ?? null);
+  const [profileImage, setProfileImage] = useState<string | null>(
+    user?.profileImage ?? null,
+  );
   const [uploadingImage, setUploadingImage] = useState(false);
 
   // Slide 2
-  const [gender, setGender] = useState<"male" | "female" | "">((user?.gender as "male" | "female") ?? "");
+  const [gender, setGender] = useState<"male" | "female" | "">(
+    (user?.gender as "male" | "female") ?? "",
+  );
 
   // Slide 3
   const [label, setLabel] = useState("");
@@ -62,12 +66,21 @@ export default function OnboardingScreen() {
     setUploadingImage(true);
     try {
       const formData = new FormData();
-      formData.append("image", { uri, name: "profile.jpg", type: "image/jpeg" } as any);
-      const res = await fetch(`${process.env.EXPO_PUBLIC_BASE_URL}/api/upload/image`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${useSessionStore.getState().accessToken}` },
-        body: formData,
-      });
+      formData.append("image", {
+        uri,
+        name: "profile.jpg",
+        type: "image/jpeg",
+      } as any);
+      const res = await fetch(
+        `${process.env.EXPO_PUBLIC_BASE_URL}/api/upload/image`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${useSessionStore.getState().accessToken}`,
+          },
+          body: formData,
+        },
+      );
       if (!res.ok) throw new Error("Upload failed");
       const data = await res.json();
       setProfileImage(data.url);
@@ -80,7 +93,10 @@ export default function OnboardingScreen() {
 
   const handleFinish = async () => {
     setSaving(true);
-    console.log("[onboarding] token:", useSessionStore.getState().accessToken?.slice(0, 20));
+    console.log(
+      "[onboarding] token:",
+      useSessionStore.getState().accessToken?.slice(0, 20),
+    );
     try {
       const profilePayload: Record<string, string> = { displayName };
       if (phone.trim()) profilePayload.phone = phone.trim();
@@ -119,8 +135,15 @@ export default function OnboardingScreen() {
         {/* Back arrow — only on steps > 0 */}
         <View style={styles.topBar}>
           {step > 0 ? (
-            <TouchableOpacity onPress={() => setStep((s) => s - 1)} style={styles.backBtn}>
-              <Ionicons name="arrow-back-outline" size={24} color={theme.text} />
+            <TouchableOpacity
+              onPress={() => setStep((s) => s - 1)}
+              style={styles.backBtn}
+            >
+              <Ionicons
+                name="arrow-back-outline"
+                size={24}
+                color={theme.text}
+              />
             </TouchableOpacity>
           ) : (
             <View style={styles.backBtn} />
@@ -135,25 +158,54 @@ export default function OnboardingScreen() {
           {/* ── SLIDE 1: Name & Photo ── */}
           {step === 0 && (
             <View style={styles.slide}>
-              <TouchableOpacity onPress={pickImage} disabled={uploadingImage} style={styles.avatarBtn}>
+              <TouchableOpacity
+                onPress={pickImage}
+                disabled={uploadingImage}
+                style={styles.avatarBtn}
+              >
                 {uploadingImage ? (
-                  <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: theme.tertiary }]}>
+                  <View
+                    style={[
+                      styles.avatar,
+                      styles.avatarFallback,
+                      { backgroundColor: theme.tertiary },
+                    ]}
+                  >
                     <ActivityIndicator size="large" color={theme.quaternary} />
                   </View>
                 ) : profileImage ? (
                   <Image source={{ uri: profileImage }} style={styles.avatar} />
                 ) : (
-                  <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: theme.tertiary }]}>
-                    <Ionicons name="person" size={44} color={theme.quaternary} />
+                  <View
+                    style={[
+                      styles.avatar,
+                      styles.avatarFallback,
+                      { backgroundColor: theme.tertiary },
+                    ]}
+                  >
+                    <Ionicons
+                      name="person"
+                      size={44}
+                      color={theme.quaternary}
+                    />
                   </View>
                 )}
-                <View style={[styles.cameraBadge, { backgroundColor: theme.quaternary }]}>
+                <View
+                  style={[
+                    styles.cameraBadge,
+                    { backgroundColor: theme.quaternary },
+                  ]}
+                >
                   <Ionicons name="camera" size={13} color="#fff" />
                 </View>
               </TouchableOpacity>
-              <Text style={[styles.avatarHint, { color: theme.icon }]}>Add a photo (optional)</Text>
+              <Text style={[styles.avatarHint, { color: theme.icon }]}>
+                Add a photo (optional)
+              </Text>
 
-              <Text style={[styles.heading, { color: theme.text }]}>What's your name?</Text>
+              <Text style={[styles.heading, { color: theme.text }]}>
+                What's your name?
+              </Text>
               <Text style={[styles.sub, { color: theme.icon }]}>
                 This is how you'll appear in the app.
               </Text>
@@ -181,7 +233,9 @@ export default function OnboardingScreen() {
           {/* ── SLIDE 2: Gender ── */}
           {step === 1 && (
             <View style={styles.slide}>
-              <Text style={[styles.heading, { color: theme.text }]}>How do you identify?</Text>
+              <Text style={[styles.heading, { color: theme.text }]}>
+                How do you identify?
+              </Text>
               <Text style={[styles.sub, { color: theme.icon }]}>
                 Helps us personalise your experience.
               </Text>
@@ -198,14 +252,20 @@ export default function OnboardingScreen() {
                         styles.genderCard,
                         {
                           borderColor: active ? theme.quaternary : theme.ash,
-                          backgroundColor: active ? theme.quaternary + "12" : theme.quinest,
+                          backgroundColor: active
+                            ? theme.quaternary + "12"
+                            : theme.quinest,
                         },
                       ]}
                     >
                       <View
                         style={[
                           styles.genderIconCircle,
-                          { backgroundColor: active ? theme.quaternary : theme.ash },
+                          {
+                            backgroundColor: active
+                              ? theme.quaternary
+                              : theme.ash,
+                          },
                         ]}
                       >
                         <Ionicons
@@ -223,7 +283,12 @@ export default function OnboardingScreen() {
                         {g.charAt(0).toUpperCase() + g.slice(1)}
                       </Text>
                       {active && (
-                        <View style={[styles.genderCheck, { backgroundColor: theme.quaternary }]}>
+                        <View
+                          style={[
+                            styles.genderCheck,
+                            { backgroundColor: theme.quaternary },
+                          ]}
+                        >
                           <Ionicons name="checkmark" size={11} color="#fff" />
                         </View>
                       )}
@@ -237,26 +302,60 @@ export default function OnboardingScreen() {
           {/* ── SLIDE 3: Address ── */}
           {step === 2 && (
             <View style={styles.slide}>
-              <Text style={[styles.heading, { color: theme.text }]}>Where do you deliver?</Text>
+              <Text style={[styles.heading, { color: theme.text }]}>
+                Where do you deliver?
+              </Text>
               <Text style={[styles.sub, { color: theme.icon }]}>
                 Add your default delivery address. You can save more later.
               </Text>
 
               {/* Live preview card */}
               {label.trim().length > 0 && (
-                <View style={[styles.addressCard, { backgroundColor: theme.quinest, borderColor: theme.quaternary }]}>
+                <View
+                  style={[
+                    styles.addressCard,
+                    {
+                      backgroundColor: theme.quinest,
+                      borderColor: theme.quaternary,
+                    },
+                  ]}
+                >
                   <View style={styles.addressCardMain}>
-                    <View style={[styles.addressIconBox, { backgroundColor: theme.quaternary + "18" }]}>
-                      <Ionicons name="location-sharp" size={22} color={theme.quaternary} />
+                    <View
+                      style={[
+                        styles.addressIconBox,
+                        { backgroundColor: theme.quaternary + "18" },
+                      ]}
+                    >
+                      <Ionicons
+                        name="location-sharp"
+                        size={22}
+                        color={theme.quaternary}
+                      />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.addressCardLabel, { color: theme.text }]}>{label}</Text>
+                      <Text
+                        style={[styles.addressCardLabel, { color: theme.text }]}
+                      >
+                        {label}
+                      </Text>
                       {(street || city) && (
-                        <Text style={[styles.addressCardSub, { color: theme.icon }]}>
-                          {[street, city, addressState].filter(Boolean).join(", ")}
+                        <Text
+                          style={[styles.addressCardSub, { color: theme.icon }]}
+                        >
+                          {[street, city, addressState]
+                            .filter(Boolean)
+                            .join(", ")}
                         </Text>
                       )}
-                      <Text style={[styles.addressDefaultTag, { color: theme.quaternary }]}>Default</Text>
+                      <Text
+                        style={[
+                          styles.addressDefaultTag,
+                          { color: theme.quaternary },
+                        ]}
+                      >
+                        Default
+                      </Text>
                     </View>
                   </View>
                 </View>
@@ -264,14 +363,39 @@ export default function OnboardingScreen() {
 
               <View style={styles.fields}>
                 {[
-                  { title: "Label", value: label, onChange: setLabel, placeholder: "e.g. Home, Office", required: true },
-                  { title: "Street", value: street, onChange: setStreet, placeholder: "Street address", required: false },
-                  { title: "City", value: city, onChange: setCity, placeholder: "City", required: false },
-                  { title: "State", value: addressState, onChange: setAddressState, placeholder: "State", required: false },
+                  {
+                    title: "Label",
+                    value: label,
+                    onChange: setLabel,
+                    placeholder: "e.g. Home, Office",
+                    required: true,
+                  },
+                  {
+                    title: "Street",
+                    value: street,
+                    onChange: setStreet,
+                    placeholder: "Street address",
+                    required: false,
+                  },
+                  {
+                    title: "City",
+                    value: city,
+                    onChange: setCity,
+                    placeholder: "City",
+                    required: false,
+                  },
+                  {
+                    title: "State",
+                    value: addressState,
+                    onChange: setAddressState,
+                    placeholder: "State",
+                    required: false,
+                  },
                 ].map((field) => (
                   <View key={field.title} style={styles.fieldGroup}>
                     <Text style={[styles.fieldLabel, { color: theme.icon }]}>
-                      {field.title}{field.required ? " *" : ""}
+                      {field.title}
+                      {field.required ? " *" : ""}
                     </Text>
                     <TextInput
                       value={field.value}
@@ -280,7 +404,11 @@ export default function OnboardingScreen() {
                       placeholderTextColor={theme.icon}
                       style={[
                         styles.textInput,
-                        { color: theme.text, borderColor: theme.ash, backgroundColor: theme.quinest },
+                        {
+                          color: theme.text,
+                          borderColor: theme.ash,
+                          backgroundColor: theme.quinest,
+                        },
                       ]}
                     />
                   </View>
@@ -309,11 +437,19 @@ export default function OnboardingScreen() {
           </View>
 
           <TouchableOpacity
-            onPress={step < TOTAL_STEPS - 1 ? () => setStep((s) => s + 1) : handleFinish}
+            onPress={
+              step < TOTAL_STEPS - 1
+                ? () => setStep((s) => s + 1)
+                : handleFinish
+            }
             disabled={!canNext || saving}
             style={[
               styles.nextBtn,
-              { backgroundColor: canNext ? theme.quaternary : theme.quaternary + "40" },
+              {
+                backgroundColor: canNext
+                  ? theme.quaternary
+                  : theme.quaternary + "40",
+              },
             ]}
           >
             {saving ? (
@@ -347,7 +483,12 @@ const styles = StyleSheet.create({
   sub: { fontSize: 15, lineHeight: 22, marginBottom: 36 },
 
   // Avatar
-  avatarBtn: { alignSelf: "center", position: "relative", marginBottom: 10, marginTop: 8 },
+  avatarBtn: {
+    alignSelf: "center",
+    position: "relative",
+    marginBottom: 10,
+    marginTop: 8,
+  },
   avatar: { width: 96, height: 96, borderRadius: 48 },
   avatarFallback: { justifyContent: "center", alignItems: "center" },
   cameraBadge: {
@@ -431,7 +572,12 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     gap: 16,
   },
-  dots: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6 },
+  dots: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+  },
   dot: { height: 8, borderRadius: 4 },
   nextBtn: {
     paddingVertical: 16,

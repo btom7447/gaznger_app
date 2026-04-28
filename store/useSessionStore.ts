@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { secureStorage } from "./secureStorage";
+import { connectSocket, disconnectSocket } from "@/lib/socket";
 
 export type UserRole = "customer" | "vendor" | "rider" | "admin";
 
@@ -44,21 +45,16 @@ export const useSessionStore = create<SessionState>()(
       isLoggedIn: false,
       hasHydrated: false,
 
-      login: ({ user, accessToken, refreshToken }) =>
-        set({
-          user,
-          accessToken,
-          refreshToken,
-          isLoggedIn: true,
-        }),
+      login: ({ user, accessToken, refreshToken }) => {
+        set({ user, accessToken, refreshToken, isLoggedIn: true });
+        // Connect socket after tokens are flushed to store
+        setTimeout(() => connectSocket(accessToken), 0);
+      },
 
-      logout: () =>
-        set({
-          user: null,
-          accessToken: null,
-          refreshToken: null,
-          isLoggedIn: false,
-        }),
+      logout: () => {
+        disconnectSocket();
+        set({ user: null, accessToken: null, refreshToken: null, isLoggedIn: false });
+      },
 
       updateUser: (fields) => {
         const current = get().user;

@@ -1,110 +1,91 @@
-import React, { useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import React from "react";
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import { MaterialIcons } from "@expo/vector-icons";
 import { useOrderStore } from "@/store/useOrderStore";
 import { useTheme } from "@/constants/theme";
-import { Ionicons } from "@expo/vector-icons";
 
-const CYLINDER_TYPES = ["Carbon Fiber", "Steel", "Aluminum"];
+const CYLINDER_OPTIONS: Array<{
+  key: string;
+  label: string;
+  icon: keyof typeof MaterialIcons.glyphMap;
+}> = [
+  { key: "Carbon Fiber", label: "Carbon Fiber", icon: "propane-tank" },
+  { key: "Steel", label: "Steel", icon: "propane-tank" },
+  { key: "Aluminum", label: "Aluminum", icon: "propane-tank" },
+  { key: "Composite", label: "Composite", icon: "propane-tank" },
+];
 
 export default function CylinderTypeSelect() {
   const cylinderType = useOrderStore((s) => s.order.cylinderType);
   const setCylinderType = useOrderStore((s) => s.setCylinderType);
-  const [open, setOpen] = useState(false);
-
   const theme = useTheme();
 
   return (
     <View style={styles(theme).fieldContainer}>
       <Text style={styles(theme).label}>Cylinder Type</Text>
-
-      {/* Main Dropdown */}
-      <TouchableOpacity
-        style={styles(theme).dropdown}
-        onPress={() => setOpen((prev) => !prev)}
-        activeOpacity={0.8}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ gap: 10, paddingVertical: 4 }}
       >
-        <Text style={[styles(theme).placeholder, { flex: 1 }]}>
-          {cylinderType || "Select cylinder type"}
-        </Text>
-        <Ionicons
-          name={open ? "chevron-up" : "chevron-down"}
-          size={20}
-          color={theme.text}
-        />
-      </TouchableOpacity>
-
-      {/* Dropdown Items */}
-      {open && (
-        <View style={styles(theme).dropdownItemsContainer}>
-          {CYLINDER_TYPES.map((type) => (
+        {CYLINDER_OPTIONS.map((opt) => {
+          const active = cylinderType === opt.key;
+          return (
             <TouchableOpacity
-              key={type}
-              style={styles(theme).dropdownItem}
-              activeOpacity={0.7}
-              onPress={() => {
-                setCylinderType(type);
-                setOpen(false);
-              }}
+              key={opt.key}
+              onPress={() => setCylinderType(opt.key)}
+              activeOpacity={0.85}
+              style={[
+                styles(theme).card,
+                {
+                  backgroundColor: active ? theme.tertiary : theme.surface,
+                  borderColor: active ? theme.primary : theme.ash,
+                  borderWidth: active ? 2 : 1.5,
+                },
+              ]}
             >
-              <Text style={styles(theme).dropdownItemText}>{type}</Text>
+              <View style={[styles(theme).iconWrap, { backgroundColor: active ? theme.primary + "18" : theme.background }]}>
+                <MaterialIcons name={opt.icon} size={26} color={active ? theme.primary : theme.icon} />
+              </View>
+              <Text style={[styles(theme).cardLabel, { color: active ? theme.primary : theme.text }]}>
+                {opt.label}
+              </Text>
             </TouchableOpacity>
-          ))}
-        </View>
-      )}
+          );
+        })}
+      </ScrollView>
     </View>
   );
 }
 
 const styles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
-    fieldContainer: { marginBottom: 20 },
-    label: { fontSize: 20, fontWeight: "600", marginBottom: 10 },
-    dropdown: {
-      flexDirection: "row",
-      alignItems: "center",
-      borderWidth: 1,
-      borderColor: theme.quaternary,
-      borderRadius: 14,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      backgroundColor: theme.quinest,
-      height: 55,
-      shadowColor: "#000",
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.05,
-      shadowRadius: 4,
-      elevation: 2,
-    },
-
-    dropdownItemsContainer: {
-      marginTop: 8,
-      borderRadius: 14,
-      backgroundColor: theme.background,
-      shadowColor: "#000",
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.08,
-      shadowRadius: 8,
-      elevation: 5,
-      overflow: "hidden",
-    },
-
-    dropdownItem: {
-      paddingVertical: 16,
-      paddingHorizontal: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.quinest,
-      backgroundColor: theme.background,
-    },
-
-    dropdownItemText: {
-      fontSize: 16,
+    fieldContainer: { marginVertical: 16 },
+    label: {
+      fontSize: 13,
       fontWeight: "500",
       color: theme.text,
+      letterSpacing: 0.1,
+      marginBottom: 10,
     },
-
-    placeholder: {
-      fontSize: 16,
-      fontWeight: "400",
-      color: theme.text,
+    card: {
+      width: 100,
+      paddingVertical: 14,
+      paddingHorizontal: 10,
+      borderRadius: 18,
+      alignItems: "center",
+      gap: 8,
+    },
+    iconWrap: {
+      width: 52,
+      height: 52,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    cardLabel: {
+      fontSize: 12,
+      fontWeight: "500",
+      textAlign: "center",
     },
   });
