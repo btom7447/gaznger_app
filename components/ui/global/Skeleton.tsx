@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, StyleProp, ViewStyle } from "react-native";
+import { Animated, DimensionValue, StyleProp, ViewStyle } from "react-native";
 
 export default function Skeleton({
   width,
@@ -8,8 +8,8 @@ export default function Skeleton({
   color = "#D1D5DB",
   style,
 }: {
-  width?: number | string;
-  height?: number;
+  width?: DimensionValue;
+  height?: DimensionValue;
   borderRadius?: number;
   color?: string;
   style?: StyleProp<ViewStyle>;

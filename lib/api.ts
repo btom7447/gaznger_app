@@ -2,7 +2,21 @@ import { useSessionStore } from "@/store/useSessionStore";
 
 const BASE_URL = process.env.EXPO_PUBLIC_BASE_URL ?? "http://localhost:5000";
 
-type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown };
+// DEBUG: rip out once we've confirmed the right URL is bundled.
+// eslint-disable-next-line no-console
+console.log("[api] BASE_URL =", BASE_URL);
+
+/**
+ * Default per-request timeout. Render free tier often takes 20-40s to wake on
+ * cold start, so 25s is the floor. Pass `signal` to override; pass `timeoutMs`
+ * to extend or shorten without writing your own AbortController.
+ */
+const DEFAULT_TIMEOUT_MS = 25_000;
+
+type RequestOptions = Omit<RequestInit, "body"> & {
+  body?: unknown;
+  timeoutMs?: number;
+};
 
 // Single-flight lock: only one refresh call in flight at a time
 let refreshPromise: Promise<boolean> | null = null;
@@ -63,11 +77,57 @@ async function request<T = unknown>(
     headers["Authorization"] = `Bearer ${accessToken}`;
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers,
-    body: options.body != null ? JSON.stringify(options.body) : undefined,
-  });
+  const { timeoutMs, signal: externalSignal, ...rest } = options;
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(
+    () => controller.abort(new Error("Request timed out")),
+    timeoutMs ?? DEFAULT_TIMEOUT_MS
+  );
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", onExternalAbort);
+  }
+
+  // DEBUG: log every request so we can see what the phone is actually hitting.
+  // eslint-disable-next-line no-console
+  console.log("[api] →", options.method ?? "GET", `${BASE_URL}${path}`);
+  const t0 = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...rest,
+      headers,
+      body: options.body != null ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    });
+    // eslint-disable-next-line no-console
+    console.log(
+      "[api] ←",
+      options.method ?? "GET",
+      `${BASE_URL}${path}`,
+      res.status,
+      `${Date.now() - t0}ms`
+    );
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.log(
+      "[api] ✗",
+      options.method ?? "GET",
+      `${BASE_URL}${path}`,
+      `${Date.now() - t0}ms`,
+      controller.signal.aborted ? "ABORTED" : (err as Error).message
+    );
+    if (controller.signal.aborted) {
+      throw new Error("Request timed out — check your connection.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutHandle);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
+  }
 
   // Attempt token refresh on 401
   if (res.status === 401 && retry) {
@@ -90,19 +150,33 @@ async function request<T = unknown>(
   return res.json() as Promise<T>;
 }
 
+interface CallOpts {
+  /** Override per-request timeout in milliseconds. */
+  timeoutMs?: number;
+  /** Pass an external AbortSignal to cancel the request. */
+  signal?: AbortSignal;
+  /**
+   * Extra headers — used to pass `Idempotency-Key` to money endpoints.
+   * Auth + content-type are merged in by the request wrapper.
+   */
+  headers?: Record<string, string>;
+}
+
 export const api = {
-  get: <T = unknown>(path: string) => request<T>(path, { method: "GET" }),
+  get: <T = unknown>(path: string, opts: CallOpts = {}) =>
+    request<T>(path, { method: "GET", ...opts }),
 
-  post: <T = unknown>(path: string, body?: unknown) =>
-    request<T>(path, { method: "POST", body }),
+  post: <T = unknown>(path: string, body?: unknown, opts: CallOpts = {}) =>
+    request<T>(path, { method: "POST", body, ...opts }),
 
-  put: <T = unknown>(path: string, body?: unknown) =>
-    request<T>(path, { method: "PUT", body }),
+  put: <T = unknown>(path: string, body?: unknown, opts: CallOpts = {}) =>
+    request<T>(path, { method: "PUT", body, ...opts }),
 
-  patch: <T = unknown>(path: string, body?: unknown) =>
-    request<T>(path, { method: "PATCH", body }),
+  patch: <T = unknown>(path: string, body?: unknown, opts: CallOpts = {}) =>
+    request<T>(path, { method: "PATCH", body, ...opts }),
 
-  delete: <T = unknown>(path: string) => request<T>(path, { method: "DELETE" }),
+  delete: <T = unknown>(path: string, opts: CallOpts = {}) =>
+    request<T>(path, { method: "DELETE", ...opts }),
 
   /** Multipart form-data upload (FormData). No Content-Type header — fetch sets it with boundary. */
   uploadForm: async <T = unknown>(path: string, formData: FormData, method: "POST" | "PATCH" = "PATCH"): Promise<T> => {
