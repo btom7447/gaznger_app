@@ -1,203 +1,375 @@
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Switch,
-  StatusBar,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import React, { useCallback, useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useTheme } from "@/constants/theme";
-import { useThemeStore, ColorSchemeOverride } from "@/store/useThemeStore";
-import BackButton from "@/components/ui/global/BackButton";
+import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
+import { Theme, useTheme } from "@/constants/theme";
+import { useThemeStore, ColorSchemeOverride } from "@/store/useThemeStore";
+import { useSessionStore } from "@/store/useSessionStore";
+import { api } from "@/lib/api";
+import {
+  Row,
+  ScreenContainer,
+  ScreenHeader,
+} from "@/components/ui/primitives";
 
-interface ToggleSetting {
-  id: string;
+const APP_VERSION = "2.4.1";
+
+type ThemeOption = {
+  value: ColorSchemeOverride;
   label: string;
-  description: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  value: boolean;
-}
-
-type ThemeOption = { value: ColorSchemeOverride; label: string; icon: keyof typeof Ionicons.glyphMap };
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+};
 
 const THEME_OPTIONS: ThemeOption[] = [
   { value: "light", label: "Light", icon: "sunny-outline" },
-  { value: "system", label: "Auto", icon: "phone-portrait-outline" },
   { value: "dark", label: "Dark", icon: "moon-outline" },
+  { value: "system", label: "System", icon: "phone-portrait-outline" },
 ];
 
+/**
+ * Settings screen — v3.
+ *
+ * Five row groups + a danger zone:
+ *   1. Appearance — Light / Dark / System tri-card (drives useThemeStore)
+ *   2. Notifications — push master + price alerts (server-mirrored via
+ *      PUT /auth/me preferences; spec at
+ *      docs/handoff/_server-asks/auth-me-preferences.md)
+ *   3. Account — Edit profile / Phone / Email link rows
+ *   4. Support — Help / Contact / Feedback
+ *   5. About — Version / Terms / Privacy
+ *   6. Danger — Delete account (placeholder; routes a TODO toast for now)
+ *
+ * Pricing rule honoured: the price-alerts toggle copy is scoped to
+ * "nearby stations" market drops, never customer-specific order pricing.
+ */
 export default function SettingsScreen() {
   const theme = useTheme();
+  const router = useRouter();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+
   const { colorScheme, setColorScheme } = useThemeStore();
+  const user = useSessionStore((s) => s.user);
+  const updateUser = useSessionStore((s) => s.updateUser);
 
-  const [settings, setSettings] = useState<Record<string, boolean>>({
-    pushNotifications: true,
-    emailNotifications: false,
-    smsNotifications: true,
-    locationServices: true,
-  });
+  // Local-mirror of preferences for instant toggle response. Network
+  // call follows; rollback on failure.
+  const [pushEnabled, setPushEnabled] = useState<boolean>(
+    user?.preferences?.pushEnabled ?? true
+  );
+  const [priceAlertsEnabled, setPriceAlertsEnabled] = useState<boolean>(
+    user?.preferences?.priceAlertsEnabled ?? false
+  );
+  const [autoRedeemPoints, setAutoRedeemPoints] = useState<boolean>(
+    user?.preferences?.autoRedeemPoints ?? false
+  );
 
-  const toggle = (key: string) =>
-    setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
-
-  const ITEMS: ToggleSetting[] = [
-    { id: "pushNotifications", label: "Push Notifications", description: "Order updates and alerts", icon: "notifications-outline", value: settings.pushNotifications },
-    { id: "emailNotifications", label: "Email Notifications", description: "Receipts and promotions", icon: "mail-outline", value: settings.emailNotifications },
-    { id: "smsNotifications", label: "SMS Notifications", description: "Delivery alerts via SMS", icon: "chatbubble-outline", value: settings.smsNotifications },
-    { id: "locationServices", label: "Location Services", description: "For finding nearby stations", icon: "location-outline", value: settings.locationServices },
-  ];
-
-  const s = styles(theme);
+  /**
+   * Generic preference toggle wiring. Optimistically updates the
+   * local mirror + the session store, then PATCHes the server. On
+   * failure, reverts the local state and surfaces a non-blocking toast.
+   */
+  const togglePreference = useCallback(
+    async (
+      key: "pushEnabled" | "priceAlertsEnabled" | "autoRedeemPoints",
+      next: boolean,
+      setter: (v: boolean) => void
+    ) => {
+      const previous = !next;
+      setter(next);
+      updateUser({
+        preferences: { ...user?.preferences, [key]: next },
+      });
+      try {
+        await api.put("/auth/me", { preferences: { [key]: next } });
+      } catch (err: any) {
+        // Rollback both the local mirror and the persisted store.
+        setter(previous);
+        updateUser({
+          preferences: { ...user?.preferences, [key]: previous },
+        });
+        toast.error("Couldn't save", {
+          description: err?.message ?? "Try again in a moment.",
+        });
+      }
+    },
+    [user?.preferences, updateUser]
+  );
 
   return (
-    <SafeAreaView style={s.safe}>
-      <StatusBar barStyle={theme.mode === "dark" ? "light-content" : "dark-content"} />
-      <View style={s.header}>
-        <BackButton />
-        <Text style={s.headerTitle}>Settings</Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-
+    <ScreenContainer
+      edges={["top", "bottom"]}
+      header={<ScreenHeader title="Settings" onBack={() => router.back()} />}
+    >
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scroll}
+      >
         {/* ── Appearance ─────────────────────────────────────── */}
-        <Text style={s.sectionTitle}>Appearance</Text>
-        <View style={[s.appearanceCard, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
-          <View style={s.appearanceRow}>
-            <View style={[s.iconWrap, { backgroundColor: theme.tertiary }]}>
-              <Ionicons name="color-palette-outline" size={20} color={theme.primary} />
-            </View>
-            <View style={s.rowText}>
-              <Text style={[s.rowLabel, { color: theme.text }]}>Theme</Text>
-              <Text style={[s.rowDesc, { color: theme.icon }]}>
-                {colorScheme === "system" ? "Follows device setting" : colorScheme === "dark" ? "Always dark" : "Always light"}
-              </Text>
-            </View>
-          </View>
-          <View style={[s.segmentRow, { backgroundColor: theme.background, borderColor: theme.ash }]}>
-            {THEME_OPTIONS.map((opt) => {
-              const active = colorScheme === opt.value;
-              return (
-                <TouchableOpacity
-                  key={opt.value}
+        <Text style={styles.sectionLabel}>APPEARANCE</Text>
+        <View style={styles.themeRow}>
+          {THEME_OPTIONS.map((opt) => {
+            const selected = colorScheme === opt.value;
+            return (
+              <Pressable
+                key={opt.value}
+                onPress={() => setColorScheme(opt.value)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`${opt.label} theme`}
+                style={({ pressed }) => [
+                  styles.themeCard,
+                  selected && styles.themeCardSelected,
+                  pressed && { opacity: 0.92 },
+                ]}
+              >
+                <Ionicons
+                  name={opt.icon}
+                  size={22}
+                  color={
+                    selected
+                      ? theme.mode === "dark"
+                        ? "#fff"
+                        : theme.palette.green700
+                      : theme.fg
+                  }
+                />
+                <Text
                   style={[
-                    s.segmentBtn,
-                    active && { backgroundColor: theme.primary },
+                    styles.themeLabel,
+                    selected && styles.themeLabelSelected,
                   ]}
-                  onPress={() => setColorScheme(opt.value)}
-                  activeOpacity={0.7}
                 >
-                  <Ionicons
-                    name={opt.icon}
-                    size={16}
-                    color={active ? "#fff" : theme.icon}
-                  />
-                  <Text style={[s.segmentLabel, { color: active ? "#fff" : theme.icon }]}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+                  {opt.label}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
 
         {/* ── Notifications ──────────────────────────────────── */}
-        <Text style={[s.sectionTitle, { marginTop: 24 }]}>Notifications</Text>
-        {ITEMS.map((item) => (
-          <View key={item.id} style={[s.row, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
-            <View style={[s.iconWrap, { backgroundColor: theme.tertiary }]}>
-              <Ionicons name={item.icon} size={20} color={theme.primary} />
-            </View>
-            <View style={s.rowText}>
-              <Text style={[s.rowLabel, { color: theme.text }]}>{item.label}</Text>
-              <Text style={[s.rowDesc, { color: theme.icon }]}>{item.description}</Text>
-            </View>
-            <Switch
-              value={item.value}
-              onValueChange={() => toggle(item.id)}
-              trackColor={{ false: theme.ash, true: theme.primary + "99" }}
-              thumbColor={item.value ? theme.primary : theme.icon}
-            />
-          </View>
-        ))}
+        <Text style={styles.sectionLabel}>NOTIFICATIONS</Text>
+        <View style={styles.rowGroup}>
+          <Row
+            icon="notifications-outline"
+            label="Push notifications"
+            sub="Order updates, rider alerts, delivery confirmations"
+            kind="switch"
+            switchValue={pushEnabled}
+            onSwitchChange={(next) =>
+              togglePreference("pushEnabled", next, setPushEnabled)
+            }
+          />
+          <Row
+            icon="pricetag-outline"
+            label="Price alerts"
+            sub="When nearby stations drop their price"
+            kind="switch"
+            switchValue={priceAlertsEnabled}
+            onSwitchChange={(next) =>
+              togglePreference(
+                "priceAlertsEnabled",
+                next,
+                setPriceAlertsEnabled
+              )
+            }
+            divider={false}
+          />
+        </View>
 
-        {/* ── App ────────────────────────────────────────────── */}
-        <Text style={[s.sectionTitle, { marginTop: 24 }]}>App</Text>
-        <TouchableOpacity
-          style={[s.row, { backgroundColor: theme.surface, borderColor: theme.ash }]}
-          onPress={() => toast.info("Language", { description: "Multi-language support is coming soon" })}
-          activeOpacity={0.75}
-        >
-          <View style={[s.iconWrap, { backgroundColor: theme.tertiary }]}>
-            <Ionicons name="language-outline" size={20} color={theme.primary} />
-          </View>
-          <View style={s.rowText}>
-            <Text style={[s.rowLabel, { color: theme.text }]}>Language</Text>
-            <Text style={[s.rowDesc, { color: theme.icon }]}>English (Coming Soon)</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={theme.icon} />
-        </TouchableOpacity>
-        <TouchableOpacity style={[s.row, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
-          <View style={[s.iconWrap, { backgroundColor: theme.tertiary }]}>
-            <Ionicons name="star-outline" size={20} color={theme.primary} />
-          </View>
-          <View style={s.rowText}>
-            <Text style={[s.rowLabel, { color: theme.text }]}>Rate the App</Text>
-            <Text style={[s.rowDesc, { color: theme.icon }]}>Share your feedback</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={theme.icon} />
-        </TouchableOpacity>
+        {/* ── Points ─────────────────────────────────────────── */}
+        <Text style={styles.sectionLabel}>POINTS</Text>
+        <View style={styles.rowGroup}>
+          <Row
+            icon="star-outline"
+            label="Auto-redeem at checkout"
+            sub="Apply your points balance to every payment"
+            kind="switch"
+            switchValue={autoRedeemPoints}
+            onSwitchChange={(next) =>
+              togglePreference(
+                "autoRedeemPoints",
+                next,
+                setAutoRedeemPoints
+              )
+            }
+            divider={false}
+          />
+        </View>
 
+        {/* ── Account ────────────────────────────────────────── */}
+        <Text style={styles.sectionLabel}>ACCOUNT</Text>
+        <View style={styles.rowGroup}>
+          <Row
+            icon="person-outline"
+            label="Edit profile"
+            sub="Name, photo"
+            onPress={() => router.push("/(screens)/personal-info" as never)}
+          />
+          <Row
+            icon="call-outline"
+            label="Phone number"
+            meta={user?.phone ?? "Add"}
+            onPress={() => router.push("/(screens)/personal-info" as never)}
+          />
+          <Row
+            icon="mail-outline"
+            label="Email"
+            meta={user?.email}
+            divider={false}
+            onPress={() => router.push("/(screens)/personal-info" as never)}
+          />
+        </View>
+
+        {/* ── Support ────────────────────────────────────────── */}
+        <Text style={styles.sectionLabel}>SUPPORT</Text>
+        <View style={styles.rowGroup}>
+          <Row
+            icon="help-circle-outline"
+            label="Help center"
+            onPress={() => router.push("/(screens)/help-support" as never)}
+          />
+          <Row
+            icon="chatbubble-outline"
+            label="Contact support"
+            divider={false}
+            onPress={() => router.push("/(screens)/help-support" as never)}
+          />
+        </View>
+
+        {/* ── About ──────────────────────────────────────────── */}
+        <Text style={styles.sectionLabel}>ABOUT</Text>
+        <View style={styles.rowGroup}>
+          <Row
+            icon="cube-outline"
+            label="App version"
+            meta={APP_VERSION}
+            kind="none"
+          />
+          <Row
+            icon="receipt-outline"
+            label="Terms of service"
+            onPress={() => router.push("/(legal)/terms" as never)}
+          />
+          <Row
+            icon="lock-closed-outline"
+            label="Privacy policy"
+            divider={false}
+            onPress={() => router.push("/(legal)/privacy" as never)}
+          />
+        </View>
+
+        {/* ── Danger ─────────────────────────────────────────── */}
+        <Text style={styles.sectionLabel}>DANGER ZONE</Text>
+        <View style={styles.dangerWrap}>
+          <Pressable
+            onPress={() => {
+              // TODO: replace with confirm sheet → POST /auth/delete-account
+              toast.info("Account deletion not yet enabled", {
+                description: "Email support@gaznger.com to request deletion.",
+              });
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Delete my account"
+            style={({ pressed }) => [
+              styles.dangerCard,
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <Ionicons name="close-circle-outline" size={18} color={theme.error} />
+            <Text style={styles.dangerLabel}>Delete my account</Text>
+          </Pressable>
+          <Text style={styles.dangerNote}>
+            We hold order records for 7 years (Nigerian tax law). Personal
+            info is wiped immediately.
+          </Text>
+        </View>
       </ScrollView>
-    </SafeAreaView>
+    </ScreenContainer>
   );
 }
 
-const styles = (theme: ReturnType<typeof useTheme>) =>
+const makeStyles = (theme: Theme) =>
   StyleSheet.create({
-    safe: { flex: 1, backgroundColor: theme.background },
-    header: {
-      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-      paddingHorizontal: 16, paddingVertical: 12,
+    scroll: {
+      paddingBottom: theme.space.s5 + 16,
     },
-    headerTitle: { fontSize: 17, fontWeight: "600", color: theme.text },
-    scroll: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 40 },
-    sectionTitle: {
-      fontSize: 11, fontWeight: "600", color: theme.icon,
-      marginBottom: 10, paddingLeft: 2,
-      textTransform: "uppercase", letterSpacing: 0.8,
+    sectionLabel: {
+      ...theme.type.micro,
+      color: theme.fgMuted,
+      letterSpacing: 0.5,
+      paddingHorizontal: theme.space.s4,
+      paddingTop: theme.space.s4,
+      paddingBottom: theme.space.s2,
     },
-
-    // Appearance card
-    appearanceCard: {
-      borderRadius: 16, borderWidth: 1,
-      padding: 14, gap: 14, marginBottom: 8,
-    },
-    appearanceRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-    segmentRow: {
-      flexDirection: "row",
-      borderRadius: 12, borderWidth: 1,
+    rowGroup: {
+      backgroundColor: theme.surface,
+      marginHorizontal: theme.space.s4,
+      borderRadius: theme.radius.md + 2, // 14 per design
+      borderWidth: 1,
+      borderColor: theme.divider,
       overflow: "hidden",
-      padding: 3, gap: 3,
     },
-    segmentBtn: {
-      flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-      gap: 5, paddingVertical: 8, borderRadius: 10,
-    },
-    segmentLabel: { fontSize: 13, fontWeight: "600" },
 
-    // Generic rows
-    row: {
-      flexDirection: "row", alignItems: "center", gap: 12,
-      padding: 14, borderRadius: 16, borderWidth: 1, marginBottom: 10,
+    /* Theme tri-toggle */
+    themeRow: {
+      flexDirection: "row",
+      gap: theme.space.s2,
+      paddingHorizontal: theme.space.s4,
     },
-    iconWrap: { width: 38, height: 38, borderRadius: 10, justifyContent: "center", alignItems: "center" },
-    rowText: { flex: 1 },
-    rowLabel: { fontSize: 14, fontWeight: "500", marginBottom: 2 },
-    rowDesc: { fontSize: 12 },
+    themeCard: {
+      flex: 1,
+      paddingVertical: theme.space.s3,
+      paddingHorizontal: theme.space.s2,
+      borderRadius: theme.radius.md,
+      borderWidth: 1.5,
+      borderColor: theme.border,
+      backgroundColor: theme.surface,
+      alignItems: "center",
+      gap: 4,
+    },
+    themeCardSelected: {
+      backgroundColor: theme.primaryTint,
+      borderColor: theme.primary,
+    },
+    themeLabel: {
+      ...theme.type.caption,
+      color: theme.fg,
+      fontWeight: "800",
+    },
+    themeLabelSelected: {
+      color: theme.mode === "dark" ? "#fff" : theme.palette.green700,
+    },
+
+    /* Danger zone */
+    dangerWrap: {
+      marginHorizontal: theme.space.s4,
+      marginBottom: theme.space.s5,
+    },
+    dangerCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: theme.space.s2,
+      height: 50,
+      borderRadius: theme.radius.md + 2,
+      backgroundColor: theme.errorTint,
+      borderWidth: 1,
+      borderColor:
+        theme.mode === "dark"
+          ? "rgba(209,69,59,0.20)"
+          : theme.palette.error100,
+    },
+    dangerLabel: {
+      ...theme.type.body,
+      color: theme.error,
+      fontWeight: "800",
+    },
+    dangerNote: {
+      ...theme.type.caption,
+      color: theme.fgMuted,
+      textAlign: "center",
+      marginTop: theme.space.s2,
+      lineHeight: 17,
+    },
   });
