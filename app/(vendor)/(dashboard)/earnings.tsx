@@ -20,6 +20,8 @@ import { toast } from "sonner-native";
 import { getSocket } from "@/lib/socket";
 import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
+import { useWalletStore } from "@/store/useWalletStore";
+import { newIdempotencyKey } from "@/lib/idempotency";
 import NotificationButton from "@/components/ui/global/NotificationButton";
 import ProfileButton from "@/components/ui/global/ProfileButton";
 
@@ -100,6 +102,9 @@ const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export default function VendorEarnings() {
   const theme = useTheme();
   const router = useRouter();
+  const walletAvailable = useWalletStore((s) => s.available);
+  const walletPending = useWalletStore((s) => s.pending);
+  const refreshWallet = useWalletStore((s) => s.refresh);
   const [allEarnings, setAllEarnings] = useState<Earning[]>([]);
   const [summary, setSummary] = useState({ pending: 0, settled: 0 });
   const [total, setTotal] = useState(0);
@@ -133,7 +138,10 @@ export default function VendorEarnings() {
   }, []);
 
   useEffect(() => { load(1); }, [load]);
-  useFocusEffect(useCallback(() => { load(1); }, [load]));
+  useFocusEffect(useCallback(() => {
+    load(1);
+    refreshWallet();
+  }, [load, refreshWallet]));
 
   // Real-time: reload when vendor gets new earnings
   useEffect(() => {
@@ -149,12 +157,25 @@ export default function VendorEarnings() {
   const handlePayoutSubmit = async () => {
     const amount = parseInt(payoutAmount, 10);
     if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
+    if (amount > walletAvailable) {
+      toast.error("Amount exceeds available balance", {
+        description: `You have ₦${walletAvailable.toLocaleString("en-NG")} available.`,
+      });
+      return;
+    }
     setSubmittingPayout(true);
     try {
-      await api.post("/api/vendor/withdraw", { amount });
-      toast.success("Payout request submitted!", { description: "We'll process it within 1–2 business days." });
+      await api.post(
+        "/api/vendor/withdraw",
+        { amount },
+        { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+      );
+      toast.success("Payout request submitted!", {
+        description: "Funds typically arrive within minutes via Paystack.",
+      });
       setShowPayout(false);
       setPayoutAmount("");
+      refreshWallet();
     } catch (err: any) {
       toast.error("Request failed", { description: err.message });
     } finally {
@@ -201,10 +222,12 @@ export default function VendorEarnings() {
     [earnings]
   );
 
+  // Wallet is the source of truth for what's withdrawable. Earnings.summary
+  // remains for "Pending" (per-order ledger view); wallet drives "Available".
   const totalAll = summary.settled;
   const countTotal = useCountUp(totalAll);
-  const countPending = useCountUp(summary.pending);
-  const countSettled = useCountUp(summary.settled);
+  const countPending = useCountUp(walletPending || summary.pending);
+  const countSettled = useCountUp(walletAvailable);
 
   const renderEarning = ({ item }: { item: Earning }) => {
     const isPending = item.status === "pending";

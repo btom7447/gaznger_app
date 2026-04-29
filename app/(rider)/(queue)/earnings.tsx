@@ -19,6 +19,8 @@ import { toast } from "sonner-native";
 import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
+import { useWalletStore } from "@/store/useWalletStore";
+import { newIdempotencyKey } from "@/lib/idempotency";
 import NotificationButton from "@/components/ui/global/NotificationButton";
 import ProfileButton from "@/components/ui/global/ProfileButton";
 import Skeleton from "@/components/ui/global/Skeleton";
@@ -74,6 +76,9 @@ const FILTERS: { key: FilterType; label: string }[] = [
 export default function RiderEarnings() {
   const theme = useTheme();
   const router = useRouter();
+  const walletAvailable = useWalletStore((s) => s.available);
+  const walletPending = useWalletStore((s) => s.pending);
+  const refreshWallet = useWalletStore((s) => s.refresh);
   const [earnings, setEarnings] = useState<Earning[]>([]);
   const [summary, setSummary] = useState({ pending: 0, settled: 0 });
   const [total, setTotal] = useState(0);
@@ -106,7 +111,10 @@ export default function RiderEarnings() {
     }
   }, [filter]);
 
-  useFocusEffect(useCallback(() => { load(1, false, filter); }, [load, filter]));
+  useFocusEffect(useCallback(() => {
+    load(1, false, filter);
+    refreshWallet();
+  }, [load, filter, refreshWallet]));
 
   // Socket: real-time earning updates
   useEffect(() => {
@@ -144,12 +152,25 @@ export default function RiderEarnings() {
   const handlePayoutSubmit = async () => {
     const amount = parseInt(payoutAmount, 10);
     if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
+    if (amount > walletAvailable) {
+      toast.error("Amount exceeds available balance", {
+        description: `You have ${fmtCurrency(walletAvailable)} available.`,
+      });
+      return;
+    }
     setSubmittingPayout(true);
     try {
-      await api.post("/api/rider/withdraw", { amount });
-      toast.success("Payout request submitted!", { description: "We'll process it within 1–2 business days." });
+      await api.post(
+        "/api/rider/withdraw",
+        { amount },
+        { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+      );
+      toast.success("Payout request submitted!", {
+        description: "Funds typically arrive within minutes via Paystack.",
+      });
       setShowPayout(false);
       setPayoutAmount("");
+      refreshWallet();
     } catch (err: any) {
       toast.error("Request failed", { description: err.message });
     } finally {
@@ -266,7 +287,11 @@ export default function RiderEarnings() {
     );
   }
 
-  const availableBalance = summary.settled;
+  // Wallet is the source of truth for what's withdrawable. Earnings.summary
+  // is kept around for the historical "Total Earned" / "Pending" tiles
+  // because it knows about the per-order ledger; the wallet only knows
+  // the aggregate balance.
+  const availableBalance = walletAvailable;
 
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: theme.background }]}>
@@ -304,13 +329,13 @@ export default function RiderEarnings() {
               </View>
               <View style={[s.summaryCard, { backgroundColor: "#FEF3C7", borderColor: "#FCD34D" }]}>
                 <Text style={[s.summaryLabel, { color: "#92400E" }]}>Pending</Text>
-                <Text style={[s.summaryAmount, { color: "#D97706" }]}>{fmtCurrency(summary.pending)}</Text>
+                <Text style={[s.summaryAmount, { color: "#D97706" }]}>{fmtCurrency(walletPending || summary.pending)}</Text>
                 <Text style={[s.summaryNote, { color: "#B45309" }]}>Awaiting delivery</Text>
               </View>
               <View style={[s.summaryCard, { backgroundColor: "#D1FAE5", borderColor: "#6EE7B7" }]}>
-                <Text style={[s.summaryLabel, { color: "#065F46" }]}>Settled</Text>
-                <Text style={[s.summaryAmount, { color: "#059669" }]}>{fmtCurrency(summary.settled)}</Text>
-                <Text style={[s.summaryNote, { color: "#065F46" }]}>Confirmed</Text>
+                <Text style={[s.summaryLabel, { color: "#065F46" }]}>Available</Text>
+                <Text style={[s.summaryAmount, { color: "#059669" }]}>{fmtCurrency(walletAvailable)}</Text>
+                <Text style={[s.summaryNote, { color: "#065F46" }]}>Withdrawable now</Text>
               </View>
             </View>
 
