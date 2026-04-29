@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect } from "react";
 import { View, TouchableOpacity, StyleSheet } from "react-native";
 import { useTheme } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/lib/api";
 import { useSessionStore } from "@/store/useSessionStore";
+import { useNotificationStore } from "@/store/useNotificationStore";
+import { getSocket } from "@/lib/socket";
 
 interface NotificationButtonProps {
   onPress: () => void;
@@ -12,26 +14,25 @@ interface NotificationButtonProps {
 export default function NotificationButton({ onPress }: NotificationButtonProps) {
   const theme = useTheme();
   const isLoggedIn = useSessionStore((s) => s.isLoggedIn);
-  const [unread, setUnread] = useState(0);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const unread = useNotificationStore((s) => s.unreadCount);
+  const { setUnreadCount, increment } = useNotificationStore.getState();
 
-  const fetchUnread = async () => {
-    if (!isLoggedIn) return;
-    try {
-      const data = await api.get<{ data: { read: boolean }[] }>("/api/notifications?page=1&limit=50");
-      const count = (data.data ?? []).filter((n) => !n.read).length;
-      setUnread(count);
-    } catch {
-      // silent
-    }
-  };
-
+  // Fetch initial unread count once on mount
   useEffect(() => {
     if (!isLoggedIn) return;
-    fetchUnread();
-    intervalRef.current = setInterval(fetchUnread, 60_000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    api
+      .get<{ data: { read: boolean }[] }>("/api/notifications?page=1&limit=50")
+      .then((data) => setUnreadCount((data.data ?? []).filter((n) => !n.read).length))
+      .catch(() => {});
   }, [isLoggedIn]);
+
+  // Real-time: increment badge when a new notification arrives
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    socket.on("notification:new", increment);
+    return () => { socket.off("notification:new", increment); };
+  }, []);
 
   return (
     <TouchableOpacity

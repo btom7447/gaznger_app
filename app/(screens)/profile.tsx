@@ -6,9 +6,9 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Image,
   StatusBar,
 } from "react-native";
+import Avatar from "@/components/ui/global/Avatar";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
@@ -19,7 +19,7 @@ import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
 import BackButton from "@/components/ui/global/BackButton";
 
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.0.0";
 
 interface MenuCard {
   id: string;
@@ -117,12 +117,13 @@ export default function ProfileScreen() {
               <View style={s.avatarPlaceholder}>
                 <ActivityIndicator color={theme.primary} />
               </View>
-            ) : user?.profileImage ? (
-              <Image source={{ uri: user.profileImage }} style={s.avatar} />
             ) : (
-              <View style={s.avatarPlaceholder}>
-                <Ionicons name="person" size={42} color={theme.primary} />
-              </View>
+              <Avatar
+                uri={user?.profileImage}
+                initials={user?.displayName?.split(" ").map((w) => w[0]).join("").slice(0, 2)}
+                size={96}
+                radius={48}
+              />
             )}
             <View style={[s.cameraTag, { backgroundColor: theme.primary }]}>
               <Ionicons name="camera" size={12} color="#fff" />

@@ -51,13 +51,26 @@ export default function LoginForm() {
         refreshToken: string;
       }>("/auth/login", { email, password });
 
+      const mappedUser = mapBackendUser(data.user);
       loginSession({
-        user: mapBackendUser(data.user),
+        user: mappedUser,
         accessToken: data.accessToken,
         refreshToken: data.refreshToken,
       });
 
-      router.replace("/(customer)/(home)" as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+      // Route to role-specific home
+      const role = mappedUser.role ?? "customer";
+      const isOnboarded = mappedUser.isOnboarded ?? false;
+      if (role === "vendor") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        router.replace((isOnboarded ? "/(vendor)/(dashboard)" : "/(vendor)/onboarding") as any);
+      } else if (role === "rider") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        router.replace((isOnboarded ? "/(rider)/(queue)" : "/(rider)/onboarding") as any);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        router.replace("/(customer)/(home)" as any);
+      }
     } catch (err: any) {
       toast.error("Login failed", { description: err.message });
     } finally {

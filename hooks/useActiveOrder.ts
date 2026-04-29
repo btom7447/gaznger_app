@@ -8,7 +8,7 @@ export function useActiveOrder() {
   const check = async () => {
     try {
       const res = await api.get<{ data: any[]; total: number }>(
-        "/api/orders?status=pending&page=1&limit=1"
+        "/api/orders?status=pending,confirmed,assigned,in-transit,awaiting_confirmation&page=1&limit=1"
       );
       setHasActiveOrder((res.data?.length ?? 0) > 0 || res.total > 0);
     } catch {

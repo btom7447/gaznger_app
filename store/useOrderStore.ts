@@ -202,10 +202,14 @@ export const useOrderStore = create<OrderState>()(
     {
       name: "order-store",
       storage: zustandAsyncStorage,
+      partialize: (state) => ({
+        fuelTypes: state.fuelTypes,
+        order: state.order,
+        progressStep: state.progressStep,
+      }),
       onRehydrateStorage: () => (state) => {
         if (state) {
-          // ❗ IMPORTANT: must update via set, not mutation
-          useOrderStore.setState({ hasHydrated: true });
+          useOrderStore.setState({ hasHydrated: true, isFetchingFuelTypes: false });
         }
       },
     }

@@ -53,7 +53,8 @@ export default function HomeHeader({
 
         <ProfileCard
           image={user?.profileImage}
-          onPress={() => router.push("/profile")}
+          initials={user?.displayName?.split(" ").map((w) => w[0]).join("").slice(0, 2)}
+          onPress={() => router.push("/(screens)/profile" as any)}
         />
       </View>
     </View>

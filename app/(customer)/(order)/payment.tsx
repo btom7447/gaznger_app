@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import SkeletonBox from "@/components/ui/skeletons/SkeletonBox";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/constants/theme";
@@ -24,6 +25,8 @@ export default function PaymentScreen() {
   const {
     orderId,
     totalPrice,
+    fuelCost,
+    deliveryFee,
     fuelName,
     quantity,
     unit,
@@ -34,6 +37,8 @@ export default function PaymentScreen() {
   } = useLocalSearchParams<{
     orderId: string;
     totalPrice: string;
+    fuelCost: string;
+    deliveryFee: string;
     fuelName: string;
     quantity: string;
     unit: string;
@@ -43,6 +48,7 @@ export default function PaymentScreen() {
     deliveryType: string;
   }>();
 
+  const insets = useSafeAreaInsets();
   const resetOrder = useOrderStore((s) => s.resetOrder);
   const userPoints = useSessionStore((s) => s.user?.points ?? 0);
   const [processing, setProcessing] = useState(true);
@@ -61,6 +67,8 @@ export default function PaymentScreen() {
       params: {
         orderId,
         totalPrice: String(currentTotal),
+        fuelCost,
+        deliveryFee,
         fuelName,
         quantity,
         unit,
@@ -118,11 +126,6 @@ export default function PaymentScreen() {
           <Text style={[s.amount, { color: theme.primary }]}>
             ₦{currentTotal.toLocaleString()}
           </Text>
-          {currentTotal < Number(totalPrice ?? 0) && (
-            <Text style={[s.discountNote, { color: theme.success }]}>
-              Points discount applied — saved ₦{(Number(totalPrice ?? 0) - currentTotal).toLocaleString()}
-            </Text>
-          )}
         </View>
 
         {/* Order details card */}
@@ -149,6 +152,23 @@ export default function PaymentScreen() {
               theme={theme}
             />
           )}
+
+          <View style={[{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.ash, marginTop: 8, paddingTop: 12 }]}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 7 }}>
+              <Text style={{ fontSize: 13, color: theme.icon, fontWeight: "300" }}>Fuel Cost</Text>
+              <Text style={{ fontSize: 13, color: theme.text, fontWeight: "400" }}>₦{Number(fuelCost ?? 0).toLocaleString()}</Text>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 7 }}>
+              <Text style={{ fontSize: 13, color: theme.icon, fontWeight: "300" }}>Delivery Fee</Text>
+              <Text style={{ fontSize: 13, color: theme.text, fontWeight: "400" }}>₦{Number(deliveryFee ?? 0).toLocaleString()}</Text>
+            </View>
+            {currentTotal < Number(totalPrice ?? 0) && (
+              <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 7 }}>
+                <Text style={{ fontSize: 13, color: theme.success, fontWeight: "300" }}>Points Discount</Text>
+                <Text style={{ fontSize: 13, color: theme.success, fontWeight: "400" }}>-₦{(Number(totalPrice ?? 0) - currentTotal).toLocaleString()}</Text>
+              </View>
+            )}
+          </View>
 
           <View style={[s.totalRow, { borderTopColor: theme.ash }]}>
             <Text style={[s.totalLabel, { color: theme.icon }]}>Total</Text>
@@ -185,7 +205,7 @@ export default function PaymentScreen() {
         onRedeemed={(newTotal) => setCurrentTotal(newTotal)}
       />
 
-      <View style={s.footer}>
+      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 62 }]}>
         <TouchableOpacity style={[s.cancelBtn, { borderColor: theme.ash }]} onPress={handleCancel}>
           <Text style={[s.cancelText, { color: theme.text }]}>Cancel</Text>
         </TouchableOpacity>
@@ -250,7 +270,7 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
     redeemTitle: { fontSize: 14, fontWeight: "400" },
     redeemSub: { fontSize: 12, fontWeight: "300", marginTop: 2 },
     footer: {
-      flexDirection: "row", gap: 12, padding: 16, paddingBottom: 28,
+      flexDirection: "row", gap: 12, paddingHorizontal: 16, paddingTop: 16,
       borderTopWidth: 1, borderTopColor: theme.ash,
     },
     cancelBtn: {

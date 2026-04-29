@@ -1,9 +1,35 @@
-import React from "react";
-import { Stack } from "expo-router";
+import React, { useEffect } from "react";
+import { BackHandler } from "react-native";
+import { Stack, useRouter } from "expo-router";
 import { useTheme } from "@/constants/theme";
+import { useSessionStore } from "@/store/useSessionStore";
 
 export default function VendorLayout() {
   const theme = useTheme();
+  const router = useRouter();
+  const { user, isLoggedIn, hasHydrated } = useSessionStore();
+
+  useEffect(() => {
+    if (!hasHydrated) return;
+    if (!isLoggedIn) {
+      router.replace("/(auth)/authentication" as any);
+      return;
+    }
+    if (user?.role !== "vendor") {
+      if (user?.role === "rider") {
+        router.replace("/(rider)/(queue)" as any);
+      } else {
+        router.replace("/(customer)/(home)" as any);
+      }
+    }
+  }, [hasHydrated, isLoggedIn, user?.role]);
+
+  // Block Android hardware back from leaving the vendor area
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
+    return () => sub.remove();
+  }, []);
+
   return (
     <Stack
       screenOptions={{

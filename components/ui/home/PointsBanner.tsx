@@ -12,6 +12,7 @@ import {
 import { useTheme } from "@/constants/theme";
 import { useSessionStore } from "@/store/useSessionStore";
 import { api } from "@/lib/api";
+import { getSocket } from "@/lib/socket";
 
 interface PointsBannerProps {
   onOpenRedeem?: () => void;
@@ -66,11 +67,22 @@ export default function PointsBanner({ onOpenRedeem }: PointsBannerProps = {}) {
     fetchPoints();
   }, [user?.id]);
 
-  // Auto-refresh points every 60 seconds
+  // Real-time: update points instantly via WebSocket
   useEffect(() => {
-    const interval = setInterval(fetchPoints, 60000);
-    return () => clearInterval(interval);
-  }, [user?.id]);
+    const socket = getSocket();
+    if (!socket) return;
+    const handler = ({ points }: { points: number }) => {
+      updateUser({ points });
+      Animated.timing(animatedPoints, {
+        toValue: points,
+        duration: 800,
+        easing: Easing.out(Easing.exp),
+        useNativeDriver: false,
+      }).start();
+    };
+    socket.on("points:update", handler);
+    return () => { socket.off("points:update", handler); };
+  }, []);
 
   const points = displayPoints;
 

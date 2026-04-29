@@ -103,4 +103,18 @@ export const api = {
     request<T>(path, { method: "PATCH", body }),
 
   delete: <T = unknown>(path: string) => request<T>(path, { method: "DELETE" }),
+
+  /** Multipart form-data upload (FormData). No Content-Type header — fetch sets it with boundary. */
+  uploadForm: async <T = unknown>(path: string, formData: FormData, method: "POST" | "PATCH" = "PATCH"): Promise<T> => {
+    const { accessToken } = useSessionStore.getState();
+    const headers: Record<string, string> = {};
+    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+    const BASE = process.env.EXPO_PUBLIC_BASE_URL ?? "http://localhost:5000";
+    const res = await fetch(`${BASE}${path}`, { method, headers, body: formData });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({})) as { message?: string };
+      throw new Error(errData.message ?? `Upload failed (${res.status})`);
+    }
+    return res.json() as Promise<T>;
+  },
 };

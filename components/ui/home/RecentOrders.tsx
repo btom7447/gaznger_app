@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Image, ImageSourcePropType } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useTheme } from "@/constants/theme";
@@ -25,6 +25,23 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
   pending: "Pending", confirmed: "Confirmed",
   in_transit: "In Transit", delivered: "Delivered", cancelled: "Cancelled",
 };
+
+/* ── Fuel icon assets (same as delivery.tsx) ── */
+const FUEL_LOCAL_ICON: Record<string, ImageSourcePropType> = {
+  petrol: require("../../../assets/icons/fuel/petrol-icon.png"),
+  diesel: require("../../../assets/icons/fuel/diesel-icon.png"),
+  gas:    require("../../../assets/icons/fuel/gas-icon.png"),
+  oil:    require("../../../assets/icons/fuel/oil-icon.png"),
+};
+
+function fuelAsset(name?: string): ImageSourcePropType {
+  const k = name?.toLowerCase() ?? "";
+  if (k.includes("diesel") || k.includes("ago")) return FUEL_LOCAL_ICON.diesel;
+  if (k.includes("gas") || k.includes("lpg") || k.includes("kerosene")) return FUEL_LOCAL_ICON.gas;
+  if (k.includes("oil")) return FUEL_LOCAL_ICON.oil;
+  return FUEL_LOCAL_ICON.petrol; // PMS / petrol default
+}
+
 
 export default function RecentOrders() {
   const theme = useTheme();
@@ -54,12 +71,19 @@ export default function RecentOrders() {
         return (
           <TouchableOpacity
             key={order._id}
-            style={[s.row, { backgroundColor: theme.surface, borderColor: theme.ash }]}
+            style={[
+              s.row,
+              { backgroundColor: theme.surface, borderColor: theme.ash },
+            ]}
             onPress={() => router.push("/(screens)/order-history" as any)}
             activeOpacity={0.8}
           >
             <View style={[s.iconWrap, { backgroundColor: theme.tertiary }]}>
-              <Ionicons name="flame-outline" size={18} color={theme.primary} />
+              <Image
+                source={fuelAsset(order.fuel?.name)}
+                style={s.fuelImg}
+                resizeMode="contain"
+              />
             </View>
             <View style={s.info}>
               <Text style={[s.fuelName, { color: theme.text }]}>
@@ -67,7 +91,9 @@ export default function RecentOrders() {
               </Text>
               <Text style={[s.date, { color: theme.icon }]}>
                 {new Date(order.createdAt).toLocaleDateString("en-NG", {
-                  day: "numeric", month: "short", year: "numeric",
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
                 })}
               </Text>
             </View>
@@ -91,14 +117,34 @@ export default function RecentOrders() {
 const styles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
     container: { marginBottom: 24 },
-    sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+    sectionHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 12,
+    },
     sectionTitle: { fontSize: 15, fontWeight: "500" },
     seeAll: { fontSize: 13, fontWeight: "400" },
     row: {
-      flexDirection: "row", alignItems: "center", gap: 12,
-      padding: 14, borderRadius: 16, borderWidth: 1, marginBottom: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      padding: 14,
+      borderRadius: 16,
+      borderWidth: 1,
+      marginBottom: 10,
     },
-    iconWrap: { width: 38, height: 38, borderRadius: 10, justifyContent: "center", alignItems: "center" },
+    iconWrap: {
+      width: 38,
+      height: 38,
+      borderRadius: 10,
+      justifyContent: "center",
+      alignItems: "center",
+    },
+    fuelImg: {
+      width: 22,
+      height: 22,
+    },
     info: { flex: 1 },
     fuelName: { fontSize: 14, fontWeight: "400", marginBottom: 3 },
     date: { fontSize: 12, fontWeight: "300" },

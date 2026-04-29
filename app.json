@@ -2,6 +2,7 @@
   "expo": {
     "name": "gaznger",
     "slug": "gaznger",
+    "owner": "btom",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -10,10 +11,13 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "config": {
+      "bundleIdentifier": "com.gaznger.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
+      "package": "com.gaznger.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -23,8 +27,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "config": {
-        "googleMaps": {
-        }
+        "googleMaps": {}
       }
     },
     "web": {
@@ -61,6 +64,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "68bb341e-e53b-4345-8b4d-5dd5f4c6ca52"
+      }
     }
   }
 }

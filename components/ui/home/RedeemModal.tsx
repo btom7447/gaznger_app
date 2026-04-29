@@ -15,6 +15,7 @@ import {
   FlatList,
 } from "react-native";
 import { Modalize } from "react-native-modalize";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { toast } from "sonner-native";
 import { useTheme } from "@/constants/theme";
@@ -43,6 +44,7 @@ interface PendingOrder {
 const RedeemModal = forwardRef<RedeemModalHandles, RedeemModalProps>(
   ({ orderId: preselectedOrderId, onRedeemed }, ref) => {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const modalRef = useRef<Modalize>(null);
   const user = useSessionStore((s) => s.user);
   const updateUser = useSessionStore((s) => s.updateUser);
@@ -134,7 +136,7 @@ const RedeemModal = forwardRef<RedeemModalHandles, RedeemModalProps>(
         </View>
       }
     >
-      <View style={s.content}>
+      <View style={[s.content, { paddingBottom: Math.max(insets.bottom, 16) + 62 }]}>
         {/* Balance */}
         <View style={[s.balanceCard, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
           <Text style={[s.balanceLabel, { color: theme.icon }]}>Available Balance</Text>
@@ -259,7 +261,7 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
       alignItems: "center",
       justifyContent: "center",
     },
-    content: { paddingHorizontal: 20, paddingBottom: 36, paddingTop: 16 },
+    content: { paddingHorizontal: 20, paddingTop: 16 },
     balanceCard: {
       borderRadius: 14,
       borderWidth: 1,

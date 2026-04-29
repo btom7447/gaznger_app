@@ -1,8 +1,23 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { secureStorage } from "./secureStorage";
+import { connectSocket, disconnectSocket } from "@/lib/socket";
 
 export type UserRole = "customer" | "vendor" | "rider" | "admin";
+
+/**
+ * Saved Paystack card metadata. Populated by the server on first
+ * successful charge — do NOT mutate from the client. Treated as
+ * "is the user able to pay with one tap" gate in payment.tsx.
+ */
+export interface SavedCard {
+  authorizationCode?: string;
+  last4: string;
+  brand?: string;
+  bank?: string;
+  expMonth?: string;
+  expYear?: string;
+}
 
 export interface SessionUser {
   id: string;
@@ -15,6 +30,12 @@ export interface SessionUser {
   defaultAddress?: string | null;
   role: UserRole;
   isOnboarded: boolean;
+  /** Server-managed. Surfaces the "Use saved card" path in checkout. */
+  lastPaystackAuth?: SavedCard;
+  /** "pending" | "active" | "suspended". Gated UI when not active. */
+  accountStatus?: "pending" | "active" | "suspended";
+  /** Vendor + rider only — gates the withdraw button when active. */
+  withdrawalHold?: { active: boolean; reason?: string };
 }
 
 interface SessionState {
@@ -44,21 +65,16 @@ export const useSessionStore = create<SessionState>()(
       isLoggedIn: false,
       hasHydrated: false,
 
-      login: ({ user, accessToken, refreshToken }) =>
-        set({
-          user,
-          accessToken,
-          refreshToken,
-          isLoggedIn: true,
-        }),
+      login: ({ user, accessToken, refreshToken }) => {
+        set({ user, accessToken, refreshToken, isLoggedIn: true });
+        // Connect socket after tokens are flushed to store
+        setTimeout(() => connectSocket(accessToken), 0);
+      },
 
-      logout: () =>
-        set({
-          user: null,
-          accessToken: null,
-          refreshToken: null,
-          isLoggedIn: false,
-        }),
+      logout: () => {
+        disconnectSocket();
+        set({ user: null, accessToken: null, refreshToken: null, isLoggedIn: false });
+      },
 
       updateUser: (fields) => {
         const current = get().user;

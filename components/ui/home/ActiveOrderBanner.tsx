@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
+import { getSocket } from "@/lib/socket";
 
 type OrderStatus = "pending" | "confirmed" | "in-transit" | "delivered" | "cancelled";
 
@@ -43,6 +44,23 @@ export default function ActiveOrderBanner() {
         setOrder(active ?? null);
       })
       .catch(() => {});
+  }, []);
+
+  // Real-time order status update
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const handler = ({ orderId, status }: { orderId: string; status: string }) => {
+      setOrder((prev) => {
+        if (!prev) return prev;
+        if (prev._id !== orderId) return prev;
+        // Hide banner when order is terminal
+        if (status === "cancelled" || status === "delivered") return null;
+        return { ...prev, status: status as OrderStatus };
+      });
+    };
+    socket.on("order:update", handler);
+    return () => { socket.off("order:update", handler); };
   }, []);
 
   if (!order) return null;

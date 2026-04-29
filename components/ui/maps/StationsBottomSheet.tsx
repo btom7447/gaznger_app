@@ -217,7 +217,7 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: 20,
     paddingVertical: 14,
-    paddingBottom: 28,
+    paddingBottom: 60,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   gazngerBtn: {

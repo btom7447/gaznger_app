@@ -8,39 +8,47 @@ import {
   TouchableOpacity,
   Switch,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
 import * as Location from "expo-location";
 import { toast } from "sonner-native";
 import { useTheme } from "@/constants/theme";
 import { useSessionStore } from "@/store/useSessionStore";
 import { api } from "@/lib/api";
+import { getSocket } from "@/lib/socket";
+import { useNotificationStore } from "@/store/useNotificationStore";
+import NotificationButton from "@/components/ui/global/NotificationButton";
+import ProfileButton from "@/components/ui/global/ProfileButton";
+import RiderPromoBanner from "@/components/ui/home/RiderPromoBanner";
 
-const LOCATION_POLL_MS = 30_000; // 30 seconds
+const LOCATION_POLL_MS = 30_000;
 
-type DeliveryStatus = "pending" | "accepted" | "picked_up" | "delivered" | "failed";
+type DeliveryStatus = "pending" | "accepted" | "picked_up" | "awaiting_confirmation" | "delivered" | "dropped" | "failed";
+
+interface DispatchOffer {
+  deliveryId: string;
+  orderId: string;
+  stationName: string;
+  stationAddress?: string;
+  fuelName: string;
+  quantity: number;
+  unit: string;
+  riderEarnings: number;
+}
 
 interface ActiveDelivery {
   _id: string;
   status: DeliveryStatus;
   riderEarnings: number;
-  pickupTime?: string;
   station: { name: string; address: string };
   order: {
     _id: string;
-    totalPrice: number;
-    deliveryFee: number;
-    fuelCost: number;
     fuel: { name: string; unit: string };
     quantity: number;
-    user: { displayName: string; phone?: string };
-    deliveryAddress: {
-      street: string;
-      city: string;
-      state: string;
-    };
+    user: { displayName: string };
+    deliveryAddress: { street: string; city: string };
   };
 }
 
@@ -51,6 +59,8 @@ interface RiderProfile {
   isVerified: boolean;
   rating: number;
   totalDeliveries: number;
+  todaysEarnings: number;
+  user?: { displayName: string; email: string; phone?: string; profileImage?: string };
 }
 
 function fmtCurrency(n: number) {
@@ -59,20 +69,23 @@ function fmtCurrency(n: number) {
 
 const VEHICLE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   motorcycle: "bicycle",
-  tricycle: "bicycle",
-  van: "car",
+  car: "car",
+  truck: "car",
 };
 
 export default function RiderQueue() {
   const theme = useTheme();
+  const router = useRouter();
   const user = useSessionStore((s) => s.user);
+  const { increment: incrementBadge } = useNotificationStore();
 
   const [profile, setProfile] = useState<RiderProfile | null>(null);
   const [activeDelivery, setActiveDelivery] = useState<ActiveDelivery | null>(null);
+  const [dispatchOffer, setDispatchOffer] = useState<DispatchOffer | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [togglingAvail, setTogglingAvail] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [offerLoading, setOfferLoading] = useState<"accept" | "reject" | null>(null);
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
@@ -82,19 +95,70 @@ export default function RiderQueue() {
         api.get<{ delivery: ActiveDelivery | null }>("/api/rider/active"),
       ]);
       setProfile(profileRes);
-      setActiveDelivery(activeRes.delivery);
+
+      const delivery = activeRes.delivery;
+      if (delivery?.status === "pending") {
+        // Rider missed the socket dispatch event — surface it as an offer card
+        setDispatchOffer({
+          deliveryId: delivery._id,
+          orderId: delivery.order._id,
+          stationName: delivery.station?.name,
+          stationAddress: delivery.station?.address,
+          fuelName: delivery.order?.fuel?.name,
+          quantity: delivery.order?.quantity,
+          unit: delivery.order?.fuel?.unit,
+          riderEarnings: delivery.riderEarnings,
+        });
+        setActiveDelivery(null);
+      } else {
+        setActiveDelivery(delivery);
+        // Clear any stale offer if we now have an active delivery
+        if (delivery) setDispatchOffer(null);
+      }
     } catch {
-      // silently fail — stale data
+      // silently fail
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useFocusEffect(useCallback(() => {
+    load();
+    // Poll every 30 s while on screen — catches missed socket events
+    const poll = setInterval(load, 30_000);
+    return () => clearInterval(poll);
+  }, [load]));
 
-  // ── Location polling ────────────────────────────────────────────────────
-  // Poll every 30 s while rider is online or has an active delivery.
+  // ── Socket listeners ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const onDispatch = (data: DispatchOffer) => setDispatchOffer(data);
+
+    const onOrderUpdate = ({ orderId, status }: { orderId: string; status: string }) => {
+      setActiveDelivery((prev) => {
+        if (!prev || prev.order._id !== orderId) return prev;
+        if (status === "cancelled") { return null; }
+        return prev;
+      });
+    };
+
+    // Wire notification badge increment for riders
+    const onNotification = () => incrementBadge();
+
+    socket.on("delivery:dispatch", onDispatch);
+    socket.on("order:update", onOrderUpdate);
+    socket.on("notification:new", onNotification);
+    return () => {
+      socket.off("delivery:dispatch", onDispatch);
+      socket.off("order:update", onOrderUpdate);
+      socket.off("notification:new", onNotification);
+    };
+  }, [incrementBadge]);
+
+  // ── Location polling + socket emit ────────────────────────────────────────
   useEffect(() => {
     const shouldPoll = profile?.isAvailable || !!activeDelivery;
 
@@ -104,26 +168,23 @@ export default function RiderQueue() {
 
       const sendLocation = async () => {
         try {
-          const loc = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          await api.patch("/api/rider/location", {
-            lat: loc.coords.latitude,
-            lng: loc.coords.longitude,
-          });
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          const lat = loc.coords.latitude;
+          const lng = loc.coords.longitude;
+          await api.patch("/api/rider/location", { lat, lng });
+          // Emit real-time location to customer tracking screen
+          const socket = getSocket();
+          socket?.emit("rider:location", { lat, lng });
         } catch {
-          // location update is best-effort — never block the UI
+          // best-effort
         }
       };
 
-      // Send once immediately, then on interval
       sendLocation();
       locationIntervalRef.current = setInterval(sendLocation, LOCATION_POLL_MS);
     };
 
-    if (shouldPoll) {
-      startPolling();
-    }
+    if (shouldPoll) startPolling();
 
     return () => {
       if (locationIntervalRef.current) {
@@ -133,15 +194,11 @@ export default function RiderQueue() {
     };
   }, [profile?.isAvailable, activeDelivery]);
 
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    load();
-  }, [load]);
+  const onRefresh = useCallback(() => { setRefreshing(true); load(); }, [load]);
 
   const toggleAvailability = useCallback(async (value: boolean) => {
     if (!profile) return;
     setTogglingAvail(true);
-    // Optimistic update
     setProfile((p) => p ? { ...p, isAvailable: value } : p);
     try {
       await api.patch("/api/rider/availability", { isAvailable: value });
@@ -153,295 +210,770 @@ export default function RiderQueue() {
     }
   }, [profile]);
 
-  const handlePickup = useCallback(async () => {
-    if (!activeDelivery) return;
-    Alert.alert("Confirm Pickup", "Confirm you have collected the fuel from the station.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Confirm Pickup",
-        onPress: async () => {
-          setActionLoading(true);
-          try {
-            await api.patch(`/api/rider/deliveries/${activeDelivery._id}/pickup`);
-            setActiveDelivery((d) => d ? { ...d, status: "picked_up", pickupTime: new Date().toISOString() } : d);
-            toast.success("Pickup confirmed", { description: "Head to the delivery address." });
-          } catch (err: any) {
-            toast.error("Failed to confirm pickup", { description: err.message });
-          } finally {
-            setActionLoading(false);
-          }
-        },
-      },
-    ]);
-  }, [activeDelivery]);
+  const handleAcceptOffer = useCallback(async () => {
+    if (!dispatchOffer) return;
+    setOfferLoading("accept");
+    try {
+      await api.patch(`/api/rider/deliveries/${dispatchOffer.deliveryId}/accept`);
+      setDispatchOffer(null);
+      toast.success("Delivery accepted!", { description: "Head to the pickup station." });
+      await load();
+    } catch (err: any) {
+      toast.error("Failed to accept", { description: err.message });
+      setDispatchOffer(null);
+    } finally {
+      setOfferLoading(null);
+    }
+  }, [dispatchOffer, load]);
 
-  const handleComplete = useCallback(async () => {
-    if (!activeDelivery) return;
-    Alert.alert("Complete Delivery", "Confirm the fuel has been delivered to the customer.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Complete",
-        onPress: async () => {
-          setActionLoading(true);
-          try {
-            await api.patch(`/api/rider/deliveries/${activeDelivery._id}/complete`);
-            setActiveDelivery(null);
-            // Refresh profile to update totalDeliveries
-            const updated = await api.get<RiderProfile>("/api/rider/profile");
-            setProfile(updated);
-            toast.success("Delivery complete!", { description: "Earnings have been recorded." });
-          } catch (err: any) {
-            toast.error("Failed to complete delivery", { description: err.message });
-          } finally {
-            setActionLoading(false);
-          }
-        },
-      },
-    ]);
-  }, [activeDelivery]);
+  const handleRejectOffer = useCallback(async () => {
+    if (!dispatchOffer) return;
+    setOfferLoading("reject");
+    try {
+      await api.patch(`/api/rider/deliveries/${dispatchOffer.deliveryId}/reject`);
+    } catch {
+      // silently ignore
+    } finally {
+      setDispatchOffer(null);
+      setOfferLoading(null);
+    }
+  }, [dispatchOffer]);
+
+
+  const isAvailable = profile?.isAvailable ?? false;
+  const s = styles(theme);
 
   if (loading) {
     return (
       <SafeAreaView style={[s.safe, { backgroundColor: theme.background }]}>
-        <View style={s.center}>
-          <ActivityIndicator size="large" color={theme.primary} />
-        </View>
+        <View style={s.center}><ActivityIndicator size="large" color={theme.primary} /></View>
       </SafeAreaView>
     );
   }
-
-  const isAvailable = profile?.isAvailable ?? false;
 
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: theme.background }]}>
       <ScrollView
         contentContainerStyle={s.scroll}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.primary}
+          />
+        }
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
+        {/* ── Header ── */}
         <View style={s.header}>
           <View>
-            <Text style={[s.greeting, { color: theme.icon }]}>Rider</Text>
-            <Text style={[s.name, { color: theme.text }]}>{user?.displayName ?? "Rider"}</Text>
-          </View>
-          {profile?.isVerified && (
-            <View style={[s.badge, { backgroundColor: theme.tertiary }]}>
-              <Ionicons name="shield-checkmark" size={14} color={theme.secondary} />
-              <Text style={[s.badgeText, { color: theme.secondary }]}>Verified</Text>
+            <Text style={[s.greeting, { color: theme.icon }]}>Good day,</Text>
+            <View
+              style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}
+            >
+              <Text style={[s.name, { color: theme.text }]}>
+                {user?.displayName ?? "Rider"}
+              </Text>
+              <View
+                style={[
+                  s.statusDotIndicator,
+                  { backgroundColor: isAvailable ? "#10B981" : "#888888" },
+                ]}
+              />
             </View>
-          )}
+          </View>
+
+          <View style={s.headerRight}>
+            <NotificationButton
+              onPress={() => router.push("/(screens)/notification" as any)}
+            />
+            <ProfileButton
+              onPress={() => router.push("/(rider)/(queue)/profile" as any)}
+              size={40}
+            />
+          </View>
         </View>
 
-        {/* Profile Card */}
-        {profile && (
-          <View style={[s.profileCard, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
-            <View style={s.profileRow}>
-              <View style={[s.vehicleIcon, { backgroundColor: theme.tertiary }]}>
-                <Ionicons
-                  name={VEHICLE_ICON[profile.vehicleType] ?? "bicycle"}
-                  size={24}
-                  color={theme.primary}
+        {/* ── Stat Row ── */}
+        <View style={s.statsRow}>
+          {/* Trips / Completed Deliveries */}
+          <View
+            style={[
+              s.statCard,
+              { backgroundColor: "#2196F311", borderColor: "#2196F333" },
+            ]}
+          >
+            <Ionicons
+              name="checkmark-circle-outline"
+              size={20}
+              color="#2196F3"
+            />
+            <Text style={[s.statValue, { color: theme.text }]}>
+              {profile?.totalDeliveries ?? 0}
+            </Text>
+            <Text style={[s.statLabel, { color: theme.icon }]}>Trips</Text>
+          </View>
+
+          {/* Rating */}
+          <View
+            style={[
+              s.statCard,
+              { backgroundColor: "#F59E0B11", borderColor: "#F59E0B33" },
+            ]}
+          >
+            <Ionicons name="star-outline" size={20} color="#F59E0B" />
+            <Text style={[s.statValue, { color: theme.text }]}>
+              {profile?.rating?.toFixed(1) ?? 0}
+            </Text>
+            <Text style={[s.statLabel, { color: theme.icon }]}>Rating</Text>
+          </View>
+
+          {/* Earnings Today */}
+          <View
+            style={[
+              s.statCard,
+              {
+                backgroundColor: theme.accentLight,
+                borderColor: theme.accent + "33",
+              },
+            ]}
+          >
+            <Ionicons name="cash-outline" size={20} color={theme.accent} />
+            <Text style={[s.statValue, { color: theme.text }]}>
+              {fmtCurrency(profile?.todaysEarnings ?? 0)}
+            </Text>
+            <Text style={[s.statLabel, { color: theme.icon }]}>Today</Text>
+          </View>
+        </View>
+
+        {/* ── Availability toggle ── */}
+        {profile && !activeDelivery && (
+          <View
+            style={[
+              s.toggleCard,
+              { backgroundColor: theme.surface, borderColor: theme.borderMid },
+            ]}
+          >
+            <View style={s.toggleLeft}>
+              <View
+                style={[
+                  s.toggleIcon,
+                  {
+                    backgroundColor: isAvailable
+                      ? "#10B981" + "18"
+                      : theme.tertiary,
+                  },
+                ]}
+              >
+                <MaterialIcons
+                  name={isAvailable ? "sensors" : "wifi-off"}
+                  size={20}
+                  color={isAvailable ? "#10B981" : theme.icon}
                 />
               </View>
-              <View style={s.profileInfo}>
-                <Text style={[s.vehicleType, { color: theme.text }]}>
-                  {profile.vehicleType.charAt(0).toUpperCase() + profile.vehicleType.slice(1)}
+              <View>
+                <Text style={[s.toggleTitle, { color: theme.text }]}>
+                  {isAvailable ? "You're Online" : "You're Offline"}
                 </Text>
-                <Text style={[s.vehiclePlate, { color: theme.icon }]}>{profile.vehiclePlate}</Text>
+                <Text style={[s.toggleSub, { color: theme.icon }]}>
+                  {isAvailable
+                    ? "Accepting delivery requests"
+                    : "Toggle to start receiving orders"}
+                </Text>
               </View>
-              <View style={s.statsGroup}>
-                <View style={s.statItem}>
-                  <Text style={[s.statVal, { color: theme.text }]}>{profile.totalDeliveries}</Text>
-                  <Text style={[s.statLbl, { color: theme.icon }]}>Trips</Text>
-                </View>
-                <View style={s.statItem}>
-                  <Text style={[s.statVal, { color: theme.text }]}>
-                    {profile.rating > 0 ? profile.rating.toFixed(1) : "—"}
+            </View>
+            <Switch
+              value={isAvailable}
+              onValueChange={toggleAvailability}
+              disabled={togglingAvail}
+              trackColor={{ false: theme.ash, true: "#10B981" + "66" }}
+              thumbColor={isAvailable ? "#10B981" : theme.icon}
+            />
+          </View>
+        )}
+
+        {/* ── Incoming dispatch offer ── */}
+        {dispatchOffer && (
+          <View
+            style={[
+              s.offerCard,
+              { backgroundColor: theme.surface, borderColor: theme.primary },
+            ]}
+          >
+            {/* Colored top strip */}
+            <View style={[s.offerStrip, { backgroundColor: theme.primary }]}>
+              <View style={s.offerStripLeft}>
+                <Ionicons name="flash" size={14} color="#fff" />
+                <Text style={s.offerStripText}>New Delivery Request</Text>
+              </View>
+              <Text style={s.offerStripEarning}>
+                +{fmtCurrency(dispatchOffer.riderEarnings)}
+              </Text>
+            </View>
+
+            <View style={s.offerBody}>
+              {/* Pickup station */}
+              <View style={s.offerRow}>
+                <View
+                  style={[s.offerDot, { backgroundColor: theme.primary }]}
+                />
+                <View style={s.offerLocText}>
+                  <Text style={[s.offerLocLabel, { color: theme.icon }]}>
+                    Pickup from
                   </Text>
-                  <Text style={[s.statLbl, { color: theme.icon }]}>Rating</Text>
+                  <Text style={[s.offerLocName, { color: theme.text }]}>
+                    {dispatchOffer.stationName}
+                  </Text>
+                  {dispatchOffer.stationAddress ? (
+                    <Text
+                      style={[s.offerLocAddr, { color: theme.icon }]}
+                      numberOfLines={1}
+                    >
+                      {dispatchOffer.stationAddress}
+                    </Text>
+                  ) : null}
                 </View>
+              </View>
+
+              {/* Connector line */}
+              <View style={[s.offerConnector, { borderColor: theme.ash }]} />
+
+              {/* Fuel info chip */}
+              <View
+                style={[s.offerFuelChip, { backgroundColor: theme.tertiary }]}
+              >
+                <Ionicons
+                  name="water-outline"
+                  size={13}
+                  color={theme.primary}
+                />
+                <Text style={[s.offerFuelText, { color: theme.text }]}>
+                  {dispatchOffer.quantity} {dispatchOffer.unit} ·{" "}
+                  {dispatchOffer.fuelName}
+                </Text>
               </View>
             </View>
 
-            {/* Availability Toggle */}
-            <View style={[s.availRow, { borderTopColor: theme.ash }]}>
-              <View style={s.availLeft}>
-                <View
-                  style={[
-                    s.availDot,
-                    { backgroundColor: isAvailable ? theme.success : theme.error },
-                  ]}
-                />
-                <Text style={[s.availText, { color: theme.text }]}>
-                  {isAvailable ? "Online — accepting deliveries" : "Offline"}
-                </Text>
-              </View>
-              <Switch
-                value={isAvailable}
-                onValueChange={toggleAvailability}
-                disabled={togglingAvail || !!activeDelivery}
-                trackColor={{ false: theme.ash, true: theme.secondary + "66" }}
-                thumbColor={isAvailable ? theme.secondary : theme.icon}
-              />
+            <View style={[s.offerDivider, { backgroundColor: theme.ash }]} />
+
+            <View style={s.offerActions}>
+              <TouchableOpacity
+                style={[
+                  s.offerBtn,
+                  s.offerBtnReject,
+                  { borderColor: theme.error },
+                ]}
+                onPress={handleRejectOffer}
+                disabled={!!offerLoading}
+                activeOpacity={0.8}
+              >
+                {offerLoading === "reject" ? (
+                  <ActivityIndicator size="small" color={theme.error} />
+                ) : (
+                  <Text style={[s.offerBtnText, { color: theme.error }]}>
+                    Decline
+                  </Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  s.offerBtn,
+                  s.offerBtnAccept,
+                  { backgroundColor: theme.primary },
+                ]}
+                onPress={handleAcceptOffer}
+                disabled={!!offerLoading}
+                activeOpacity={0.8}
+              >
+                {offerLoading === "accept" ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark" size={16} color="#fff" />
+                    <Text style={[s.offerBtnText, { color: "#fff" }]}>
+                      Accept
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
             </View>
           </View>
         )}
 
-        {/* Active Delivery */}
-        {activeDelivery ? (
-          <View style={[s.deliveryCard, { backgroundColor: theme.surface, borderColor: theme.primary }]}>
-            <View style={s.deliveryHeader}>
-              <View style={[s.deliveryBadge, { backgroundColor: theme.primary + "22" }]}>
-                <Text style={[s.deliveryBadgeText, { color: theme.primary }]}>
-                  {activeDelivery.status === "picked_up" ? "In Transit" : "Active"}
+        {/* ── Active delivery redirect card ── */}
+        {activeDelivery && (
+          <TouchableOpacity
+            style={[
+              s.activeCard,
+              { backgroundColor: theme.surface, borderColor: theme.primary },
+            ]}
+            onPress={() => router.navigate("/(rider)/(queue)/track" as any)}
+            activeOpacity={0.85}
+          >
+            {/* Top strip */}
+            <View style={[s.activeStrip, { backgroundColor: theme.primary }]}>
+              <View style={s.activeStripLeft}>
+                <Ionicons name="navigate" size={14} color="#fff" />
+                <Text style={s.activeStripText}>
+                  {activeDelivery.status === "awaiting_confirmation"
+                    ? "Awaiting Customer Confirmation"
+                    : activeDelivery.status === "picked_up"
+                      ? "In Transit · Delivering"
+                      : "Active Delivery"}
                 </Text>
               </View>
-              <Text style={[s.earning, { color: theme.primary }]}>
+              <Text style={s.activeStripEarnings}>
                 +{fmtCurrency(activeDelivery.riderEarnings)}
               </Text>
             </View>
 
-            <View style={s.deliveryBody}>
-              {/* Station pickup */}
-              <View style={s.locationRow}>
-                <Ionicons name="location" size={16} color={theme.secondary} />
-                <View style={s.locationText}>
-                  <Text style={[s.locationLabel, { color: theme.icon }]}>Pickup from</Text>
-                  <Text style={[s.locationName, { color: theme.text }]} numberOfLines={1}>
-                    {activeDelivery.station?.name}
+            {/* Route body */}
+            <View style={s.activeBody}>
+              {/* Station */}
+              <View style={s.activeRow}>
+                <View
+                  style={[s.activeDot, { backgroundColor: theme.primary }]}
+                />
+                <View style={s.activeLocText}>
+                  <Text style={[s.activeLocLabel, { color: theme.icon }]}>
+                    Pickup from
                   </Text>
-                  <Text style={[s.locationAddr, { color: theme.icon }]} numberOfLines={1}>
-                    {activeDelivery.station?.address}
+                  <Text
+                    style={[s.activeLocName, { color: theme.text }]}
+                    numberOfLines={1}
+                  >
+                    {activeDelivery.station.name}
+                  </Text>
+                  {activeDelivery.station.address ? (
+                    <Text
+                      style={[s.activeLocAddr, { color: theme.icon }]}
+                      numberOfLines={1}
+                    >
+                      {activeDelivery.station.address}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+
+              <View style={[s.activeConnector, { borderColor: theme.ash }]} />
+
+              {/* Delivery address */}
+              <View style={s.activeRow}>
+                <View style={[s.activeDot, { backgroundColor: "#7C3AED" }]} />
+                <View style={s.activeLocText}>
+                  <Text style={[s.activeLocLabel, { color: theme.icon }]}>
+                    Deliver to
+                  </Text>
+                  <Text
+                    style={[s.activeLocName, { color: theme.text }]}
+                    numberOfLines={1}
+                  >
+                    {activeDelivery.order.user.displayName}
+                  </Text>
+                  <Text
+                    style={[s.activeLocAddr, { color: theme.icon }]}
+                    numberOfLines={1}
+                  >
+                    {activeDelivery.order.deliveryAddress.street},{" "}
+                    {activeDelivery.order.deliveryAddress.city}
                   </Text>
                 </View>
               </View>
 
-              {/* Customer drop-off */}
-              <View style={s.locationRow}>
-                <Ionicons name="navigate" size={16} color={theme.error} />
-                <View style={s.locationText}>
-                  <Text style={[s.locationLabel, { color: theme.icon }]}>Deliver to</Text>
-                  <Text style={[s.locationName, { color: theme.text }]}>
-                    {activeDelivery.order?.user?.displayName}
-                  </Text>
-                  <Text style={[s.locationAddr, { color: theme.icon }]} numberOfLines={2}>
-                    {activeDelivery.order?.deliveryAddress?.street},{" "}
-                    {activeDelivery.order?.deliveryAddress?.city}
+              {/* Fuel chip + tap cue */}
+              <View style={s.activeFooter}>
+                <View
+                  style={[
+                    s.activeFuelChip,
+                    { backgroundColor: theme.tertiary },
+                  ]}
+                >
+                  <Ionicons
+                    name="water-outline"
+                    size={12}
+                    color={theme.primary}
+                  />
+                  <Text style={[s.activeFuelText, { color: theme.text }]}>
+                    {activeDelivery.order.quantity}{" "}
+                    {activeDelivery.order.fuel.unit} ·{" "}
+                    {activeDelivery.order.fuel.name}
                   </Text>
                 </View>
+                <View style={s.activeCue}>
+                  <Text style={[s.activeCueText, { color: theme.primary }]}>
+                    Open
+                  </Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={14}
+                    color={theme.primary}
+                  />
+                </View>
               </View>
+            </View>
+          </TouchableOpacity>
+        )}
 
-              {/* Order info */}
-              <View style={[s.orderInfo, { backgroundColor: theme.tertiary }]}>
-                <Ionicons name="water-outline" size={15} color={theme.primary} />
-                <Text style={[s.orderInfoText, { color: theme.text }]}>
-                  {activeDelivery.order?.quantity} {activeDelivery.order?.fuel?.unit} ·{" "}
-                  {activeDelivery.order?.fuel?.name}
-                </Text>
-                <Text style={[s.orderTotal, { color: theme.primary }]}>
-                  {fmtCurrency(activeDelivery.order?.totalPrice)}
+        {/* ── Idle states ── */}
+        {!activeDelivery &&
+          !dispatchOffer &&
+          (isAvailable ? (
+            <View style={[s.idleCard, { backgroundColor: theme.tertiary }]}>
+              <View
+                style={[
+                  s.idleIconWrap,
+                  {
+                    backgroundColor: isAvailable
+                      ? "#10B98133" // 20% opacity green
+                      : theme.tertiary,
+                  },
+                ]}
+              >
+                <MaterialIcons
+                  name={isAvailable ? "sensors" : "wifi-off"}
+                  size={32}
+                  color={isAvailable ? "#10B981" : theme.icon}
+                />
+              </View>
+              <Text style={[s.idleTitle, { color: theme.text }]}>
+                Waiting for orders
+              </Text>
+              <Text style={[s.idleSub, { color: theme.icon }]}>
+                You're online and visible to the dispatch system. Delivery
+                requests will appear here automatically.
+              </Text>
+              <View
+                style={[
+                  s.idleTip,
+                  {
+                    backgroundColor: theme.primary + "12",
+                    borderColor: theme.primary + "33",
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="location-outline"
+                  size={14}
+                  color={theme.primary}
+                />
+                <Text style={[s.idleTipText, { color: theme.primary }]}>
+                  Location is being shared every 30s
                 </Text>
               </View>
             </View>
-
-            {/* Action buttons */}
-            {activeDelivery.status === "accepted" && (
-              <TouchableOpacity
-                style={[s.actionBtn, { backgroundColor: theme.primary }]}
-                onPress={handlePickup}
-                disabled={actionLoading}
+          ) : (
+            <View
+              style={[
+                s.idleCard,
+                {
+                  backgroundColor: theme.skeletonShimmer,
+                },
+              ]}
+            >
+              <View
+                style={[s.idleIconWrap, { backgroundColor: theme.ash + "55" }]}
               >
-                {actionLoading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
-                    <Text style={s.actionBtnText}>Confirm Pickup</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
+                <MaterialIcons name="wifi-off" size={32} color={theme.icon} />
+              </View>
+              <Text style={[s.idleTitle, { color: theme.text }]}>
+                You're Offline
+              </Text>
+              <Text style={[s.idleSub, { color: theme.icon }]}>
+                Toggle the switch above to go online and start receiving
+                delivery requests.
+              </Text>
+            </View>
+          ))}
 
-            {activeDelivery.status === "picked_up" && (
-              <TouchableOpacity
-                style={[s.actionBtn, { backgroundColor: theme.success }]}
-                onPress={handleComplete}
-                disabled={actionLoading}
-              >
-                {actionLoading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="flag-outline" size={20} color="#fff" />
-                    <Text style={s.actionBtnText}>Mark as Delivered</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
-        ) : isAvailable ? (
-          <View style={[s.waitCard, { backgroundColor: theme.tertiary }]}>
-            <Ionicons name="radio-outline" size={32} color={theme.primary} />
-            <Text style={[s.waitTitle, { color: theme.text }]}>Waiting for orders</Text>
-            <Text style={[s.waitSub, { color: theme.icon }]}>
-              You're online. Orders will appear here when dispatched to you.
-            </Text>
-          </View>
-        ) : (
-          <View style={[s.waitCard, { backgroundColor: theme.surface, borderColor: theme.ash, borderWidth: 1 }]}>
-            <Ionicons name="moon-outline" size={32} color={theme.icon} />
-            <Text style={[s.waitTitle, { color: theme.text }]}>You're offline</Text>
-            <Text style={[s.waitSub, { color: theme.icon }]}>
-              Toggle the switch above to go online and start receiving delivery requests.
-            </Text>
-          </View>
-        )}
+        {/* ── Promo banner ── */}
+        <RiderPromoBanner />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const s = StyleSheet.create({
-  safe: { flex: 1 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  scroll: { padding: 20, gap: 16, paddingBottom: 40 },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  greeting: { fontSize: 13 },
-  name: { fontSize: 22, fontWeight: "700", marginTop: 2 },
-  badge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  badgeText: { fontSize: 12, fontWeight: "600" },
-  profileCard: { borderRadius: 14, borderWidth: 1, overflow: "hidden" },
-  profileRow: { flexDirection: "row", alignItems: "center", padding: 14, gap: 12 },
-  vehicleIcon: { width: 48, height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  profileInfo: { flex: 1 },
-  vehicleType: { fontSize: 15, fontWeight: "700" },
-  vehiclePlate: { fontSize: 13, marginTop: 2 },
-  statsGroup: { flexDirection: "row", gap: 16 },
-  statItem: { alignItems: "center" },
-  statVal: { fontSize: 16, fontWeight: "700" },
-  statLbl: { fontSize: 11 },
-  availRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 14, paddingVertical: 12, borderTopWidth: 1 },
-  availLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
-  availDot: { width: 8, height: 8, borderRadius: 4 },
-  availText: { fontSize: 13 },
-  deliveryCard: { borderRadius: 14, borderWidth: 1.5, overflow: "hidden" },
-  deliveryHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10 },
-  deliveryBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-  deliveryBadgeText: { fontSize: 12, fontWeight: "700" },
-  earning: { fontSize: 16, fontWeight: "700" },
-  deliveryBody: { paddingHorizontal: 14, gap: 12, paddingBottom: 14 },
-  locationRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
-  locationText: { flex: 1 },
-  locationLabel: { fontSize: 11 },
-  locationName: { fontSize: 14, fontWeight: "600", marginTop: 1 },
-  locationAddr: { fontSize: 12, marginTop: 1 },
-  orderInfo: { flexDirection: "row", alignItems: "center", gap: 8, padding: 10, borderRadius: 10 },
-  orderInfoText: { flex: 1, fontSize: 13 },
-  orderTotal: { fontSize: 13, fontWeight: "700" },
-  actionBtn: { margin: 14, marginTop: 4, height: 48, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  actionBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
-  waitCard: { borderRadius: 14, padding: 32, alignItems: "center", gap: 10 },
-  waitTitle: { fontSize: 16, fontWeight: "700" },
-  waitSub: { fontSize: 13, lineHeight: 20, textAlign: "center" },
-});
+const styles = (
+  theme: ReturnType<typeof import("@/constants/theme").useTheme>,
+) =>
+  StyleSheet.create({
+    safe: { flex: 1 },
+    center: { flex: 1, justifyContent: "center", alignItems: "center" },
+    scroll: { padding: 20, gap: 14, paddingBottom: 110 },
+
+    header: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+    },
+    greeting: { fontSize: 13 },
+    name: { fontSize: 22, fontWeight: "700", marginTop: 2 },
+    headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
+
+    statusBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      borderRadius: 14,
+      borderWidth: 1,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+    statItem: { flex: 1, alignItems: "center" },
+    statVal: { fontSize: 16, fontWeight: "700" },
+    statLbl: { fontSize: 11, marginTop: 1 },
+    statDivider: { width: 1, height: 28, marginHorizontal: 8 },
+    statusPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 20,
+    },
+    statusDot: { width: 7, height: 7, borderRadius: 4 },
+    statusPillText: { fontSize: 12, fontWeight: "700" },
+
+    toggleCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      borderRadius: 14,
+      borderWidth: 1,
+      padding: 14,
+    },
+    toggleLeft: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      flex: 1,
+    },
+    toggleIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    toggleTitle: { fontSize: 14, fontWeight: "600" },
+    toggleSub: { fontSize: 12, marginTop: 1 },
+
+    offerCard: { borderRadius: 16, borderWidth: 1.5, overflow: "hidden" },
+    offerStrip: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    offerStripLeft: { flexDirection: "row", alignItems: "center", gap: 6 },
+    offerStripText: { fontSize: 12, fontWeight: "700", color: "#fff" },
+    offerStripEarning: { fontSize: 15, fontWeight: "800", color: "#fff" },
+    offerEarning: { fontSize: 16, fontWeight: "700" },
+    offerBody: { paddingHorizontal: 14, gap: 8, paddingVertical: 12 },
+    offerRow: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
+    offerDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      marginTop: 5,
+      flexShrink: 0,
+    },
+    offerConnector: {
+      marginLeft: 4,
+      height: 14,
+      borderLeftWidth: 2,
+      borderStyle: "dashed",
+      marginVertical: -2,
+    },
+    offerLocText: { flex: 1 },
+    offerLocLabel: { fontSize: 11 },
+    offerLocName: { fontSize: 14, fontWeight: "600", marginTop: 1 },
+    offerLocAddr: { fontSize: 12, marginTop: 1 },
+    offerFuelChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      padding: 10,
+      borderRadius: 10,
+    },
+    offerFuelText: { fontSize: 13, flex: 1 },
+    offerDivider: { height: StyleSheet.hairlineWidth },
+    offerActions: { flexDirection: "row", gap: 10, padding: 12 },
+    offerBtn: {
+      flex: 1,
+      height: 44,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      flexDirection: "row",
+      gap: 6,
+    },
+    offerBtnReject: { borderWidth: 1.5, backgroundColor: "transparent" },
+    offerBtnAccept: {},
+    offerBtnText: { fontSize: 14, fontWeight: "700" },
+    activeCard: {
+      borderRadius: 16,
+      borderWidth: 1.5,
+      overflow: "hidden",
+    },
+
+    /* Top strip */
+    activeStrip: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    activeStripLeft: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    activeStripText: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: "#fff",
+    },
+    activeStripEarnings: {
+      fontSize: 15,
+      fontWeight: "800",
+      color: "#fff",
+    },
+
+    /* Body */
+    activeBody: {
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      gap: 10,
+    },
+
+    activeRow: {
+      flexDirection: "row",
+      gap: 12,
+      alignItems: "flex-start",
+    },
+
+    activeDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      marginTop: 5,
+      flexShrink: 0,
+    },
+
+    activeConnector: {
+      marginLeft: 4,
+      height: 16,
+      borderLeftWidth: 2,
+      borderStyle: "dashed",
+      marginVertical: -2,
+    },
+
+    activeLocText: {
+      flex: 1,
+    },
+
+    activeLocLabel: {
+      fontSize: 11,
+    },
+
+    activeLocName: {
+      fontSize: 14,
+      fontWeight: "600",
+      marginTop: 1,
+    },
+
+    activeLocAddr: {
+      fontSize: 12,
+      marginTop: 1,
+    },
+
+    /* Footer */
+    activeFooter: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: 4,
+    },
+
+    activeFuelChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 10,
+    },
+
+    activeFuelText: {
+      fontSize: 12,
+    },
+
+    activeCue: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 2,
+    },
+
+    activeCueText: {
+      fontSize: 12,
+      fontWeight: "600",
+    },
+    idleCard: { borderRadius: 16, padding: 32, alignItems: "center", gap: 12 },
+    idleIconWrap: {
+      width: 64,
+      height: 64,
+      borderRadius: 20,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    idleTitle: { fontSize: 17, fontWeight: "700" },
+    idleSub: { fontSize: 13, lineHeight: 20, textAlign: "center" },
+    idleTip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: 20,
+      borderWidth: 1,
+      marginTop: 4,
+    },
+    idleTipText: { fontSize: 12, fontWeight: "500" },
+
+    promoBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 14,
+      padding: 14,
+      borderRadius: 16,
+      borderWidth: 1,
+      marginTop: 4,
+    },
+    promoIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    promoText: { flex: 1 },
+    promoTitle: { fontSize: 13, fontWeight: "700", marginBottom: 3 },
+    promoSub: { fontSize: 12, lineHeight: 17 },
+    statsRow: { flexDirection: "row", gap: 12, marginVertical: 14 },
+    statCard: {
+      flex: 1,
+      borderRadius: 14,
+      borderWidth: 1,
+      paddingVertical: 12,
+      alignItems: "center",
+      gap: 4,
+    },
+    statValue: { fontSize: 16, fontWeight: "700" },
+    statLabel: { fontSize: 11, fontWeight: "500" },
+    statusDotIndicator: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+    },
+  });

@@ -9,6 +9,7 @@ import {
   FlatList,
   Dimensions,
   Pressable,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/constants/theme";
@@ -46,13 +47,16 @@ export default function OrderSummaryModal({
 
   const Row = ({ label, value, isTotal, valueColor }: any) => (
     <View style={[styles(theme).row, isTotal && { borderBottomWidth: 0, paddingBottom: 0 }]}>
-      <Text style={[styles(theme).rowLabel, isTotal && styles(theme).totalText]}>{label}</Text>
+      <Text style={[styles(theme).rowLabel, isTotal && styles(theme).totalText]} numberOfLines={1}>
+        {label}
+      </Text>
       <Text
         style={[
           styles(theme).rowValue,
           isTotal && styles(theme).totalText,
           valueColor && { color: valueColor },
         ]}
+        numberOfLines={2}
       >
         {value}
       </Text>
@@ -120,9 +124,22 @@ export default function OrderSummaryModal({
           <View style={styles(theme).actions}>
             <TouchableOpacity
               onPress={() => {
-                useOrderStore.getState().resetOrder();
-                if (onCancel) onCancel();
-                else onClose();
+                Alert.alert(
+                  "Cancel Order",
+                  "Are you sure you want to cancel this order? Your selections will be cleared.",
+                  [
+                    { text: "Keep Order", style: "cancel" },
+                    {
+                      text: "Cancel Order",
+                      style: "destructive",
+                      onPress: () => {
+                        useOrderStore.getState().resetOrder();
+                        if (onCancel) onCancel();
+                        else onClose();
+                      },
+                    },
+                  ]
+                );
               }}
               style={styles(theme).cancelBtn}
             >
@@ -142,7 +159,7 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
     overlay: {
       flex: 1,
-      backgroundColor: "transparent",
+      backgroundColor: "rgba(0,0,0,0.45)",
       justifyContent: "flex-end",
     },
     card: {
@@ -179,14 +196,16 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
       fontSize: 14,
       fontWeight: "300",
       color: theme.icon,
+      flex: 1,
     },
     rowValue: {
       fontSize: 14,
-      fontWeight: "400",
+      fontWeight: "500",
       color: theme.text,
       flexShrink: 1,
       textAlign: "right",
-      marginLeft: 12,
+      marginLeft: 24,
+      maxWidth: "55%",
     },
     totalText: {
       fontWeight: "500",

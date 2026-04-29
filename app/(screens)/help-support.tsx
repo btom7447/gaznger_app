@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   View,
   Text,
@@ -7,11 +7,20 @@ import {
   TouchableOpacity,
   StatusBar,
   Linking,
+  LayoutAnimation,
+  Platform,
+  UIManager,
+  Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { toast } from "sonner-native";
 import { useTheme } from "@/constants/theme";
 import BackButton from "@/components/ui/global/BackButton";
+
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const FAQS = [
   { q: "How do I place a fuel order?", a: "Tap a fuel type on the home screen, fill in quantity and delivery details, then confirm your order." },
@@ -21,6 +30,48 @@ const FAQS = [
   { q: "What payment methods are accepted?", a: "We currently support card payments via Paystack. More options coming soon." },
 ];
 
+function FaqItem({ faq, isExpanded, onToggle }: { faq: typeof FAQS[0]; isExpanded: boolean; onToggle: () => void }) {
+  const theme = useTheme();
+  const s = styles(theme);
+  const rotation = useRef(new Animated.Value(isExpanded ? 1 : 0)).current;
+
+  const handleToggle = () => {
+    LayoutAnimation.configureNext({
+      duration: 250,
+      create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+      update: { type: LayoutAnimation.Types.easeInEaseOut },
+    });
+    Animated.timing(rotation, {
+      toValue: isExpanded ? 0 : 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+    onToggle();
+  };
+
+  const rotate = rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] });
+
+  return (
+    <TouchableOpacity
+      style={[s.faqCard, { backgroundColor: theme.surface, borderColor: isExpanded ? theme.primary : theme.ash }]}
+      onPress={handleToggle}
+      activeOpacity={0.75}
+    >
+      <View style={s.faqHeader}>
+        <Text style={[s.faqQ, { color: theme.text, flex: 1 }]}>{faq.q}</Text>
+        <Animated.View style={{ transform: [{ rotate }] }}>
+          <Ionicons name="chevron-down" size={16} color={isExpanded ? theme.primary : theme.icon} />
+        </Animated.View>
+      </View>
+      {isExpanded && (
+        <View style={[s.faqAnswerWrap, { borderTopColor: theme.ash }]}>
+          <Text style={[s.faqA, { color: theme.icon }]}>{faq.a}</Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
+
 export default function HelpSupportScreen() {
   const theme = useTheme();
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -28,7 +79,7 @@ export default function HelpSupportScreen() {
 
   const CONTACT = [
     { id: "email", label: "Email Support", value: "support@gaznger.com", icon: "mail-outline" as const, onPress: () => Linking.openURL("mailto:support@gaznger.com") },
-    { id: "chat", label: "Live Chat", value: "Chat with an agent", icon: "chatbubbles-outline" as const, onPress: () => {} },
+    { id: "chat", label: "Live Chat", value: "Chat with an agent", icon: "chatbubbles-outline" as const, onPress: () => toast.info("Live Chat", { description: "Live chat is coming soon — email us in the meantime!" }) },
     { id: "call", label: "Call Us", value: "+234 800 000 0000", icon: "call-outline" as const, onPress: () => Linking.openURL("tel:+2348000000000") },
   ];
 
@@ -42,7 +93,6 @@ export default function HelpSupportScreen() {
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-        {/* Contact options */}
         <Text style={s.sectionTitle}>Contact Us</Text>
         {CONTACT.map((item) => (
           <TouchableOpacity
@@ -62,27 +112,14 @@ export default function HelpSupportScreen() {
           </TouchableOpacity>
         ))}
 
-        {/* FAQs */}
         <Text style={[s.sectionTitle, { marginTop: 24 }]}>FAQs</Text>
         {FAQS.map((faq, i) => (
-          <TouchableOpacity
+          <FaqItem
             key={i}
-            style={[s.faqCard, { backgroundColor: theme.surface, borderColor: theme.ash }]}
-            onPress={() => setExpanded(expanded === i ? null : i)}
-            activeOpacity={0.75}
-          >
-            <View style={s.faqHeader}>
-              <Text style={[s.faqQ, { color: theme.text, flex: 1 }]}>{faq.q}</Text>
-              <Ionicons
-                name={expanded === i ? "chevron-up" : "chevron-down"}
-                size={16}
-                color={theme.icon}
-              />
-            </View>
-            {expanded === i && (
-              <Text style={[s.faqA, { color: theme.icon }]}>{faq.a}</Text>
-            )}
-          </TouchableOpacity>
+            faq={faq}
+            isExpanded={expanded === i}
+            onToggle={() => setExpanded(expanded === i ? null : i)}
+          />
         ))}
       </ScrollView>
     </SafeAreaView>
@@ -99,7 +136,7 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
     headerTitle: { fontSize: 17, fontWeight: "500", color: theme.text },
     scroll: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 32 },
     sectionTitle: {
-      fontSize: 12, fontWeight: "400", color: theme.icon,
+      fontSize: 11, fontWeight: "600", color: theme.icon,
       marginBottom: 10, paddingLeft: 2,
       textTransform: "uppercase", letterSpacing: 0.8,
     },
@@ -112,9 +149,16 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
     rowLabel: { fontSize: 14, fontWeight: "400", marginBottom: 2 },
     rowDesc: { fontSize: 12, fontWeight: "300" },
     faqCard: {
-      padding: 14, borderRadius: 16, borderWidth: 1, marginBottom: 10,
+      borderRadius: 16, borderWidth: 1, marginBottom: 10, overflow: "hidden",
     },
-    faqHeader: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+    faqHeader: {
+      flexDirection: "row", alignItems: "center", gap: 8,
+      padding: 14,
+    },
     faqQ: { fontSize: 14, fontWeight: "400", lineHeight: 20 },
-    faqA: { fontSize: 13, fontWeight: "300", lineHeight: 20, marginTop: 10 },
+    faqAnswerWrap: {
+      paddingHorizontal: 14, paddingBottom: 14, paddingTop: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+    },
+    faqA: { fontSize: 13, fontWeight: "300", lineHeight: 20 },
   });

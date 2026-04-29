@@ -1,7 +1,14 @@
 import React from "react";
-import { View, Text, FlatList, StyleSheet, Image } from "react-native";
+import { View, Text, FlatList, StyleSheet, Image, ImageSourcePropType } from "react-native";
 import { useTheme } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
+
+const FUEL_LOCAL_ICON: Record<string, ImageSourcePropType> = {
+  petrol: require("../../../assets/icons/fuel/petrol-icon.png"),
+  diesel: require("../../../assets/icons/fuel/diesel-icon.png"),
+  gas:    require("../../../assets/icons/fuel/gas-icon.png"),
+  oil:    require("../../../assets/icons/fuel/oil-icon.png"),
+};
 
 export default function FuelPriceTicker() {
   const theme = useTheme();
@@ -11,31 +18,31 @@ export default function FuelPriceTicker() {
 
   return (
     <View style={styles.wrapper}>
-      <Text style={[styles.heading, { color: theme.icon }]}>Market Prices</Text>
+      <Text style={[styles.heading, { color: theme.text }]}>Market Prices</Text>
       <FlatList
         data={fuelTypes}
         horizontal
         showsHorizontalScrollIndicator={false}
         keyExtractor={(item) => item._id}
         contentContainerStyle={styles.list}
-        renderItem={({ item }) => (
-          <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
-            <View style={[styles.iconWrap, { backgroundColor: theme.tertiary }]}>
-              {item.icon ? (
-                <Image source={{ uri: item.icon }} style={styles.icon} resizeMode="contain" />
-              ) : (
-                <Text style={[styles.iconFallback, { color: theme.icon }]}>⛽</Text>
-              )}
+        renderItem={({ item }) => {
+          const localIcon = FUEL_LOCAL_ICON[item.name.toLowerCase()] ?? FUEL_LOCAL_ICON.petrol;
+          return (
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
+              <View style={[styles.iconWrap, { backgroundColor: theme.tertiary }]}>
+                <Image
+                  source={item.icon ? { uri: item.icon } : localIcon}
+                  style={styles.icon}
+                  resizeMode="contain"
+                />
+              </View>
+              <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
+                {item.name}
+              </Text>
+              <Text style={[styles.unit, { color: theme.icon }]}>per {item.unit}</Text>
             </View>
-            <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
-              {item.name}
-            </Text>
-            <Text style={[styles.price, { color: theme.primary }]}>
-              {item.pricePerUnit != null ? `₦${item.pricePerUnit}` : "Market"}
-            </Text>
-            <Text style={[styles.unit, { color: theme.icon }]}>per {item.unit}</Text>
-          </View>
-        )}
+          );
+        }}
       />
     </View>
   );
@@ -43,7 +50,7 @@ export default function FuelPriceTicker() {
 
 const styles = StyleSheet.create({
   wrapper: { marginBottom: 16 },
-  heading: { fontSize: 12, fontWeight: "400", marginBottom: 10, letterSpacing: 0.3 },
+  heading: { fontSize: 15, fontWeight: "500", marginBottom: 12 },
   list: { gap: 10 },
   card: {
     width: 110,
@@ -54,15 +61,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   iconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
   },
-  icon: { width: 28, height: 28 },
-  iconFallback: { fontSize: 20 },
+  icon: { width: 32, height: 32 },
   name: { fontSize: 12, fontWeight: "400", textAlign: "center", marginBottom: 4 },
   price: { fontSize: 14, fontWeight: "600", textAlign: "center" },
   unit: { fontSize: 10, fontWeight: "300", textAlign: "center", marginTop: 2 },

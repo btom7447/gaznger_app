@@ -22,7 +22,7 @@ import StationsBottomSheet, {
   StationsBottomSheetRef,
 } from "@/components/ui/maps/StationsBottomSheet";
 import { useUserLocation } from "@/hooks/useUserLocation";
-import StationDetailsModal from "@/components/ui/maps/StationDetailsModal";
+import StationDetailsModal, { StationDetailsModalHandle } from "@/components/ui/maps/StationDetailsModal";
 import { api } from "@/lib/api";
 import { Station } from "@/types";
 import { useTheme } from "@/constants/theme";
@@ -71,7 +71,7 @@ export default function StationsScreen() {
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const bottomSheetRef = useRef<StationsBottomSheetRef>(null);
-  const detailsModalRef = useRef<React.ComponentRef<typeof StationDetailsModal>>(null);
+  const detailsModalRef = useRef<StationDetailsModalHandle>(null);
 
   const { location: userLocation, loading: locationLoading } = useUserLocation();
   const overlayOpacity = useRef(new Animated.Value(0)).current;
@@ -220,6 +220,10 @@ export default function StationsScreen() {
         : undefined,
       price: s.fuels.find((f: any) => f.fuel._id === order.fuel?._id)?.pricePerUnit,
     }))
+    .filter((s) => {
+      if (filters.verified === "true" && !s.verified) return false;
+      return true;
+    })
     .sort((a, b) => {
       if (sort === "closest") return (a.distance || 0) - (b.distance || 0);
       if (sort === "rating") return (b.rating || 0) - (a.rating || 0);
@@ -255,7 +259,10 @@ export default function StationsScreen() {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setSelectedStation(best);
     setStation({ id: best._id, label: best.name });
+    bottomSheetRef.current?.close();
+    setShowDetails(true);
     Animated.timing(overlayOpacity, { toValue: 0.35, duration: 250, useNativeDriver: true }).start();
+    setTimeout(() => detailsModalRef.current?.open(), 80);
   };
 
   const handleStationPress = (station: any) => {
@@ -289,7 +296,7 @@ export default function StationsScreen() {
         stationId: selectedStation._id,
         cylinderImages: order.cylinderImages,
       };
-      const createdOrder = await api.post<{ _id: string; totalPrice: number }>(
+      const createdOrder = await api.post<{ _id: string; totalPrice: number; fuelCost?: number; deliveryFee?: number }>(
         "/api/orders",
         orderPayload
       );
@@ -302,6 +309,8 @@ export default function StationsScreen() {
         params: {
           orderId: createdOrder._id,
           totalPrice: String(createdOrder.totalPrice),
+          fuelCost: String(createdOrder.fuelCost ?? createdOrder.totalPrice),
+          deliveryFee: String(createdOrder.deliveryFee ?? 0),
           fuelName: order.fuel?.name ?? "",
           quantity: String(order.quantity),
           unit: order.fuel?.unit ?? "",
@@ -475,16 +484,10 @@ export default function StationsScreen() {
           station={selectedStation}
           onClose={() => setShowDetails(false)}
           onConfirm={handleConfirmStation}
+          confirming={confirming}
         />
       )}
 
-      {confirming && (
-        <View style={StyleSheet.absoluteFill}>
-          <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.4)" }}>
-            <ActivityIndicator size="large" color="#fff" />
-          </View>
-        </View>
-      )}
     </View>
   );
 }

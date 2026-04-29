@@ -8,142 +8,227 @@ import {
   Modal,
   Pressable,
   FlatList,
+  ScrollView,
   Dimensions,
+  ActivityIndicator,
 } from "react-native";
 import { useTheme } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
 import { Ionicons } from "@expo/vector-icons";
 
 interface CylinderImageUploadProps {
-  openModal: () => void; // now expects a callback
+  openModal: () => void;
+  uploading?: boolean;
 }
 
 export default function CylinderImageUpload({
   openModal,
+  uploading = false,
 }: CylinderImageUploadProps) {
   const theme = useTheme();
   const images = useOrderStore((s) => s.order.cylinderImages);
   const removeImage = useOrderStore((s) => s.removeCylinderImage);
 
-  // Fullscreen preview state
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
-
-  const openPreview = (index: number) => {
-    setPreviewIndex(index);
-    setPreviewVisible(true);
-  };
-
-  const closePreview = () => {
-    setPreviewVisible(false);
-  };
 
   const screenWidth = Dimensions.get("window").width;
   const screenHeight = Dimensions.get("window").height;
 
   return (
     <View>
-      <Text style={styles(theme).label}>Upload Image of Cylinder</Text>
-      <View style={{ flexDirection: "row" }}>
-        {images.map((img, idx) => (
-          <View key={idx} style={styles(theme).imageWrapper}>
-            <TouchableOpacity onPress={() => openPreview(idx)}>
-              <Image source={{ uri: img }} style={styles(theme).image} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles(theme).removeBtn}
-              onPress={() => removeImage(img)}
-            >
-              <Ionicons name="close-circle" size={20} color={theme.error} />
-            </TouchableOpacity>
-          </View>
-        ))}
+      <Text style={[s.label, { color: theme.text }]}>
+        Upload Cylinder Photos
+      </Text>
 
-        {images.length < 3 && (
-          <TouchableOpacity
-            style={styles(theme).addImageBtn}
-            onPress={openModal}
-          >
-            <Ionicons name="add-outline" size={40} color={theme.quinary} />
-          </TouchableOpacity>
-        )}
+      {/* <Text style={[s.desc, { color: theme.icon }]}>
+        Upload up to 3 photos. First photo will be used as reference.
+      </Text> */}
 
-        {/* Fullscreen Swipe Modal */}
-        <Modal visible={previewVisible} transparent={true} animationType="fade">
-          <View style={styles(theme).modalBackground}>
-            <FlatList
-              data={images}
-              horizontal
-              pagingEnabled
-              initialScrollIndex={previewIndex}
-              keyExtractor={(_, index) => index.toString()}
-              getItemLayout={(_, index) => ({
-                length: screenWidth, // width of each item
-                offset: screenWidth * index, // position of the item
-                index,
-              })}
-              renderItem={({ item }) => (
-                <Image
-                  source={{ uri: item }}
-                  style={{ width: screenWidth, height: screenHeight }}
-                  resizeMode="contain"
-                />
+      {/* Preview Row */}
+      {images.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.previewContent}
+          style={s.previewScroll}
+        >
+          {images.map((uri, idx) => (
+            <View key={uri} style={s.thumbWrap}>
+              <TouchableOpacity
+                onPress={() => {
+                  setPreviewIndex(idx);
+                  setPreviewVisible(true);
+                }}
+              >
+                <Image source={{ uri }} style={s.thumb} />
+              </TouchableOpacity>
+
+              {/* Cover badge */}
+              {idx === 0 && (
+                <View
+                  style={[s.coverBadge, { backgroundColor: theme.primary }]}
+                >
+                  <Ionicons name="star" size={10} color="#fff" />
+                  <Text style={s.coverText}>Cover</Text>
+                </View>
               )}
-            />
-            <Pressable style={styles(theme).closeBtn} onPress={closePreview}>
-              <Ionicons name="close" size={30} color={theme.text} />
-            </Pressable>
-          </View>
-        </Modal>
-      </View>
+
+              {/* Remove */}
+              <TouchableOpacity
+                style={s.removeBtn}
+                onPress={() => removeImage(uri)}
+              >
+                <Ionicons name="close-circle" size={20} color="#EF4444" />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* Upload Button */}
+      {images.length < 3 && (
+        <TouchableOpacity
+          style={[
+            s.uploadBtn,
+            { borderColor: theme.ash, backgroundColor: theme.surface },
+          ]}
+          onPress={openModal}
+          disabled={uploading}
+          activeOpacity={0.8}
+        >
+          {uploading ? (
+            <ActivityIndicator size="small" color={theme.primary} />
+          ) : (
+            <>
+              <Ionicons
+                name="cloud-upload-outline"
+                size={26}
+                color={theme.primary}
+              />
+              <Text style={[s.uploadText, { color: theme.primary }]}>
+                {images.length === 0
+                  ? "Upload cylinder photos"
+                  : "Add another photo"}
+              </Text>
+              <Text style={[s.uploadHint, { color: theme.icon }]}>
+                {images.length}/3 photos
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      )}
+
+      {/* Fullscreen Preview */}
+      <Modal visible={previewVisible} transparent animationType="fade">
+        <View style={s.modalBg}>
+          <FlatList
+            data={images}
+            horizontal
+            pagingEnabled
+            initialScrollIndex={previewIndex}
+            keyExtractor={(_, i) => i.toString()}
+            getItemLayout={(_, index) => ({
+              length: screenWidth,
+              offset: screenWidth * index,
+              index,
+            })}
+            renderItem={({ item }) => (
+              <Image
+                source={{ uri: item }}
+                style={{ width: screenWidth, height: screenHeight }}
+                resizeMode="contain"
+              />
+            )}
+          />
+
+          <Pressable
+            style={s.closeBtn}
+            onPress={() => setPreviewVisible(false)}
+          >
+            <Ionicons name="close" size={30} color="#fff" />
+          </Pressable>
+        </View>
+      </Modal>
     </View>
   );
 }
 
-const styles = (theme: ReturnType<typeof useTheme>) =>
-  StyleSheet.create({
-    label: { fontSize: 20, fontWeight: "600", marginBottom: 10 },
-    imageWrapper: {
-      position: "relative",
-      marginRight: 12,
-      borderRadius: 10,
-      overflow: "hidden",
-      borderWidth: 1,
-      borderColor: "#ddd",
-    },
-    image: { width: 80, height: 80, borderRadius: 10 },
-    removeBtn: {
-      position: "absolute",
-      top: -1,
-      right: -1,
-      width: 24,
-      height: 24,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    addImageBtn: {
-      width: 80,
-      height: 80,
-      borderWidth: 1,
-      borderStyle: "dashed",
-      borderColor: theme.quaternary,
-      borderRadius: 10,
-      justifyContent: "center",
-      alignItems: "center",
-      backgroundColor: theme.quinest,
-    },
-    modalBackground: {
-      flex: 1,
-      backgroundColor: "rgba(0,0,0,0.95)",
-      justifyContent: "center",
-      alignItems: "center",
-    },
-    closeBtn: {
-      position: "absolute",
-      top: 70,
-      right: 30,
-      backgroundColor: theme.background,
-      borderRadius: 40,
-      padding: 1,
-    },
-  });
+const s = StyleSheet.create({
+  label: {
+    fontSize: 13,
+    fontWeight: "500",
+    letterSpacing: 0.1,
+    marginBottom: 10,
+  },
+  desc: {
+    fontSize: 12,
+    marginBottom: 12,
+  },
+
+  previewScroll: {
+    marginBottom: 10,
+  },
+  previewContent: {
+    gap: 10,
+  },
+
+  thumbWrap: {
+    position: "relative",
+  },
+  thumb: {
+    width: 70,
+    height: 70,
+    borderRadius: 12,
+  },
+
+  coverBadge: {
+    position: "absolute",
+    bottom: 4,
+    left: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  coverText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "600",
+  },
+
+  removeBtn: {
+    position: "absolute",
+    top: -6,
+    right: -6,
+  },
+
+  uploadBtn: {
+    borderWidth: 1.5,
+    borderRadius: 14,
+    paddingVertical: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  uploadText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  uploadHint: {
+    fontSize: 11,
+  },
+
+  modalBg: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.95)",
+    justifyContent: "center",
+  },
+  closeBtn: {
+    position: "absolute",
+    top: 70,
+    right: 24,
+  },
+});

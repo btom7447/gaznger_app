@@ -1,6 +1,6 @@
 import React, { useCallback } from "react";
 import { Tabs } from "expo-router";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, TouchableOpacity, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
@@ -13,10 +13,12 @@ type TabConfig = {
   label: string;
 };
 
+// Profile is intentionally excluded — accessed via the header avatar button.
 const TABS: TabConfig[] = [
   { route: "index", icon: "bicycle-outline", iconFocused: "bicycle", label: "Queue" },
-  { route: "history", icon: "time-outline", iconFocused: "time", label: "History" },
+  { route: "track", icon: "navigate-outline", iconFocused: "navigate", label: "Track" },
   { route: "earnings", icon: "wallet-outline", iconFocused: "wallet", label: "Earnings" },
+  { route: "payout", icon: "cash-outline", iconFocused: "cash", label: "Payout" },
 ];
 
 interface TabItemProps {
@@ -41,29 +43,16 @@ function RiderTabItem({ route, isFocused, navigation }: TabItemProps) {
   }, [isFocused, navigation, route.key, route.name]);
 
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.8}
-      style={styles.tabItem}
-    >
-      <View style={[styles.pill, isFocused && { backgroundColor: theme.primary }]}>
-        <Ionicons
-          name={isFocused ? tab.iconFocused : tab.icon}
-          size={20}
-          color={isFocused ? "#FFFFFF" : theme.tabIconDefault}
-        />
+    <TouchableOpacity onPress={onPress} activeOpacity={0.8} style={styles.tabItem}>
+      <View style={styles.iconPillClip}>
+        <View style={[styles.iconPill, isFocused && { backgroundColor: theme.primary }]}>
+          <Ionicons
+            name={isFocused ? tab.iconFocused : tab.icon}
+            size={20}
+            color={isFocused ? "#FFFFFF" : theme.tabIconDefault}
+          />
+        </View>
       </View>
-      <Text
-        style={[
-          styles.label,
-          {
-            color: isFocused ? "#FFFFFF" : theme.tabIconDefault,
-            fontWeight: isFocused ? "700" : "400",
-          },
-        ]}
-      >
-        {tab.label}
-      </Text>
     </TouchableOpacity>
   );
 }
@@ -72,19 +61,19 @@ function RiderTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const theme = useTheme();
 
+  // Only render the 3 listed tabs (hides profile and any other routes)
+  const visibleRoutes = TABS.map((tab) =>
+    state.routes.find((r) => r.name === tab.route)
+  ).filter(Boolean) as typeof state.routes;
+
   return (
-    <View
-      style={[
-        styles.outerWrap,
-        { backgroundColor: theme.tab, paddingBottom: Math.max(insets.bottom, 10) },
-      ]}
-    >
-      <View style={styles.bar}>
-        {state.routes.map((route, index) => (
+    <View style={[styles.outerWrap, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      <View style={[styles.pill, { backgroundColor: theme.tab }]}>
+        {visibleRoutes.map((route) => (
           <RiderTabItem
             key={route.key}
             route={route}
-            isFocused={state.index === index}
+            isFocused={state.routes[state.index].name === route.name}
             navigation={navigation}
           />
         ))}
@@ -103,9 +92,20 @@ export default function RiderQueueLayout() {
 }
 
 const styles = StyleSheet.create({
-  outerWrap: { paddingTop: 10 },
-  bar: { flexDirection: "row", marginHorizontal: 16, borderRadius: 18, overflow: "hidden" },
-  tabItem: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 6 },
-  pill: { width: 46, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
-  label: { marginTop: 3, fontSize: 11, letterSpacing: 0.2 },
+  outerWrap: { position: "absolute", bottom: 0, left: 0, right: 0, alignItems: "center" },
+  pill: {
+    flexDirection: "row",
+    borderRadius: 40,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    gap: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  tabItem: { alignItems: "center", justifyContent: "center" },
+  iconPillClip: { borderRadius: 17, overflow: "hidden" },
+  iconPill: { width: 48, height: 34, alignItems: "center", justifyContent: "center" },
 });
