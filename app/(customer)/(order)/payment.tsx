@@ -1,286 +1,513 @@
-import React, { useEffect, useRef, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-} from "react-native";
-import SkeletonBox from "@/components/ui/skeletons/SkeletonBox";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useTheme } from "@/constants/theme";
+import { useRouter } from "expo-router";
+import { usePaystack } from "react-native-paystack-webview";
+import { Theme, useTheme, formatCurrency } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
-import RedeemModal, { RedeemModalHandles } from "@/components/ui/home/RedeemModal";
 import { useSessionStore } from "@/store/useSessionStore";
+import { useWalletStore } from "@/store/useWalletStore";
+import { api } from "@/lib/api";
+import { setPaystackPublicKey } from "@/lib/paystackKey";
+import { newIdempotencyKey } from "@/lib/idempotency";
+import {
+  FloatingCTA,
+  MoneySurface,
+  ProgressDots,
+  ScreenContainer,
+  ScreenHeader,
+} from "@/components/ui/primitives";
+import PaymentMethodList, {
+  PaymentMethod,
+} from "@/components/ui/customer/order/PaymentMethodList";
+import PointsRedeem, {
+  POINTS_TO_NAIRA,
+} from "@/components/ui/customer/order/PointsRedeem";
+import { useFlowProgress } from "@/components/ui/customer/order/useFlowProgress";
 
-/**
- * Dummy payment screen — Paystack WebView integration pending.
- * Simulates a brief processing state then navigates to receipt.
- */
+// Mirror server/src/utils/haversine.ts → calcDeliveryFee.
+const DELIVERY_BASE_FEE = 500;
+const DELIVERY_PER_KM = 100;
+
+function computeDeliveryFee(distMeters?: number): number {
+  if (!distMeters || distMeters <= 0) return DELIVERY_BASE_FEE;
+  const km = distMeters / 1000;
+  return Math.round(DELIVERY_BASE_FEE + DELIVERY_PER_KM * km);
+}
+
+function brandTagFor(brand?: string): string {
+  if (!brand) return "CARD";
+  const b = brand.toLowerCase();
+  if (b.includes("visa")) return "VISA";
+  if (b.includes("master")) return "MC";
+  if (b.includes("verve")) return "VERVE";
+  return brand.slice(0, 4).toUpperCase();
+}
+
+interface InitializeResponse {
+  authorizationUrl: string;
+  reference: string;
+  publicKey?: string;
+}
+
 export default function PaymentScreen() {
   const theme = useTheme();
-  const {
-    orderId,
-    totalPrice,
-    fuelCost,
-    deliveryFee,
-    fuelName,
-    quantity,
-    unit,
-    stationName,
-    deliveryLocation,
-    cylinderType,
-    deliveryType,
-  } = useLocalSearchParams<{
-    orderId: string;
-    totalPrice: string;
-    fuelCost: string;
-    deliveryFee: string;
-    fuelName: string;
-    quantity: string;
-    unit: string;
-    stationName: string;
-    deliveryLocation: string;
-    cylinderType: string;
-    deliveryType: string;
-  }>();
+  const router = useRouter();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  const insets = useSafeAreaInsets();
-  const resetOrder = useOrderStore((s) => s.resetOrder);
-  const userPoints = useSessionStore((s) => s.user?.points ?? 0);
-  const [processing, setProcessing] = useState(true);
-  const [currentTotal, setCurrentTotal] = useState(Number(totalPrice ?? 0));
-  const redeemModalRef = useRef<RedeemModalHandles>(null);
+  const draft = useOrderStore((s) => s.order);
+  const setPaymentMethod = useOrderStore((s) => s.setPaymentMethod);
+  const setOrderId = useOrderStore((s) => s.setOrderId);
+  const user = useSessionStore((s) => s.user);
+  const userEmail = user?.email;
+  const pointsBalance = user?.points ?? 0;
+  const walletAvailable = useWalletStore((s) => s.available);
+  const refreshWallet = useWalletStore((s) => s.refresh);
+  const { step, total } = useFlowProgress("payment");
 
-  useEffect(() => {
-    const t = setTimeout(() => setProcessing(false), 2200);
-    return () => clearTimeout(t);
-  }, []);
+  const { popup } = usePaystack();
 
-  const handleConfirm = () => {
-    resetOrder();
-    router.replace({
-      pathname: "/(customer)/(order)/receipt" as any, // eslint-disable-line @typescript-eslint/no-explicit-any
-      params: {
-        orderId,
-        totalPrice: String(currentTotal),
-        fuelCost,
-        deliveryFee,
-        fuelName,
-        quantity,
-        unit,
-        stationName,
-        deliveryLocation,
-        cylinderType,
-        deliveryType,
-      },
+  const station = draft.station;
+  const totalKobo = station?.totalKobo ?? 0;
+  const lockedTotalNaira = totalKobo / 100;
+
+  const deliveryFee = useMemo(
+    () => computeDeliveryFee(station?.distMeters),
+    [station?.distMeters]
+  );
+  const subtotal = Math.max(0, lockedTotalNaira - deliveryFee);
+
+  const [pointsToSpend, setPointsToSpend] = useState(0);
+  const pointsDiscount = pointsToSpend * POINTS_TO_NAIRA;
+  const finalTotal = Math.max(0, lockedTotalNaira - pointsDiscount);
+
+  const lastCard = user?.lastPaystackAuth;
+  const hasSavedCard = Boolean(lastCard?.last4);
+
+  const methods = useMemo<PaymentMethod[]>(() => {
+    const list: PaymentMethod[] = [];
+    if (hasSavedCard) {
+      list.push({
+        id: "card-saved",
+        kind: "card",
+        label: lastCard?.brand
+          ? `${lastCard.brand[0].toUpperCase()}${lastCard.brand.slice(1)} card`
+          : "Saved card",
+        sublabel: `•••• ${lastCard?.last4} · default`,
+        brandTag: brandTagFor(lastCard?.brand),
+      });
+    } else {
+      list.push({
+        id: "card-new",
+        kind: "card",
+        label: "Add card",
+        sublabel: "Pay once, save for next time",
+      });
+    }
+    list.push({
+      id: "wallet",
+      kind: "wallet",
+      label: "Gaznger wallet",
+      sublabel: `Balance ${formatCurrency(walletAvailable)}`,
+      balance: walletAvailable,
+      insufficient: walletAvailable < finalTotal,
     });
-  };
+    list.push({
+      id: "transfer",
+      kind: "transfer",
+      label: "Bank transfer",
+      sublabel: "Pay to a one-time account",
+    });
+    return list;
+  }, [hasSavedCard, lastCard?.last4, lastCard?.brand, finalTotal, walletAvailable]);
 
-  const handleCancel = () => router.back();
+  const [selectedId, setSelectedId] = useState<string>(
+    draft.paymentMethodId ?? methods[0]?.id ?? ""
+  );
+  const [submitting, setSubmitting] = useState(false);
 
-  const s = styles(theme);
+  // Re-anchor selection if the methods list reshapes (saved card → no card after logout, etc.)
+  useEffect(() => {
+    if (!methods.find((m) => m.id === selectedId)) {
+      setSelectedId(methods[0]?.id ?? "");
+    }
+  }, [methods, selectedId]);
 
-  if (processing) {
+  // Pull a fresh wallet balance whenever this screen mounts.
+  useEffect(() => {
+    refreshWallet();
+  }, [refreshWallet]);
+
+  const selected = methods.find((m) => m.id === selectedId) ?? null;
+  const insufficient = selected?.kind === "wallet" && selected.insufficient;
+
+  const handleSelect = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      setPaymentMethod(id);
+    },
+    [setPaymentMethod]
+  );
+
+  /**
+   * Place the order on the server. The server returns the canonical
+   * `_id` we then use as `orderId` for the Paystack flow + points
+   * redemption.
+   */
+  const placeOrder = useCallback(async (): Promise<string | null> => {
+    try {
+      // Server accepts EITHER `fuelId` (Mongo ObjectId, legacy) or
+      // `fuelTypeId` (slug like "petrol"/"lpg", new flow). The new flow
+      // never populates `draft.fuel`, so we send the slug.
+      const body: Record<string, unknown> = {
+        fuelTypeId: draft.fuelTypeId,
+        stationId: station?.id,
+        quantity: draft.qty,
+        deliveryAddressId: draft.deliveryAddressId,
+        note: draft.note,
+        returnSwapAt: draft.returnSwapAt ?? undefined,
+      };
+      if (draft.product === "lpg") {
+        body.cylinderType = draft.cylinderType;
+        body.deliveryType =
+          draft.serviceType === "swap" ? "cylinder_swap" : "home_refill";
+        body.cylinderImages = draft.cylinderPhotos ?? [];
+        // Send the swap-only cylinder details (brand/valve/age/test).
+        // Server stores these on the order so the rider arrives with
+        // the right kit and Admin can audit cylinder eligibility.
+        if (draft.cylinderDetails) {
+          body.cylinderDetails = draft.cylinderDetails;
+        }
+      }
+      const order = await api.post<{ _id: string; totalPrice: number }>(
+        "/api/orders",
+        body
+      );
+      setOrderId(order._id);
+      return order._id;
+    } catch (err: any) {
+      Alert.alert(
+        "Couldn't place order",
+        err?.message ?? "Please try again in a moment."
+      );
+      return null;
+    }
+  }, [draft, station, setOrderId]);
+
+  /**
+   * Best-effort points redemption. Failures are non-fatal — server is
+   * the source of truth on whether the discount actually applied.
+   */
+  const redeemPointsIfAny = useCallback(
+    async (orderId: string) => {
+      if (pointsToSpend <= 0) return;
+      try {
+        await api.post("/api/points/redeem", {
+          orderId,
+          pointsToRedeem: pointsToSpend,
+        });
+      } catch {
+        // Swallow.
+      }
+    },
+    [pointsToSpend]
+  );
+
+  const goReceipt = useCallback(() => {
+    refreshWallet();
+    router.replace("/(customer)/(order)/receipt" as never);
+  }, [refreshWallet, router]);
+
+  /** New-card flow — initialize → open Paystack popup → verify on success. */
+  const payWithNewCard = useCallback(
+    async (orderId: string) => {
+      if (!userEmail) {
+        Alert.alert("Email required", "We need your email to start the payment.");
+        return;
+      }
+      const init = await api.post<InitializeResponse>(
+        "/api/payments/initialize",
+        { orderId },
+        { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+      );
+      setPaystackPublicKey(init.publicKey);
+
+      popup.checkout({
+        email: userEmail,
+        amount: finalTotal, // SDK takes NGN, not kobo
+        reference: init.reference,
+        metadata: { orderId, kind: "order_charge" },
+        onSuccess: async () => {
+          try {
+            await api.post(
+              "/api/payments/verify",
+              { reference: init.reference },
+              { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+            );
+            await redeemPointsIfAny(orderId);
+            goReceipt();
+          } catch (err: any) {
+            Alert.alert(
+              "Payment verification failed",
+              err?.message ??
+                "We couldn't verify the payment. Please contact support if your card was charged."
+            );
+          } finally {
+            setSubmitting(false);
+          }
+        },
+        onCancel: () => {
+          setSubmitting(false);
+        },
+        onError: (err) => {
+          Alert.alert("Payment error", err?.message ?? "Something went wrong.");
+          setSubmitting(false);
+        },
+      });
+    },
+    [userEmail, finalTotal, popup, redeemPointsIfAny, goReceipt]
+  );
+
+  /** Saved-card flow — single server call, no webview. */
+  const payWithSavedCard = useCallback(
+    async (orderId: string) => {
+      try {
+        await api.post(
+          "/api/payments/charge-saved",
+          { orderId },
+          { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+        );
+        await redeemPointsIfAny(orderId);
+        goReceipt();
+      } catch (err: any) {
+        Alert.alert(
+          "Saved card declined",
+          err?.message ?? "Try a different payment method."
+        );
+        setSubmitting(false);
+      }
+    },
+    [redeemPointsIfAny, goReceipt]
+  );
+
+  /** Wallet flow — server debits the wallet, no Paystack. */
+  const payWithWallet = useCallback(
+    async (orderId: string) => {
+      try {
+        await api.post(
+          "/api/payments/pay-with-wallet",
+          { orderId },
+          { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+        );
+        await redeemPointsIfAny(orderId);
+        goReceipt();
+      } catch (err: any) {
+        Alert.alert(
+          "Wallet payment failed",
+          err?.message ?? "Insufficient balance or wallet error."
+        );
+        setSubmitting(false);
+      }
+    },
+    [redeemPointsIfAny, goReceipt]
+  );
+
+  /** Bank-transfer flow — initialize but force `bank_transfer` channel. */
+  const payWithTransfer = useCallback(
+    async (orderId: string) => {
+      if (!userEmail) {
+        Alert.alert("Email required", "We need your email for the transfer.");
+        return;
+      }
+      const init = await api.post<InitializeResponse>(
+        "/api/payments/initialize",
+        { orderId },
+        { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+      );
+      setPaystackPublicKey(init.publicKey);
+      popup.checkout({
+        email: userEmail,
+        amount: finalTotal,
+        reference: init.reference,
+        metadata: { orderId, kind: "order_charge", channel: "bank_transfer" },
+        onSuccess: async () => {
+          try {
+            await api.post(
+              "/api/payments/verify",
+              { reference: init.reference },
+              { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+            );
+            await redeemPointsIfAny(orderId);
+            goReceipt();
+          } finally {
+            setSubmitting(false);
+          }
+        },
+        onCancel: () => setSubmitting(false),
+        onError: () => setSubmitting(false),
+      });
+    },
+    [userEmail, finalTotal, popup, redeemPointsIfAny, goReceipt]
+  );
+
+  const handlePay = useCallback(async () => {
+    if (!selected || insufficient || submitting) return;
+    setSubmitting(true);
+
+    // Step 1: place the order so we have a real orderId for downstream flows.
+    const orderId = await placeOrder();
+    if (!orderId) {
+      setSubmitting(false);
+      return;
+    }
+
+    // Step 2: dispatch by method.
+    if (selected.id === "card-saved") {
+      await payWithSavedCard(orderId);
+    } else if (selected.id === "card-new") {
+      await payWithNewCard(orderId);
+    } else if (selected.id === "wallet") {
+      await payWithWallet(orderId);
+    } else if (selected.id === "transfer") {
+      await payWithTransfer(orderId);
+    } else {
+      setSubmitting(false);
+    }
+  }, [
+    selected,
+    insufficient,
+    submitting,
+    placeOrder,
+    payWithSavedCard,
+    payWithNewCard,
+    payWithWallet,
+    payWithTransfer,
+  ]);
+
+  if (!station) {
     return (
-      <SafeAreaView style={s.safe}>
-        <View style={s.processingWrap}>
-          {/* Receipt card skeleton */}
-          <View style={[s.processingCard, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
-            <SkeletonBox width={56} height={56} borderRadius={28} style={{ alignSelf: "center", marginBottom: 20 }} />
-            <SkeletonBox width="60%" height={14} borderRadius={7} style={{ alignSelf: "center", marginBottom: 10 }} />
-            <SkeletonBox width="40%" height={36} borderRadius={10} style={{ alignSelf: "center", marginBottom: 24 }} />
-            <SkeletonBox width="100%" height={1} borderRadius={0} style={{ marginBottom: 20 }} />
-            {[100, 80, 90, 75].map((w, i) => (
-              <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 14 }}>
-                <SkeletonBox width={`${w * 0.4}%`} height={12} borderRadius={6} />
-                <SkeletonBox width={`${w * 0.45}%`} height={12} borderRadius={6} />
-              </View>
-            ))}
-          </View>
-          <Text style={[s.processingTitle, { color: theme.icon }]}>Processing Payment…</Text>
+      <ScreenContainer edges={["top", "bottom"]}>
+        <ScreenHeader title="How will you pay?" />
+        <View style={styles.body}>
+          <Text style={styles.fallback}>
+            We need a station first. Routing back…
+          </Text>
         </View>
-      </SafeAreaView>
+      </ScreenContainer>
     );
   }
 
-  const isGas = fuelName?.toLowerCase().includes("gas");
+  const lineItems: { label: string; amount: number }[] = [
+    {
+      label: `${draft.qty ?? 0} ${draft.unit ?? "L"} · ${
+        station.shortName ?? station.name
+      }`,
+      amount: subtotal,
+    },
+    { label: "Delivery fee", amount: deliveryFee },
+  ];
+  if (pointsDiscount > 0) {
+    lineItems.push({
+      label: `Points redeemed (${pointsToSpend.toLocaleString("en-NG")})`,
+      amount: -pointsDiscount,
+    });
+  }
 
   return (
-    <SafeAreaView style={s.safe}>
-      <View style={s.header}>
-        <TouchableOpacity onPress={handleCancel} style={s.closeBtn}>
-          <Ionicons name="close" size={22} color={theme.text} />
-        </TouchableOpacity>
-        <Text style={s.headerTitle}>Confirm Payment</Text>
-        <View style={{ width: 40 }} />
-      </View>
+    <ScreenContainer
+      edges={["top", "bottom"]}
+      contentStyle={styles.scroll}
+      header={<ScreenHeader title="How will you pay?" />}
+      footer={
+        <FloatingCTA
+          label={`Pay ${formatCurrency(finalTotal)}`}
+          subtitle={selected?.sublabel}
+          disabled={!selected || insufficient || submitting}
+          loading={submitting}
+          onPress={handlePay}
+          floating={false}
+          accessibilityHint={
+            insufficient ? "Top up your wallet to continue" : undefined
+          }
+        />
+      }
+    >
+      <View style={styles.body}>
+        <ProgressDots step={step} total={total} variant="bars" />
 
-      <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
-        {/* Amount card */}
-        <View style={[s.amountCard, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
-          <Text style={[s.amountLabel, { color: theme.icon }]}>Total Amount</Text>
-          <Text style={[s.amount, { color: theme.primary }]}>
-            ₦{currentTotal.toLocaleString()}
+        <Text style={styles.sectionLabel}>METHODS</Text>
+        <PaymentMethodList
+          methods={methods}
+          selectedId={selectedId}
+          onSelect={handleSelect}
+          onTopUp={() => router.push("/(customer)/wallet/topup" as never)}
+        />
+
+        <View style={styles.trustStrip}>
+          <Ionicons
+            name="shield-checkmark-outline"
+            size={16}
+            color={theme.fgMuted}
+          />
+          <Text style={styles.trustText}>
+            Payments secured by Paystack. We never see your card details.
           </Text>
         </View>
 
-        {/* Order details card */}
-        <View style={[s.detailCard, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
-          <Text style={[s.sectionTitle, { color: theme.text }]}>Order Details</Text>
+        <PointsRedeem
+          total={lockedTotalNaira}
+          balance={pointsBalance}
+          pointsToSpend={pointsToSpend}
+          onChange={setPointsToSpend}
+        />
 
-          <DetailRow label="Order ID" value={`#${(orderId ?? "").slice(-6).toUpperCase()}`} theme={theme} />
-          <DetailRow label="Fuel Type" value={fuelName ?? "-"} theme={theme} />
-          <DetailRow label="Quantity" value={`${quantity} ${unit}`} theme={theme} />
-          <DetailRow label="Station" value={stationName ?? "-"} theme={theme} />
-
-          {!!deliveryLocation && (
-            <DetailRow label="Delivery To" value={deliveryLocation} theme={theme} />
-          )}
-
-          {isGas && !!cylinderType && (
-            <DetailRow label="Cylinder Type" value={cylinderType} theme={theme} />
-          )}
-
-          {isGas && !!deliveryType && (
-            <DetailRow
-              label="Delivery Type"
-              value={deliveryType === "cylinder_swap" ? "Cylinder Swap" : "Top Up"}
-              theme={theme}
-            />
-          )}
-
-          <View style={[{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.ash, marginTop: 8, paddingTop: 12 }]}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 7 }}>
-              <Text style={{ fontSize: 13, color: theme.icon, fontWeight: "300" }}>Fuel Cost</Text>
-              <Text style={{ fontSize: 13, color: theme.text, fontWeight: "400" }}>₦{Number(fuelCost ?? 0).toLocaleString()}</Text>
-            </View>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 7 }}>
-              <Text style={{ fontSize: 13, color: theme.icon, fontWeight: "300" }}>Delivery Fee</Text>
-              <Text style={{ fontSize: 13, color: theme.text, fontWeight: "400" }}>₦{Number(deliveryFee ?? 0).toLocaleString()}</Text>
-            </View>
-            {currentTotal < Number(totalPrice ?? 0) && (
-              <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 7 }}>
-                <Text style={{ fontSize: 13, color: theme.success, fontWeight: "300" }}>Points Discount</Text>
-                <Text style={{ fontSize: 13, color: theme.success, fontWeight: "400" }}>-₦{(Number(totalPrice ?? 0) - currentTotal).toLocaleString()}</Text>
-              </View>
-            )}
-          </View>
-
-          <View style={[s.totalRow, { borderTopColor: theme.ash }]}>
-            <Text style={[s.totalLabel, { color: theme.icon }]}>Total</Text>
-            <Text style={[s.totalValue, { color: theme.primary }]}>
-              ₦{currentTotal.toLocaleString()}
-            </Text>
-          </View>
-        </View>
-
-        {/* Redeem points */}
-        {userPoints > 0 && (
-          <TouchableOpacity
-            style={[s.redeemRow, { backgroundColor: theme.surface, borderColor: theme.ash }]}
-            onPress={() => redeemModalRef.current?.open()}
-            activeOpacity={0.8}
-          >
-            <View style={[s.redeemIconWrap, { backgroundColor: theme.accentLight }]}>
-              <Ionicons name="star" size={16} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.redeemTitle, { color: theme.text }]}>Redeem Points</Text>
-              <Text style={[s.redeemSub, { color: theme.icon }]}>
-                {userPoints.toLocaleString()} pts available · worth ₦{userPoints.toLocaleString()}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={theme.icon} />
-          </TouchableOpacity>
-        )}
-      </ScrollView>
-
-      <RedeemModal
-        ref={redeemModalRef}
-        orderId={orderId}
-        onRedeemed={(newTotal) => setCurrentTotal(newTotal)}
-      />
-
-      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, 12) + 62 }]}>
-        <TouchableOpacity style={[s.cancelBtn, { borderColor: theme.ash }]} onPress={handleCancel}>
-          <Text style={[s.cancelText, { color: theme.text }]}>Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[s.payBtn, { backgroundColor: theme.primary }]} onPress={handleConfirm}>
-          <Ionicons name="lock-closed" size={16} color="#fff" style={{ marginRight: 8 }} />
-          <Text style={s.payText}>Pay Now</Text>
-        </TouchableOpacity>
+        <MoneySurface
+          eyebrow="ORDER"
+          lineItems={lineItems}
+          totalLabel="You'll pay"
+          totalValue={finalTotal}
+          sub={
+            userEmail
+              ? `Pay once · receipt to ${userEmail}`
+              : "Pay once · receipt by email"
+          }
+        />
       </View>
-    </SafeAreaView>
+    </ScreenContainer>
   );
 }
 
-function DetailRow({ label, value, theme }: { label: string; value: string; theme: ReturnType<typeof useTheme> }) {
-  return (
-    <View style={detailRowStyles.row}>
-      <Text style={[detailRowStyles.label, { color: theme.icon }]}>{label}</Text>
-      <Text style={[detailRowStyles.value, { color: theme.text }]} numberOfLines={2}>{value}</Text>
-    </View>
-  );
-}
-
-const detailRowStyles = StyleSheet.create({
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingVertical: 10 },
-  label: { fontSize: 13, fontWeight: "300", flex: 1 },
-  value: { fontSize: 13, fontWeight: "400", flex: 1.5, textAlign: "right" },
-});
-
-const styles = (theme: ReturnType<typeof useTheme>) =>
+const makeStyles = (theme: Theme) =>
   StyleSheet.create({
-    safe: { flex: 1, backgroundColor: theme.background },
-    processingWrap: { flex: 1, justifyContent: "center", padding: 24, gap: 16 },
-    processingCard: { borderRadius: 20, borderWidth: 1, padding: 24 },
-    processingTitle: { fontSize: 14, fontWeight: "300", textAlign: "center" },
-    header: {
-      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-      paddingHorizontal: 16, paddingVertical: 14,
+    scroll: { paddingBottom: theme.space.s5 },
+    body: {
+      paddingHorizontal: theme.space.s4,
+      gap: theme.space.s4,
+      paddingTop: theme.space.s2,
     },
-    closeBtn: { width: 40, alignItems: "flex-start" },
-    headerTitle: { fontSize: 17, fontWeight: "500", color: theme.text },
-    body: { paddingHorizontal: 16, paddingBottom: 16, gap: 12 },
-    amountCard: {
-      borderRadius: 20, borderWidth: 1, padding: 24,
+    sectionLabel: {
+      ...theme.type.micro,
+      fontSize: 13,
+      letterSpacing: 0.6,
+      color: theme.fgMuted,
     },
-    amountLabel: { fontSize: 13, fontWeight: "300", marginBottom: 6 },
-    amount: { fontSize: 36, fontWeight: "500" },
-    detailCard: {
-      borderRadius: 20, borderWidth: 1, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8,
+    trustStrip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.space.s2,
+      backgroundColor: theme.bgMuted,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space.s3,
+      paddingVertical: theme.space.s2 + 2,
     },
-    sectionTitle: { fontSize: 15, fontWeight: "500", marginBottom: 8 },
-    totalRow: {
-      flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-      marginTop: 8, paddingTop: 14, paddingBottom: 12, borderTopWidth: 1,
+    trustText: {
+      ...theme.type.bodySm,
+      color: theme.fgMuted,
+      flex: 1,
     },
-    totalLabel: { fontSize: 14, fontWeight: "300" },
-    totalValue: { fontSize: 18, fontWeight: "500" },
-    discountNote: { fontSize: 12, fontWeight: "300", marginTop: 4 },
-    redeemRow: {
-      flexDirection: "row", alignItems: "center", gap: 12,
-      padding: 14, borderRadius: 16, borderWidth: 1,
+    fallback: {
+      ...theme.type.body,
+      color: theme.fgMuted,
+      padding: theme.space.s4,
     },
-    redeemIconWrap: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center" },
-    redeemTitle: { fontSize: 14, fontWeight: "400" },
-    redeemSub: { fontSize: 12, fontWeight: "300", marginTop: 2 },
-    footer: {
-      flexDirection: "row", gap: 12, paddingHorizontal: 16, paddingTop: 16,
-      borderTopWidth: 1, borderTopColor: theme.ash,
-    },
-    cancelBtn: {
-      flex: 1, paddingVertical: 15, borderRadius: 16, borderWidth: 1,
-      alignItems: "center", justifyContent: "center",
-    },
-    cancelText: { fontSize: 15, fontWeight: "400" },
-    payBtn: {
-      flex: 2, flexDirection: "row", paddingVertical: 15,
-      borderRadius: 16, alignItems: "center", justifyContent: "center",
-    },
-    payText: { color: "#fff", fontSize: 15, fontWeight: "500" },
   });

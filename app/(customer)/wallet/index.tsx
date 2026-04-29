@@ -152,7 +152,9 @@ const KIND_ICON: Record<WalletTransaction["kind"], string> = {
 function TxRow({ tx, theme }: { tx: WalletTransaction; theme: Theme }) {
   const isCredit = tx.amount >= 0;
   const sign = isCredit ? "+" : "−";
-  const color = isCredit ? "#0E9F6E" : theme.fg;
+  // Credit amounts use the semantic success token so the colour
+  // adjusts with the theme; debits stay on default foreground.
+  const color = isCredit ? theme.success : theme.fg;
   const icon = (KIND_ICON[tx.kind] ?? "swap-horizontal-outline") as any;
   const label = KIND_LABEL[tx.kind] ?? "Transaction";
   const date = new Date(tx.createdAt).toLocaleDateString("en-NG", {

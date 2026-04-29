@@ -36,6 +36,23 @@ export interface SessionUser {
   accountStatus?: "pending" | "active" | "suspended";
   /** Vendor + rider only — gates the withdraw button when active. */
   withdrawalHold?: { active: boolean; reason?: string };
+  /**
+   * Number of delivered LPG orders. Drives the saved-cylinder card on
+   * Cylinder.tsx + the "Skip — use last photos" link on Photo.tsx.
+   */
+  lpgOrderCount?: number;
+  /**
+   * LPG-Swap saved cylinder profile. Populated on the first successful
+   * swap when the customer accepts the "save cylinder" prompt.
+   */
+  savedCylinder?: {
+    brand?: string;
+    valve?: string;
+    age?: string;
+    test?: string;
+    photos?: string[];
+    savedAt?: string;
+  };
 }
 
 interface SessionState {

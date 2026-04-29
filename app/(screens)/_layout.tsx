@@ -12,6 +12,15 @@ export default function ScreensLayout() {
       <Stack.Screen name="help-support" options={{ headerShown: false }} />
       <Stack.Screen name="order-history" options={{ headerShown: false }} />
       <Stack.Screen name="payment-method" options={{ headerShown: false }} />
+      <Stack.Screen
+        name="notifications-customer"
+        options={{
+          headerShown: false,
+          presentation: "modal",
+          animation: "slide_from_bottom",
+        }}
+      />
+      <Stack.Screen name="_primitives-preview" options={{ headerShown: false }} />
     </Stack>
   );
 }

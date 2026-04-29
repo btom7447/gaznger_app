@@ -1,261 +1,363 @@
-import React, { useState } from "react";
-import {
-  ScrollView,
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Image,
-  ImageSourcePropType,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { toast } from "sonner-native";
-import NotificationButton from "@/components/ui/global/NotificationButton";
-import ProfileCard from "@/components/ui/global/ProfileCard";
-import { useSessionStore } from "@/store/useSessionStore";
-
-import { useTheme } from "@/constants/theme";
+import { useFocusEffect, useRouter } from "expo-router";
+import { Theme, useTheme } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
+import { useSessionStore } from "@/store/useSessionStore";
+import { api } from "@/lib/api";
+import {
+  FloatingCTA,
+  ProgressDots,
+  RadioGroup,
+  RadioOption,
+  ScreenContainer,
+  ScreenHeader,
+} from "@/components/ui/primitives";
+import AddressList, {
+  AddressLite,
+} from "@/components/ui/customer/order/AddressList";
+import { useFlowProgress } from "@/components/ui/customer/order/useFlowProgress";
+import ScheduleSheet, {
+  ScheduleSheetRef,
+} from "@/components/ui/customer/order/ScheduleSheet";
 
-import OrderProgressBar from "@/components/ui/global/OrderProgressBar";
-import DeliveryLocationSelect from "@/components/ui/order/DeliveryLocationSelect";
-import OrderSummaryModal from "./modal/order-summary";
+interface ServerAddress {
+  _id: string;
+  label: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  latitude?: number;
+  longitude?: number;
+  isDefault?: boolean;
+  icon?: string;
+}
 
-const FUEL_LOCAL_ICON: Record<string, ImageSourcePropType> = {
-  petrol: require("../../../assets/icons/fuel/petrol-icon.png"),
-  diesel: require("../../../assets/icons/fuel/diesel-icon.png"),
-  gas:    require("../../../assets/icons/fuel/gas-icon.png"),
-  oil:    require("../../../assets/icons/fuel/oil-icon.png"),
+const NOTE_MAX = 80;
+
+const ICON_FOR_LABEL: Record<
+  string,
+  React.ComponentProps<typeof Ionicons>["name"]
+> = {
+  home: "home-outline",
+  office: "briefcase-outline",
+  work: "briefcase-outline",
+  other: "location-outline",
 };
+
+function adapt(a: ServerAddress): AddressLite {
+  const line = [a.street, a.city].filter(Boolean).join(", ");
+  const key = (a.label ?? "").toLowerCase();
+  return {
+    id: a._id,
+    label: a.label,
+    line: line || "Tap to refine",
+    icon: ICON_FOR_LABEL[key] ?? "location-outline",
+  };
+}
 
 export default function DeliveryScreen() {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
-  const user = useSessionStore((s) => s.user);
-  const { fuel, quantity, cylinderType, deliveryType, deliveryAddressId } =
-    useOrderStore((s) => s.order);
+  const router = useRouter();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  const [showSummary, setShowSummary] = useState(false);
+  const { step, total } = useFlowProgress("delivery");
+  const draft = useOrderStore((s) => s.order);
+  const setSelectedAddress = useOrderStore((s) => s.setSelectedAddress);
+  const setWhen = useOrderStore((s) => s.setWhen);
+  const setNote = useOrderStore((s) => s.setNote);
+  const userDefaultAddressId = useSessionStore(
+    (s) => s.user?.defaultAddress ?? null
+  );
 
-  const canReview = !!deliveryAddressId;
+  const [addresses, setAddresses] = useState<AddressLite[]>([]);
+  // Keep the raw records around so handleContinue can pull lat/lng.
+  const [rawAddresses, setRawAddresses] = useState<ServerAddress[]>([]);
+  const [loading, setLoading] = useState(true);
+  // "When" is local to this screen — never seeded from `draft.when`. Each
+  // step in the flow is an independent decision (LPG-swap schedule.tsx
+  // also has its own state). Default opens fresh on "now". Persisted to
+  // the store only when the user advances via Continue.
+  const [whenChoice, setWhenLocal] = useState<"now" | "schedule">("now");
+  const [scheduledAt, setScheduledAt] = useState<string | null>(null);
+  const [note, setNoteLocal] = useState<string>(draft.note ?? "");
+  const [selectedId, setSelectedId] = useState<string | null>(
+    draft.deliveryAddressId ?? userDefaultAddressId ?? null
+  );
 
-  const handleReview = () => {
-    if (!canReview) {
-      toast.error("Select a delivery address", {
-        description: "Choose where you'd like the fuel delivered",
+  const fetchAddresses = useCallback(async () => {
+    try {
+      const data = await api.get<ServerAddress[]>("/api/address-book", {
+        timeoutMs: 10000,
       });
-      return;
+      const adapted = data.map(adapt);
+      setAddresses(adapted);
+      setRawAddresses(data);
+      // Hydrate selection if nothing chosen yet.
+      if (!selectedId && adapted.length > 0) {
+        const def = data.find((a) => a.isDefault) ?? data[0];
+        setSelectedId(def._id);
+      }
+    } catch {
+      // best-effort
+    } finally {
+      setLoading(false);
     }
-    setShowSummary(true);
-  };
+  }, [selectedId]);
 
-  const handleConfirmOrder = () => {
-    setShowSummary(false);
-    useOrderStore.getState().setProgressStep(2);
-    router.push("/(customer)/(order)/stations" as any); // eslint-disable-line @typescript-eslint/no-explicit-any
-  };
+  useEffect(() => {
+    fetchAddresses();
+  }, [fetchAddresses]);
 
-  const handleBack = () => {
-    useOrderStore.getState().setProgressStep(0);
-    router.back();
-  };
+  useFocusEffect(
+    useCallback(() => {
+      // refresh when returning from address-book
+      fetchAddresses();
+    }, [fetchAddresses])
+  );
 
-  const s = styles(theme);
-  const fuelKey = fuel?.name?.toLowerCase() ?? "";
-  const localIcon = FUEL_LOCAL_ICON[fuelKey] ?? FUEL_LOCAL_ICON.petrol;
+  const selected = useMemo(
+    () => addresses.find((a) => a.id === selectedId) ?? null,
+    [addresses, selectedId]
+  );
 
-  // Build order recap chips
-  const recapChips: string[] = [];
-  if (fuel?.name) recapChips.push(fuel.name);
-  if (quantity && fuel?.unit) recapChips.push(`${quantity} ${fuel.unit}`);
-  if (cylinderType) recapChips.push(cylinderType);
-  if (deliveryType) recapChips.push(deliveryType === "cylinder_swap" ? "Swap" : "Top Up");
+  const handleSelect = useCallback((id: string) => {
+    setSelectedId(id);
+  }, []);
+
+  const handleAddNew = useCallback(() => {
+    router.push("/(screens)/address-book" as never);
+  }, [router]);
+
+  const scheduleSheetRef = useRef<ScheduleSheetRef>(null);
+
+  const handleScheduleTap = useCallback(() => {
+    scheduleSheetRef.current?.open();
+  }, []);
+
+  const handleWhenChange = useCallback(
+    (v: string) => {
+      const next = v === "schedule" ? "schedule" : "now";
+      setWhenLocal(next);
+      if (next === "schedule") handleScheduleTap();
+    },
+    [handleScheduleTap]
+  );
+
+  const handleScheduleConfirmed = useCallback((iso: string) => {
+    setWhenLocal("schedule");
+    setScheduledAt(iso);
+  }, []);
+
+  const handleContinue = useCallback(() => {
+    if (!selected) return;
+    // Carry the address coords forward so the Stations screen has somewhere
+    // to query against. Without these, /api/stations gets called with no
+    // lat/lng and Stations falls into its empty state.
+    const raw = rawAddresses.find((a) => a._id === selected.id);
+    const coords =
+      raw && raw.latitude != null && raw.longitude != null
+        ? { lat: raw.latitude, lng: raw.longitude }
+        : undefined;
+    setSelectedAddress({ id: selected.id, label: selected.label, coords });
+    setNote(note.trim());
+    setWhen(whenChoice, scheduledAt);
+    // LPG-Swap detours through `schedule` next so the user can decide
+    // whether the rider should take the empty same-trip or come back later.
+    // Liquid + LPG-Refill go straight to Stations.
+    const isSwap = draft.product === "lpg" && draft.serviceType === "swap";
+    router.push(
+      isSwap
+        ? ("/(customer)/(order)/schedule" as never)
+        : ("/(customer)/(order)/stations" as never)
+    );
+  }, [
+    selected,
+    rawAddresses,
+    setSelectedAddress,
+    setNote,
+    note,
+    setWhen,
+    whenChoice,
+    scheduledAt,
+    draft.product,
+    draft.serviceType,
+    router,
+  ]);
+
+  // CTA echo: address label (Home / Office / etc.) + when.
+  const ctaSubtitle = selected
+    ? `${selected.label} · ${whenChoice === "now" ? "now" : "scheduled"}`
+    : undefined;
 
   return (
-    <SafeAreaView style={s.safe}>
-      {/* Header */}
-      <View style={s.header}>
-        <TouchableOpacity
-          onPress={handleBack}
-          style={[s.backBtn, { borderColor: theme.ash }]}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="chevron-back" size={20} color={theme.text} />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={[s.headerSub, { color: theme.icon }]}>Step 2 of 3</Text>
-          <Text style={[s.headerTitle, { color: theme.text }]}>
-            Delivery Details
-          </Text>
-        </View>
-        <View style={s.headerRight}>
-          <NotificationButton onPress={() => router.push("/(screens)/notification" as any)} />
-          <ProfileCard
-            image={user?.profileImage}
-            initials={user?.displayName?.split(" ").map((w) => w[0]).join("").slice(0, 2)}
-            onPress={() => router.push("/(screens)/profile" as any)}
+    <ScreenContainer
+      edges={["top", "bottom"]}
+      contentStyle={styles.scroll}
+      header={<ScreenHeader title="Where & when" />}
+      footer={
+        <FloatingCTA
+          label="Continue"
+          subtitle={ctaSubtitle}
+          disabled={!selected}
+          onPress={handleContinue}
+          floating={false}
+          accessibilityHint={
+            !selected ? "Add or select an address to continue." : undefined
+          }
+        />
+      }
+    >
+      <View style={styles.body}>
+        <ProgressDots step={step} total={total} variant="bars" />
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>SAVED ADDRESSES</Text>
+          <AddressList
+            addresses={addresses}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            loading={loading}
           />
+          <Pressable
+            onPress={handleAddNew}
+            accessibilityRole="button"
+            accessibilityLabel="Add a new address"
+            style={({ pressed }) => [
+              styles.addNew,
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <Ionicons name="add" size={18} color={theme.primary} />
+            <Text style={styles.addNewText}>Add a new address</Text>
+          </Pressable>
         </View>
-      </View>
 
-      <OrderProgressBar />
-
-      <ScrollView
-        contentContainerStyle={s.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Compact order recap row */}
-        <View
-          style={[
-            s.recapRow,
-            { backgroundColor: theme.surface, borderColor: theme.ash },
-          ]}
-        >
-          <View style={[s.recapIconWrap, { backgroundColor: theme.tertiary }]}>
-            <Image
-              source={fuel?.icon ? { uri: fuel.icon } : localIcon}
-              style={s.recapIcon}
-              resizeMode="contain"
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>WHEN</Text>
+          <RadioGroup value={whenChoice} onChange={handleWhenChange}>
+            <RadioOption
+              value="now"
+              label="Now"
+              sublabel="Rider ~12 min away"
             />
-          </View>
-          <View style={s.recapChips}>
-            {recapChips.map((chip, i) => (
-              <React.Fragment key={chip}>
-                <Text style={[s.recapChipText, { color: theme.text }]}>
-                  {chip}
-                </Text>
-                {i < recapChips.length - 1 && (
-                  <Text style={[s.recapDot, { color: theme.ash }]}>·</Text>
-                )}
-              </React.Fragment>
-            ))}
-          </View>
+            <RadioOption
+              value="schedule"
+              label="Schedule"
+              sublabel={
+                whenChoice === "schedule" && scheduledAt
+                  ? new Date(scheduledAt).toLocaleString("en-NG", {
+                      weekday: "short",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })
+                  : "30 minutes headsup"
+              }
+              trailing="chevron"
+            />
+          </RadioGroup>
+          {whenChoice === "schedule" ? (
+            <Pressable
+              onPress={handleScheduleTap}
+              accessibilityRole="button"
+              accessibilityLabel="Change scheduled time"
+              hitSlop={6}
+            >
+              <Text style={styles.changeTimeLink}>Change time</Text>
+            </Pressable>
+          ) : null}
         </View>
 
-        {/* Divider */}
-        <View style={[s.divider, { backgroundColor: theme.ash }]} />
-
-        {/* Delivery address section */}
-        <DeliveryLocationSelect />
-      </ScrollView>
-
-      {/* Fixed CTA — paddingBottom clears floating pill tab bar */}
-      <View
-        style={[
-          s.ctaBar,
-          { borderTopColor: theme.ash, backgroundColor: theme.background, paddingBottom: Math.max(insets.bottom, 12) + 62 },
-        ]}
-      >
-        <TouchableOpacity
-          onPress={handleReview}
-          style={[
-            s.continueBtn,
-            { backgroundColor: theme.primary, opacity: canReview ? 1 : 0.4 },
-          ]}
-          activeOpacity={0.85}
-        >
-          <Text style={s.continueText}>
-            {canReview ? "Review Order" : "Select Delivery Address"}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>NOTE FOR RIDER · OPTIONAL</Text>
+          <View style={styles.noteWrap}>
+            <TextInput
+              value={note}
+              onChangeText={(v) => setNoteLocal(v.slice(0, NOTE_MAX))}
+              placeholder="Gate code, landmark, etc."
+              placeholderTextColor={theme.fgSubtle}
+              multiline
+              maxLength={NOTE_MAX}
+              accessibilityLabel="Note for rider"
+              accessibilityHint={`Optional. Up to ${NOTE_MAX} characters.`}
+              accessibilityValue={{ text: `${note.length} of ${NOTE_MAX} characters` }}
+              style={styles.noteInput}
+            />
+            <Text style={styles.noteCounter}>
+              {note.length}/{NOTE_MAX}
+            </Text>
+          </View>
+        </View>
       </View>
 
-      <OrderSummaryModal
-        visible={showSummary}
-        onClose={() => setShowSummary(false)}
-        onConfirm={handleConfirmOrder}
-        onCancel={() => {
-          setShowSummary(false);
-          router.replace("/(customer)/(order)" as any); // eslint-disable-line @typescript-eslint/no-explicit-any
-        }}
+      <ScheduleSheet
+        ref={scheduleSheetRef}
+        value={scheduledAt}
+        onChange={handleScheduleConfirmed}
       />
-    </SafeAreaView>
+    </ScreenContainer>
   );
 }
 
-const styles = (theme: ReturnType<typeof useTheme>) =>
+const makeStyles = (theme: Theme) =>
   StyleSheet.create({
-    safe: { flex: 1, backgroundColor: theme.background },
-    header: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      paddingHorizontal: 16,
-      paddingTop: 14,
-      paddingBottom: 6,
+    scroll: {
+      paddingBottom: theme.space.s5,
     },
-    backBtn: {
-      width: 36,
-      height: 36,
-      borderRadius: 10,
-      borderWidth: 1,
-      alignItems: "center",
-      justifyContent: "center",
+    body: {
+      paddingHorizontal: theme.space.s4,
+      gap: theme.space.s5,
+      paddingTop: theme.space.s2,
     },
-    headerSub: { fontSize: 11, fontWeight: "300", marginBottom: 1 },
-    headerTitle: { fontSize: 20, fontWeight: "600" },
-    headerRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-    scrollContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20 },
-    title: {
-      fontSize: 13,
-      fontWeight: "500",
-      marginBottom: 12,
-      letterSpacing: 0.1,
-    },
-    // Recap row
-    recapRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      padding: 12,
-      borderRadius: 14,
-      borderWidth: 1,
-      marginBottom: 20,
-    },
-    recapIconWrap: {
-      width: 52,
-      height: 52,
-      borderRadius: 14,
-      alignItems: "center",
-      justifyContent: "center",
-      flexShrink: 0,
-    },
-    recapIcon: { width: 38, height: 38 },
-    recapChips: {
-      flex: 1,
-      flexDirection: "row",
-      alignItems: "center",
-      flexWrap: "wrap",
-      gap: 4,
-    },
-    recapChipText: { fontSize: 13, fontWeight: "500" },
-    recapDot: { fontSize: 14, fontWeight: "300" },
-    payBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
-    payBadgeText: { fontSize: 11, fontWeight: "600", color: "#22C55E" },
-
-    divider: { height: StyleSheet.hairlineWidth, marginBottom: 20 },
-
+    section: { gap: theme.space.s3 },
     sectionLabel: {
-      fontSize: 11,
-      fontWeight: "600",
-      letterSpacing: 0.9,
-      textTransform: "uppercase",
-      marginBottom: 12,
+      ...theme.type.micro,
+      fontSize: 13,
+      letterSpacing: 0.6,
+      color: theme.fgMuted,
     },
-
-    ctaBar: {
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      borderTopWidth: 1,
+    changeTimeLink: {
+      ...theme.type.caption,
+      color: theme.primary,
+      fontWeight: "700",
+      alignSelf: "flex-end",
     },
-    continueBtn: {
-      paddingVertical: 16,
-      borderRadius: 16,
+    addNew: {
+      flexDirection: "row",
       alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      borderColor: theme.borderStrong,
+      borderWidth: 1,
+      borderStyle: "dashed",
+      borderRadius: theme.radius.lg,
+      paddingVertical: theme.space.s3,
     },
-    continueText: { color: "#fff", fontWeight: "500", fontSize: 16 },
+    addNewText: {
+      ...theme.type.body,
+      color: theme.primary,
+      fontWeight: "700",
+    },
+    noteWrap: {
+      backgroundColor: theme.bgMuted,
+      borderRadius: theme.radius.md,
+      borderColor: theme.border,
+      borderWidth: 1,
+      paddingHorizontal: theme.space.s3,
+      paddingVertical: theme.space.s2 + 2,
+    },
+    noteInput: {
+      ...theme.type.body,
+      color: theme.fg,
+      minHeight: 64,
+      textAlignVertical: "top",
+      padding: 0,
+    },
+    noteCounter: {
+      ...theme.type.caption,
+      color: theme.fgSubtle,
+      alignSelf: "flex-end",
+      marginTop: 4,
+    },
   });

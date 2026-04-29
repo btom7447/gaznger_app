@@ -34,6 +34,7 @@ const MENU_ITEMS: MenuCard[] = [
   { id: "address", label: "Delivery Address", icon: "location-outline", route: "/(screens)/address-book" },
   { id: "notifications", label: "Notifications", icon: "notifications-outline", route: "/(screens)/notification" },
   { id: "settings", label: "Settings", icon: "settings-outline", route: "/(screens)/settings" },
+  { id: "wallet", label: "Wallet", icon: "wallet-outline", route: "/(customer)/wallet" },
   { id: "payment", label: "Payment Method", icon: "card-outline", route: "/(screens)/payment-method" },
   { id: "orders", label: "Order History", icon: "receipt-outline", route: "/(screens)/order-history" },
   { id: "security", label: "Security & Privacy", icon: "shield-checkmark-outline", route: "/(screens)/security-privacy" },
