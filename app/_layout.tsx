@@ -4,11 +4,15 @@ import { useTheme } from "@/constants/theme";
 import { StatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { Toaster } from 'sonner-native';
+import { PaystackProvider } from "react-native-paystack-webview";
 import { useSessionStore } from "@/store/useSessionStore";
+import { useWalletStore } from "@/store/useWalletStore";
 import Constants from "expo-constants";
 import { api } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
+import { getPaystackPublicKey } from "@/lib/paystackKey";
 
 const isExpoGo = Constants.appOwnership === "expo";
 
@@ -41,10 +45,24 @@ async function syncUserSession() {
       points: user.points,
       defaultAddress: user.defaultAddress ?? null,
       isOnboarded: user.isOnboarded,
+      lastPaystackAuth: user.lastPaystackAuth,
+      accountStatus: user.accountStatus,
+      withdrawalHold: user.withdrawalHold,
     });
   } catch {
     // Non-fatal — stale session still works; token refresh / 401 logout is handled by api wrapper
   }
+}
+
+/**
+ * Pull wallet balance + wire socket subscription on login. Wallet socket
+ * pushes (`wallet:update`) update the store automatically; this kicks
+ * off the initial GET so balances are warm before any screen reads them.
+ */
+function syncWalletAndSubscribe(): () => void {
+  const wallet = useWalletStore.getState();
+  wallet.refresh();
+  return wallet.attachSocket();
 }
 
 export default function RootLayout() {
@@ -54,50 +72,63 @@ export default function RootLayout() {
   // Redirect to auth whenever the session is cleared (e.g. token refresh fails after server restart)
   useEffect(() => {
     let prev = useSessionStore.getState().isLoggedIn;
+    let detachWallet: (() => void) | undefined;
     const unsub = useSessionStore.subscribe((state) => {
       if (prev && !state.isLoggedIn && state.hasHydrated) {
         router.replace("/(auth)/authentication");
+        detachWallet?.();
+        detachWallet = undefined;
       }
-      // Register device token, connect socket, and sync profile whenever user logs in
+      // Register device token, connect socket, sync profile + wallet on login
       if (!prev && state.isLoggedIn && state.hasHydrated) {
         registerDeviceToken();
         connectSocket(state.accessToken);
         syncUserSession();
+        detachWallet?.();
+        detachWallet = syncWalletAndSubscribe();
       }
       prev = state.isLoggedIn;
     });
-    // Also register, connect socket, and sync profile if already logged in on mount (app resume)
+    // Same flow on mount when the user is already logged in (app resume)
     const session = useSessionStore.getState();
     if (session.isLoggedIn) {
       registerDeviceToken();
       connectSocket(session.accessToken);
       syncUserSession();
+      detachWallet = syncWalletAndSubscribe();
     }
-    return unsub;
+    return () => {
+      unsub();
+      detachWallet?.();
+    };
   }, []);
 
   return (
     <>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
-          <StatusBar
-            barStyle={theme.mode === "dark" ? "light-content" : "dark-content"}
-            backgroundColor={theme.background}
-          />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: theme.background },
-            }}
-          >
-            {/* Main navigators */}
-            <Stack.Screen name="index" />
-            <Stack.Screen name="modal" />
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(screens)" />
-            <Stack.Screen name="(legal)/privacy" />
-            <Stack.Screen name="(legal)/terms" />
-          </Stack>
+          <PaystackProvider publicKey={getPaystackPublicKey()} currency="NGN" debug={__DEV__}>
+            <BottomSheetModalProvider>
+              <StatusBar
+                barStyle={theme.mode === "dark" ? "light-content" : "dark-content"}
+                backgroundColor={theme.background}
+              />
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: theme.background },
+                }}
+              >
+                {/* Main navigators */}
+                <Stack.Screen name="index" />
+                <Stack.Screen name="modal" />
+                <Stack.Screen name="(auth)" />
+                <Stack.Screen name="(screens)" />
+                <Stack.Screen name="(legal)/privacy" />
+                <Stack.Screen name="(legal)/terms" />
+              </Stack>
+            </BottomSheetModalProvider>
+          </PaystackProvider>
         </SafeAreaProvider>
         <Toaster richColors position="top-center" toastOptions={{ style: { borderRadius: 14 } }} />
       </GestureHandlerRootView>

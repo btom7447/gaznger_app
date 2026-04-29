@@ -5,6 +5,20 @@ import { connectSocket, disconnectSocket } from "@/lib/socket";
 
 export type UserRole = "customer" | "vendor" | "rider" | "admin";
 
+/**
+ * Saved Paystack card metadata. Populated by the server on first
+ * successful charge — do NOT mutate from the client. Treated as
+ * "is the user able to pay with one tap" gate in payment.tsx.
+ */
+export interface SavedCard {
+  authorizationCode?: string;
+  last4: string;
+  brand?: string;
+  bank?: string;
+  expMonth?: string;
+  expYear?: string;
+}
+
 export interface SessionUser {
   id: string;
   email: string;
@@ -16,6 +30,12 @@ export interface SessionUser {
   defaultAddress?: string | null;
   role: UserRole;
   isOnboarded: boolean;
+  /** Server-managed. Surfaces the "Use saved card" path in checkout. */
+  lastPaystackAuth?: SavedCard;
+  /** "pending" | "active" | "suspended". Gated UI when not active. */
+  accountStatus?: "pending" | "active" | "suspended";
+  /** Vendor + rider only — gates the withdraw button when active. */
+  withdrawalHold?: { active: boolean; reason?: string };
 }
 
 interface SessionState {
