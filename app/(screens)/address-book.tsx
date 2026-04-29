@@ -14,8 +14,10 @@ import {
   Keyboard,
   Dimensions,
   Switch,
+  Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Swipeable } from "react-native-gesture-handler";
 import MapView, { Marker, Region } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
@@ -27,6 +29,7 @@ import { useSessionStore } from "@/store/useSessionStore";
 import BackButton from "@/components/ui/global/BackButton";
 import AddressListSkeleton from "@/components/ui/skeletons/AddressListSkeleton";
 import { useUserLocation } from "@/hooks/useUserLocation";
+import { KebabMenu } from "@/components/ui/primitives";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const MODAL_HEIGHT = SCREEN_HEIGHT * 0.9;
@@ -246,49 +249,151 @@ export default function AddressBookScreen() {
     ? { latitude: userLocation.lat, longitude: userLocation.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 }
     : DEFAULT_REGION;
 
-  /* ── Address list card ── */
-  const renderItem = ({ item }: { item: Address }) => (
-    <View style={[s.card, { borderColor: item.isDefault ? theme.primary : theme.ash, backgroundColor: theme.surface }]}>
-      <View style={[s.cardIconWrap, { backgroundColor: item.isDefault ? theme.tertiary : theme.quinest }]}>
-        <Ionicons
-          name={(item.icon ?? "location-outline") as any}
-          size={20}
-          color={item.isDefault ? theme.primary : theme.icon}
-        />
+  /* ── Address list card (v3) ──
+   * Two ways to act on a row, per UX direction (we ship both):
+   *   1. Tap the kebab → action sheet (Edit / Set as default / Delete)
+   *   2. Swipe left → reveals Edit + Delete buttons inline
+   * Whole-row tap sets the address as default — fastest path for the
+   * most common action.
+   */
+  const renderItem = ({ item }: { item: Address }) => {
+    const swipeRef = useRef<Swipeable>(null);
+    const renderRightActions = () => (
+      <View style={s.swipeActions}>
+        <Pressable
+          onPress={() => {
+            swipeRef.current?.close();
+            openEdit(item);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${item.label}`}
+          style={({ pressed }) => [
+            s.swipeBtn,
+            { backgroundColor: theme.bgMuted },
+            pressed && { opacity: 0.85 },
+          ]}
+        >
+          <Ionicons name="create-outline" size={20} color={theme.fg} />
+          <Text style={[s.swipeBtnText, { color: theme.fg }]}>Edit</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            swipeRef.current?.close();
+            deleteAddress(item._id);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${item.label}`}
+          style={({ pressed }) => [
+            s.swipeBtn,
+            { backgroundColor: theme.errorTint },
+            pressed && { opacity: 0.85 },
+          ]}
+        >
+          <Ionicons name="trash-outline" size={20} color={theme.error} />
+          <Text style={[s.swipeBtnText, { color: theme.error }]}>Delete</Text>
+        </Pressable>
       </View>
+    );
 
-      <TouchableOpacity style={s.cardContent} onPress={() => setDefault(item._id)} activeOpacity={0.7}>
-        <View style={s.cardTitleRow}>
-          <Text style={[s.cardLabel, { color: theme.text }]}>{item.label}</Text>
-          {item.isDefault && (
-            <View style={[s.defaultBadge, { backgroundColor: theme.tertiary, borderColor: theme.primary }]}>
-              <Ionicons name="checkmark-circle" size={11} color={theme.primary} />
-              <Text style={[s.defaultBadgeText, { color: theme.primary }]}>Default</Text>
+    return (
+      <Swipeable
+        ref={swipeRef}
+        renderRightActions={renderRightActions}
+        overshootRight={false}
+        friction={2}
+      >
+        <Pressable
+          onPress={() => !item.isDefault && setDefault(item._id)}
+          accessibilityRole="button"
+          accessibilityLabel={
+            item.isDefault
+              ? `${item.label}, default address`
+              : `${item.label}. Tap to set as default.`
+          }
+          style={({ pressed }) => [
+            s.cardV3,
+            {
+              backgroundColor: theme.surface,
+              borderColor: item.isDefault ? theme.primary : theme.divider,
+            },
+            pressed && { opacity: 0.94 },
+          ]}
+        >
+          <View style={[s.cardIconV3, { backgroundColor: theme.primaryTint }]}>
+            <Ionicons
+              name={(item.icon ?? "location-outline") as any}
+              size={18}
+              color={theme.mode === "dark" ? "#fff" : theme.palette.green700}
+            />
+          </View>
+
+          <View style={s.cardBody}>
+            <View style={s.cardTitleRowV3}>
+              <Text style={[s.cardLabelV3, { color: theme.fg }]} numberOfLines={1}>
+                {item.label}
+              </Text>
+              {item.isDefault ? (
+                <View
+                  style={[s.defaultBadgeV3, { backgroundColor: theme.primaryTint }]}
+                >
+                  <Text
+                    style={[
+                      s.defaultBadgeTextV3,
+                      {
+                        color:
+                          theme.mode === "dark"
+                            ? "#fff"
+                            : theme.palette.green700,
+                      },
+                    ]}
+                  >
+                    DEFAULT
+                  </Text>
+                </View>
+              ) : null}
             </View>
-          )}
-        </View>
-        {(item.street || item.city) ? (
-          <Text style={[s.cardSub, { color: theme.icon }]} numberOfLines={1}>
-            {[item.street, item.city, item.state].filter(Boolean).join(", ")}
-          </Text>
-        ) : null}
-        {item.latitude && item.longitude ? (
-          <Text style={[s.cardCoords, { color: theme.icon }]}>
-            {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}
-          </Text>
-        ) : null}
-      </TouchableOpacity>
+            {item.street || item.city ? (
+              <Text
+                style={[s.cardSubV3, { color: theme.fg }]}
+                numberOfLines={2}
+              >
+                {[item.street, item.city, item.state]
+                  .filter(Boolean)
+                  .join(", ")}
+              </Text>
+            ) : null}
+          </View>
 
-      <View style={s.cardActions}>
-        <TouchableOpacity onPress={() => openEdit(item)} style={s.actionBtn}>
-          <Ionicons name="create-outline" size={17} color={theme.icon} />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => deleteAddress(item._id)} style={s.actionBtn}>
-          <Ionicons name="trash-outline" size={17} color={theme.error} />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+          <KebabMenu
+            title="Address actions"
+            accessibilityLabel={`${item.label} actions`}
+            actions={[
+              {
+                label: "Edit",
+                icon: "create-outline",
+                onPress: () => openEdit(item),
+              },
+              ...(!item.isDefault
+                ? [
+                    {
+                      label: "Set as default",
+                      icon: "star-outline" as const,
+                      onPress: () => setDefault(item._id),
+                    },
+                  ]
+                : []),
+              {
+                label: "Delete",
+                icon: "trash-outline",
+                danger: true,
+                onPress: () => deleteAddress(item._id),
+              },
+            ]}
+          />
+        </Pressable>
+      </Swipeable>
+    );
+  };
 
   return (
     <SafeAreaView style={s.safe}>
@@ -603,6 +708,71 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
     cardCoords: { fontSize: 10, fontWeight: "300", marginTop: 2, fontVariant: ["tabular-nums" as any] },
     cardActions: { flexDirection: "row", gap: 2, flexShrink: 0 },
     actionBtn: { width: 36, height: 36, justifyContent: "center", alignItems: "center" },
+
+    /* Address card — v3 design (replaces .card on the list view) */
+    cardV3: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.space.s3,
+      padding: theme.space.s3 + 2,
+      marginBottom: theme.space.s3,
+      borderRadius: theme.radius.md + 2, // 14 per design
+      borderWidth: 1,
+    },
+    cardIconV3: {
+      width: 40,
+      height: 40,
+      borderRadius: theme.radius.md - 2, // 10
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
+    cardBody: { flex: 1, minWidth: 0 },
+    cardTitleRowV3: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.space.s2,
+      marginBottom: 4,
+    },
+    cardLabelV3: {
+      ...theme.type.body,
+      fontWeight: "800",
+      flexShrink: 1,
+    },
+    defaultBadgeV3: {
+      borderRadius: theme.radius.pill,
+      paddingHorizontal: theme.space.s2,
+      paddingVertical: 2,
+    },
+    defaultBadgeTextV3: {
+      ...theme.type.micro,
+      fontWeight: "800",
+      letterSpacing: 0.5,
+    },
+    cardSubV3: {
+      ...theme.type.bodySm,
+      lineHeight: 18,
+    },
+
+    /* Swipe-revealed actions */
+    swipeActions: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      // Match the card's bottom margin so the swipe surface aligns.
+      marginBottom: theme.space.s3,
+      borderRadius: theme.radius.md + 2,
+      overflow: "hidden",
+    },
+    swipeBtn: {
+      width: 80,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 4,
+    },
+    swipeBtnText: {
+      ...theme.type.micro,
+      fontWeight: "800",
+    },
 
     /* Empty */
     empty: { alignItems: "center", marginTop: 80, gap: 12 },
