@@ -22,3 +22,12 @@ export { default as OfflineStrip } from "./OfflineStrip";
 export { default as MoneySurface } from "./MoneySurface";
 export { default as ReceiptRow } from "./ReceiptRow";
 export { default as MapMarkerRider } from "./MapMarkerRider";
+
+// v3 primitives
+export { default as Row } from "./Row";
+export type { RowKind } from "./Row";
+export { default as Switch } from "./Switch";
+export { default as Chip } from "./Chip";
+export type { ChipKind } from "./Chip";
+export { default as KebabMenu } from "./KebabMenu";
+export type { KebabAction } from "./KebabMenu";

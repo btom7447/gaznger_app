@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
@@ -18,11 +18,30 @@ interface PointsRedeemProps {
   /** Currently chosen points to spend (0 = no redemption). */
   pointsToSpend: number;
   onChange: (points: number) => void;
+  /**
+   * v3 design: render a collapsed primary state ("Redeem points?") that
+   * expands on tap to reveal the preset row. Defaults to false to
+   * preserve the existing always-expanded behaviour for any caller that
+   * doesn't opt in. (Backward-compatible — no consumer break.)
+   */
+  collapsible?: boolean;
+  /**
+   * Initial collapsed state when `collapsible=true`. Default true when
+   * pointsToSpend === 0 (collapsed), false when > 0 (expanded so the
+   * user sees their selection). Caller can force a value either way.
+   */
+  defaultCollapsed?: boolean;
 }
 
 /**
- * Quick-pick redemption bar with a few preset amounts (capped to balance
- * and to total). Tapping a preset toggles between "redeem N" and "off".
+ * Quick-pick redemption with two visual modes:
+ *
+ *   - LEGACY (collapsible=false, default): always-expanded card with
+ *     header + preset chip row.
+ *   - v3 COLLAPSED (collapsible=true + collapsed): a single tappable
+ *     header row with a "Redeem points?" affordance + chevron. Tapping
+ *     expands into the preset row. Auto-expands when pointsToSpend > 0
+ *     so a redemption is never hidden behind a tap.
  *
  * The user's balance and the order total both bound the maximum: you can
  * never spend more points than you own, and you can never reduce the
@@ -33,6 +52,8 @@ export default function PointsRedeem({
   balance,
   pointsToSpend,
   onChange,
+  collapsible = false,
+  defaultCollapsed,
 }: PointsRedeemProps) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -50,10 +71,58 @@ export default function PointsRedeem({
     return fits;
   }, [maxRedeemable]);
 
+  // Collapsed state — only meaningful when collapsible=true.
+  const [collapsed, setCollapsed] = useState<boolean>(
+    defaultCollapsed ?? pointsToSpend === 0
+  );
+
+  // Auto-expand whenever a redemption is active so the user can always
+  // see + change their selection. Auto-collapse on Clear (back to 0).
+  useEffect(() => {
+    if (!collapsible) return;
+    if (pointsToSpend > 0 && collapsed) setCollapsed(false);
+  }, [pointsToSpend, collapsible, collapsed]);
+
   const handlePreset = (n: number) => {
     onChange(n === pointsToSpend ? 0 : n);
   };
 
+  // ── Collapsed render (v3 only) ──
+  if (collapsible && collapsed && balance > 0 && maxRedeemable > 0) {
+    return (
+      <Pressable
+        onPress={() => setCollapsed(false)}
+        accessibilityRole="button"
+        accessibilityLabel="Redeem Gaznger Points"
+        accessibilityHint="Expands the redemption options."
+        style={({ pressed }) => [
+          styles.card,
+          styles.collapsedCard,
+          pressed && { opacity: 0.92 },
+        ]}
+      >
+        <View style={styles.headerLeft}>
+          <View style={styles.coin}>
+            <Ionicons name="star" size={13} color={theme.palette.neutral900} />
+          </View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={styles.title}>Redeem points?</Text>
+            <Text style={styles.sub}>
+              {balance.toLocaleString("en-NG")} available · up to{" "}
+              {formatCurrency(maxRedeemable * POINTS_TO_NAIRA)} off
+            </Text>
+          </View>
+        </View>
+        <Ionicons
+          name="chevron-down"
+          size={18}
+          color={theme.fgMuted}
+        />
+      </Pressable>
+    );
+  }
+
+  // ── Expanded render (legacy + v3 expanded) ──
   return (
     <View style={styles.card}>
       <View style={styles.headerRow}>
@@ -70,12 +139,24 @@ export default function PointsRedeem({
         </View>
         {pointsToSpend > 0 ? (
           <Pressable
-            onPress={() => onChange(0)}
+            onPress={() => {
+              onChange(0);
+              if (collapsible) setCollapsed(true);
+            }}
             accessibilityRole="button"
             accessibilityLabel="Don't redeem points"
             hitSlop={8}
           >
             <Text style={styles.clear}>Clear</Text>
+          </Pressable>
+        ) : collapsible ? (
+          <Pressable
+            onPress={() => setCollapsed(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Hide redemption options"
+            hitSlop={8}
+          >
+            <Ionicons name="chevron-up" size={18} color={theme.fgMuted} />
           </Pressable>
         ) : null}
       </View>
@@ -128,6 +209,12 @@ const makeStyles = (theme: Theme) =>
       backgroundColor: theme.accentTint,
       borderRadius: theme.radius.lg,
       padding: theme.space.s3 + 2,
+      gap: theme.space.s3,
+    },
+    collapsedCard: {
+      // Single-row variant: row layout, no inner gap.
+      flexDirection: "row",
+      alignItems: "center",
       gap: theme.space.s3,
     },
     headerRow: {

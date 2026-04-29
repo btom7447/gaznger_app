@@ -5,9 +5,11 @@ import { Theme, useTheme } from "@/constants/theme";
 import { useThemeStore } from "@/store/useThemeStore";
 import {
   Button,
+  Chip,
   EmptyState,
   ErrorStrip,
   FloatingCTA,
+  KebabMenu,
   LiveBadge,
   LiveStatus,
   MoneySurface,
@@ -16,13 +18,16 @@ import {
   RadioGroup,
   RadioOption,
   ReceiptRow,
+  Row,
   ScreenContainer,
   ScreenHeader,
   SelectCard,
   Skeleton,
   StatusBadge,
   Stepper,
+  Switch,
 } from "@/components/ui/primitives";
+import PointsRedeem from "@/components/ui/customer/order/PointsRedeem";
 
 /**
  * Phase 1 primitive preview harness. Renders every primitive in the
@@ -44,6 +49,11 @@ export default function PrimitivesPreview() {
   const [progress, setProgress] = useState(1);
   const [offlineForce, setOfflineForce] = useState(false);
   const [liveStatus, setLiveStatus] = useState<LiveStatus>("live");
+  // v3 demo state
+  const [pushOn, setPushOn] = useState(true);
+  const [priceAlertsOn, setPriceAlertsOn] = useState(false);
+  const [chipFilter, setChipFilter] = useState<string>("all");
+  const [points, setPoints] = useState(0);
 
   const cycleTheme = () => {
     setColorScheme(
@@ -335,6 +345,145 @@ export default function PrimitivesPreview() {
             ]}
             totalLabel="Estimated total"
             totalValue={12000}
+          />
+        </Section>
+
+        {/* ───────────────── v3 PRIMITIVES ───────────────── */}
+
+        <Section title="Row (v3)">
+          <View
+            style={{
+              borderRadius: theme.radius.lg,
+              backgroundColor: theme.surface,
+              borderColor: theme.border,
+              borderWidth: 1,
+              overflow: "hidden",
+            }}
+          >
+            <Row
+              icon="person-outline"
+              label="Profile"
+              meta="View"
+              onPress={() => {}}
+            />
+            <Row
+              icon="wallet-outline"
+              label="Wallet"
+              sub="Balance · ₦7,225"
+              meta="₦7,225"
+              onPress={() => {}}
+              accent={theme.primaryTint}
+            />
+            <Row
+              icon="notifications-outline"
+              label="Push notifications"
+              kind="switch"
+              switchValue={pushOn}
+              onSwitchChange={setPushOn}
+            />
+            <Row
+              icon="pricetag-outline"
+              label="Price alerts"
+              sub="When nearby stations drop their price"
+              kind="switch"
+              switchValue={priceAlertsOn}
+              onSwitchChange={setPriceAlertsOn}
+            />
+            <Row
+              icon="log-out-outline"
+              label="Sign out"
+              danger
+              kind="none"
+              divider={false}
+              onPress={() => {}}
+            />
+          </View>
+        </Section>
+
+        <Section title="Switch (v3) — standalone">
+          <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
+            <Switch value={pushOn} onValueChange={setPushOn} />
+            <Switch value={priceAlertsOn} onValueChange={setPriceAlertsOn} />
+            <Switch value={false} onValueChange={() => {}} disabled />
+          </View>
+        </Section>
+
+        <Section title="Chip (v3) — filter rail">
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            {(["all", "active", "delivered", "cancelled"] as const).map((k) => (
+              <Chip
+                key={k}
+                selected={chipFilter === k}
+                count={
+                  k === "all" ? 12 : k === "active" ? 1 : k === "delivered" ? 9 : 2
+                }
+                onPress={() => setChipFilter(k)}
+              >
+                {k[0].toUpperCase() + k.slice(1)}
+              </Chip>
+            ))}
+          </View>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+            <Chip kind="primary" selected onPress={() => {}}>
+              Primary kind
+            </Chip>
+            <Chip onPress={() => {}}>Inactive neutral</Chip>
+          </View>
+        </Section>
+
+        <Section title="KebabMenu (v3) — action sheet">
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              padding: 12,
+              borderRadius: theme.radius.lg,
+              backgroundColor: theme.surface,
+              borderColor: theme.border,
+              borderWidth: 1,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text
+                style={{
+                  ...theme.type.body,
+                  color: theme.fg,
+                  fontWeight: "700",
+                }}
+              >
+                Home address
+              </Text>
+              <Text style={{ ...theme.type.caption, color: theme.fgMuted }}>
+                12 Banana Island Rd, Ikoyi
+              </Text>
+            </View>
+            <KebabMenu
+              title="Address actions"
+              actions={[
+                { label: "Edit", icon: "create-outline", onPress: () => {} },
+                {
+                  label: "Set as default",
+                  icon: "star-outline",
+                  onPress: () => {},
+                },
+                {
+                  label: "Delete",
+                  icon: "trash-outline",
+                  danger: true,
+                  onPress: () => {},
+                },
+              ]}
+            />
+          </View>
+        </Section>
+
+        <Section title="PointsRedeem (v3) — collapsible">
+          <PointsRedeem
+            total={12000}
+            balance={2450}
+            pointsToSpend={points}
+            onChange={setPoints}
+            collapsible
           />
         </Section>
       </View>
