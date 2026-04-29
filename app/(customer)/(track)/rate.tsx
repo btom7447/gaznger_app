@@ -80,12 +80,22 @@ export default function RateScreen() {
 
     setSubmitting(true);
     try {
-      await api.post(`/api/orders/${draft.orderId}/rate`, {
+      const res = await api.post<{
+        tipTransferred?: boolean;
+        tipWarning?: string;
+      }>(`/api/orders/${draft.orderId}/rate`, {
         stars,
         tags: tagsArray,
         tip: finalTip,
         note: note.trim(),
       });
+      // Server transfers the tip from customer wallet → rider wallet
+      // on submit. If wallet balance was below the tip, server returns
+      // a tipWarning and skips the transfer — surface it so the user
+      // can top up + retry the tip outside this flow.
+      if (finalTip > 0 && res?.tipTransferred === false && res.tipWarning) {
+        toast.warning("Tip not sent", { description: res.tipWarning });
+      }
     } catch (err: any) {
       // Show a non-blocking error but still continue to Complete so the
       // user isn't stuck on this screen. The local rating remains in

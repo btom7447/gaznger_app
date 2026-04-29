@@ -13,6 +13,7 @@ import { useRouter } from "expo-router";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
 import { useSessionStore } from "@/store/useSessionStore";
+import { shareReceiptPdf } from "@/lib/receiptPdf";
 import {
   Button,
   ReceiptRow,
@@ -97,12 +98,19 @@ export default function DeliveredScreen() {
   }, [router]);
 
   const handleShare = useCallback(async () => {
+    if (!draft.orderId) return;
     try {
-      await Share.share({
-        message: `Order #${draft.orderId ?? ""}: ${fuelLine}. Total ${formatCurrency(totalCharged)}.`,
-      });
+      await shareReceiptPdf(draft.orderId);
     } catch {
-      // user cancelled
+      // PDF download failed — fall back to text share so the button
+      // never feels dead.
+      try {
+        await Share.share({
+          message: `Order #${draft.orderId ?? ""}: ${fuelLine}. Total ${formatCurrency(totalCharged)}.`,
+        });
+      } catch {
+        // user cancelled
+      }
     }
   }, [draft.orderId, fuelLine, totalCharged]);
 

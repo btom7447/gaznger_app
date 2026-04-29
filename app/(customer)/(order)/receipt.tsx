@@ -14,6 +14,7 @@ import { useOrderStore } from "@/store/useOrderStore";
 import { useSessionStore } from "@/store/useSessionStore";
 import { getSocket } from "@/lib/socket";
 import { paymentMethodLabel } from "@/lib/paymentLabel";
+import { shareReceiptPdf } from "@/lib/receiptPdf";
 import {
   Button,
   ReceiptRow,
@@ -158,15 +159,23 @@ export default function ReceiptScreen() {
   }, [router]);
 
   const handleSharePdf = useCallback(async () => {
+    if (!draft.orderId) return;
     try {
-      await Share.share({
-        title: `Gaznger receipt — Order ${orderId}`,
-        message: `Order ${orderId}: ${fuelLine} from ${stationName}. Total ${formatCurrency(total)}.`,
-      });
-    } catch {
-      // user cancelled
+      await shareReceiptPdf(draft.orderId);
+    } catch (err: any) {
+      // PDF download failed (offline, server error, share unavailable).
+      // Fall back to the legacy text Share so the user still gets
+      // *something* shareable instead of a dead button.
+      try {
+        await Share.share({
+          title: `Gaznger receipt — Order ${orderId}`,
+          message: `Order ${orderId}: ${fuelLine} from ${stationName}. Total ${formatCurrency(total)}.`,
+        });
+      } catch {
+        // user cancelled
+      }
     }
-  }, [orderId, fuelLine, stationName, total]);
+  }, [draft.orderId, orderId, fuelLine, stationName, total]);
 
   const display = STATUS_DISPLAY[status];
 
