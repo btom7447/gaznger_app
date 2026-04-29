@@ -50,6 +50,7 @@ async function syncUserSession() {
       withdrawalHold: user.withdrawalHold,
       lpgOrderCount: user.lpgOrderCount,
       savedCylinder: user.savedCylinder,
+      preferences: user.preferences,
     });
   } catch {
     // Non-fatal — stale session still works; token refresh / 401 logout is handled by api wrapper

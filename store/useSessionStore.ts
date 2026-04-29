@@ -53,6 +53,24 @@ export interface SessionUser {
     photos?: string[];
     savedAt?: string;
   };
+
+  /**
+   * Customer preferences. Server-mirrored — every Settings toggle PATCHes
+   * the matching key via PUT /auth/me. Defaults at the server layer:
+   *   autoRedeemPoints     → false
+   *   priceAlertsEnabled   → false
+   *   pushEnabled          → true
+   *   notificationsFilter  → undefined (client treats as "all")
+   *
+   * See docs/handoff/_server-asks/auth-me-preferences.md for the full
+   * contract.
+   */
+  preferences?: {
+    autoRedeemPoints?: boolean;
+    priceAlertsEnabled?: boolean;
+    pushEnabled?: boolean;
+    notificationsFilter?: string;
+  };
 }
 
 interface SessionState {
