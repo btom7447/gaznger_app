@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { ACTIVE_ORDER_STATUSES } from "@/_shared";
 
 /**
  * Minimal active-order shape that callers commonly need. We
@@ -42,9 +43,10 @@ export interface ActiveOrderInfo {
  * and v3 granular (`at_plant`, `arrived`, etc.) enums so it works
  * regardless of which rider-app version produced the order.
  */
-const ACTIVE_QUERY =
-  "pending,confirmed,assigned,in-transit,in_transit,awaiting_confirmation," +
-  "assigning,picked_up,at_plant,refilling,returning,arrived,dispensing";
+// Comma-joined whitelist for the polling query. Sourced from the
+// shared module so adding a new in-flight status updates this hook
+// AND the server's matching whitelists in lockstep.
+const ACTIVE_QUERY = ACTIVE_ORDER_STATUSES.join(",");
 
 export function useActiveOrder() {
   const [hasActiveOrder, setHasActiveOrder] = useState(false);
