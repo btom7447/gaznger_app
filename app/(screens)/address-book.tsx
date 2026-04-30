@@ -29,7 +29,12 @@ import { useSessionStore } from "@/store/useSessionStore";
 import BackButton from "@/components/ui/global/BackButton";
 import AddressListSkeleton from "@/components/ui/skeletons/AddressListSkeleton";
 import { useUserLocation } from "@/hooks/useUserLocation";
-import { KebabMenu } from "@/components/ui/primitives";
+import {
+  FloatingCTA,
+  KebabMenu,
+  ScreenContainer,
+  ScreenHeader,
+} from "@/components/ui/primitives";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const MODAL_HEIGHT = SCREEN_HEIGHT * 0.9;
@@ -256,160 +261,47 @@ export default function AddressBookScreen() {
    * Whole-row tap sets the address as default — fastest path for the
    * most common action.
    */
-  const renderItem = ({ item }: { item: Address }) => {
-    const swipeRef = useRef<Swipeable>(null);
-    const renderRightActions = () => (
-      <View style={s.swipeActions}>
-        <Pressable
-          onPress={() => {
-            swipeRef.current?.close();
-            openEdit(item);
-          }}
-          accessibilityRole="button"
-          accessibilityLabel={`Edit ${item.label}`}
-          style={({ pressed }) => [
-            s.swipeBtn,
-            { backgroundColor: theme.bgMuted },
-            pressed && { opacity: 0.85 },
-          ]}
-        >
-          <Ionicons name="create-outline" size={20} color={theme.fg} />
-          <Text style={[s.swipeBtnText, { color: theme.fg }]}>Edit</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => {
-            swipeRef.current?.close();
-            deleteAddress(item._id);
-          }}
-          accessibilityRole="button"
-          accessibilityLabel={`Delete ${item.label}`}
-          style={({ pressed }) => [
-            s.swipeBtn,
-            { backgroundColor: theme.errorTint },
-            pressed && { opacity: 0.85 },
-          ]}
-        >
-          <Ionicons name="trash-outline" size={20} color={theme.error} />
-          <Text style={[s.swipeBtnText, { color: theme.error }]}>Delete</Text>
-        </Pressable>
-      </View>
-    );
-
-    return (
-      <Swipeable
-        ref={swipeRef}
-        renderRightActions={renderRightActions}
-        overshootRight={false}
-        friction={2}
-      >
-        <Pressable
-          onPress={() => !item.isDefault && setDefault(item._id)}
-          accessibilityRole="button"
-          accessibilityLabel={
-            item.isDefault
-              ? `${item.label}, default address`
-              : `${item.label}. Tap to set as default.`
-          }
-          style={({ pressed }) => [
-            s.cardV3,
-            {
-              backgroundColor: theme.surface,
-              borderColor: item.isDefault ? theme.primary : theme.divider,
-            },
-            pressed && { opacity: 0.94 },
-          ]}
-        >
-          <View style={[s.cardIconV3, { backgroundColor: theme.primaryTint }]}>
-            <Ionicons
-              name={(item.icon ?? "location-outline") as any}
-              size={18}
-              color={theme.mode === "dark" ? "#fff" : theme.palette.green700}
-            />
-          </View>
-
-          <View style={s.cardBody}>
-            <View style={s.cardTitleRowV3}>
-              <Text style={[s.cardLabelV3, { color: theme.fg }]} numberOfLines={1}>
-                {item.label}
-              </Text>
-              {item.isDefault ? (
-                <View
-                  style={[s.defaultBadgeV3, { backgroundColor: theme.primaryTint }]}
-                >
-                  <Text
-                    style={[
-                      s.defaultBadgeTextV3,
-                      {
-                        color:
-                          theme.mode === "dark"
-                            ? "#fff"
-                            : theme.palette.green700,
-                      },
-                    ]}
-                  >
-                    DEFAULT
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-            {item.street || item.city ? (
-              <Text
-                style={[s.cardSubV3, { color: theme.fg }]}
-                numberOfLines={2}
-              >
-                {[item.street, item.city, item.state]
-                  .filter(Boolean)
-                  .join(", ")}
-              </Text>
-            ) : null}
-          </View>
-
-          <KebabMenu
-            title="Address actions"
-            accessibilityLabel={`${item.label} actions`}
-            actions={[
-              {
-                label: "Edit",
-                icon: "create-outline",
-                onPress: () => openEdit(item),
-              },
-              ...(!item.isDefault
-                ? [
-                    {
-                      label: "Set as default",
-                      icon: "star-outline" as const,
-                      onPress: () => setDefault(item._id),
-                    },
-                  ]
-                : []),
-              {
-                label: "Delete",
-                icon: "trash-outline",
-                danger: true,
-                onPress: () => deleteAddress(item._id),
-              },
-            ]}
-          />
-        </Pressable>
-      </Swipeable>
-    );
-  };
+  // The row is its own component so the per-row hooks (`useRef` for the
+  // Swipeable handle) don't violate the rules-of-hooks. FlatList's
+  // `renderItem` is a regular function — calling hooks inside it crashes
+  // React with "Invalid hook call" because the row count varies between
+  // renders (the hook order isn't stable).
+  const renderItem = ({ item }: { item: Address }) => (
+    <AddressRow
+      item={item}
+      theme={theme}
+      styles={s}
+      onSetDefault={setDefault}
+      onEdit={openEdit}
+      onDelete={deleteAddress}
+    />
+  );
 
   return (
-    <SafeAreaView style={s.safe}>
-      <StatusBar barStyle={theme.mode === "dark" ? "light-content" : "dark-content"} />
-
-      <View style={s.header}>
-        <BackButton />
-        <Text style={[s.headerTitle, { color: theme.text }]}>Address Book</Text>
-        <TouchableOpacity
-          style={[s.addIconBtn, { backgroundColor: theme.tertiary, borderColor: theme.ash }]}
-          onPress={openAdd}
-        >
-          <Ionicons name="add" size={20} color={theme.primary} />
-        </TouchableOpacity>
-      </View>
-
+    <ScreenContainer
+      edges={["top", "bottom"]}
+      noScroll
+      header={
+        <ScreenHeader
+          title="Saved addresses"
+          subtitle={
+            addresses.length > 0
+              ? `${addresses.length} saved`
+              : undefined
+          }
+        />
+      }
+      footer={
+        addresses.length > 0 ? (
+          <FloatingCTA
+            label="Add new address"
+            iconLeft="add"
+            onPress={openAdd}
+            floating={false}
+          />
+        ) : undefined
+      }
+    >
       <FlatList
         data={addresses}
         keyExtractor={(item) => item._id}
@@ -425,14 +317,20 @@ export default function AddressBookScreen() {
             </View>
           ) : (
             <View style={s.empty}>
-              <View style={[s.emptyIconWrap, { backgroundColor: theme.tertiary }]}>
-                <Ionicons name="map-outline" size={36} color={theme.icon} />
+              <View style={[s.emptyIconWrap, { backgroundColor: theme.bgMuted }]}>
+                <Ionicons name="location-outline" size={32} color={theme.fgMuted} />
               </View>
-              <Text style={[s.emptyTitle, { color: theme.text }]}>No saved addresses</Text>
-              <Text style={[s.emptySub, { color: theme.icon }]}>Add your home, office, or any location</Text>
-              <TouchableOpacity style={[s.emptyBtn, { backgroundColor: theme.primary }]} onPress={openAdd}>
+              <Text style={[s.emptyTitle, { color: theme.fg }]}>No addresses yet</Text>
+              <Text style={[s.emptySub, { color: theme.fgMuted }]}>
+                Add a few favourites — Home, Office, anywhere we should
+                bring fuel.
+              </Text>
+              <TouchableOpacity
+                style={[s.emptyBtn, { backgroundColor: theme.primary }]}
+                onPress={openAdd}
+              >
                 <Ionicons name="add" size={16} color="#fff" />
-                <Text style={s.emptyBtnText}>Add Address</Text>
+                <Text style={s.emptyBtnText}>Add address</Text>
               </TouchableOpacity>
             </View>
           )
@@ -669,7 +567,178 @@ export default function AddressBookScreen() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </ScreenContainer>
+  );
+}
+
+/* ─────────────────────── AddressRow ─────────────────────────── */
+
+/**
+ * One row in the address list. Lifted into its own component so the
+ * `useRef<Swipeable>` per-row hook lives in a real component body —
+ * calling it inside `FlatList.renderItem` (a regular function) was
+ * triggering React's rules-of-hooks check and crashing the screen with
+ * "Invalid hook call".
+ *
+ * Two affordances stay (per UX direction "let's go with both"):
+ *   1. Tap the kebab → action sheet (Edit / Set default / Delete)
+ *   2. Swipe left → reveals Edit + Delete buttons inline
+ * Whole-row tap sets the address as default — the most common action.
+ */
+function AddressRow({
+  item,
+  theme,
+  styles: s,
+  onSetDefault,
+  onEdit,
+  onDelete,
+}: {
+  item: Address;
+  theme: ReturnType<typeof useTheme>;
+  styles: ReturnType<typeof styles>;
+  onSetDefault: (id: string) => void;
+  onEdit: (a: Address) => void;
+  onDelete: (id: string) => void;
+}) {
+  const swipeRef = useRef<Swipeable>(null);
+
+  const renderRightActions = () => (
+    <View style={s.swipeActions}>
+      <Pressable
+        onPress={() => {
+          swipeRef.current?.close();
+          onEdit(item);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Edit ${item.label}`}
+        style={({ pressed }) => [
+          s.swipeBtn,
+          { backgroundColor: theme.bgMuted },
+          pressed && { opacity: 0.85 },
+        ]}
+      >
+        <Ionicons name="create-outline" size={20} color={theme.fg} />
+        <Text style={[s.swipeBtnText, { color: theme.fg }]}>Edit</Text>
+      </Pressable>
+      <Pressable
+        onPress={() => {
+          swipeRef.current?.close();
+          onDelete(item._id);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Delete ${item.label}`}
+        style={({ pressed }) => [
+          s.swipeBtn,
+          { backgroundColor: theme.errorTint },
+          pressed && { opacity: 0.85 },
+        ]}
+      >
+        <Ionicons name="trash-outline" size={20} color={theme.error} />
+        <Text style={[s.swipeBtnText, { color: theme.error }]}>Delete</Text>
+      </Pressable>
+    </View>
+  );
+
+  return (
+    <Swipeable
+      ref={swipeRef}
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      friction={2}
+    >
+      <Pressable
+        onPress={() => !item.isDefault && onSetDefault(item._id)}
+        accessibilityRole="button"
+        accessibilityLabel={
+          item.isDefault
+            ? `${item.label}, default address`
+            : `${item.label}. Tap to set as default.`
+        }
+        style={({ pressed }) => [
+          s.cardV3,
+          {
+            backgroundColor: theme.surface,
+            borderColor: item.isDefault ? theme.primary : theme.divider,
+          },
+          pressed && { opacity: 0.94 },
+        ]}
+      >
+        <View style={[s.cardIconV3, { backgroundColor: theme.primaryTint }]}>
+          <Ionicons
+            name={(item.icon ?? "location-outline") as any}
+            size={18}
+            color={theme.mode === "dark" ? "#fff" : theme.palette.green700}
+          />
+        </View>
+
+        <View style={s.cardBody}>
+          <View style={s.cardTitleRowV3}>
+            <Text
+              style={[s.cardLabelV3, { color: theme.fg }]}
+              numberOfLines={1}
+            >
+              {item.label}
+            </Text>
+            {item.isDefault ? (
+              <View
+                style={[s.defaultBadgeV3, { backgroundColor: theme.primaryTint }]}
+              >
+                <Text
+                  style={[
+                    s.defaultBadgeTextV3,
+                    {
+                      color:
+                        theme.mode === "dark"
+                          ? "#fff"
+                          : theme.palette.green700,
+                    },
+                  ]}
+                >
+                  DEFAULT
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          {item.street || item.city ? (
+            <Text
+              style={[s.cardSubV3, { color: theme.fg }]}
+              numberOfLines={2}
+            >
+              {[item.street, item.city, item.state]
+                .filter(Boolean)
+                .join(", ")}
+            </Text>
+          ) : null}
+        </View>
+
+        <KebabMenu
+          title="Address actions"
+          accessibilityLabel={`${item.label} actions`}
+          actions={[
+            {
+              label: "Edit",
+              icon: "create-outline",
+              onPress: () => onEdit(item),
+            },
+            ...(!item.isDefault
+              ? [
+                  {
+                    label: "Set as default",
+                    icon: "star-outline" as const,
+                    onPress: () => onSetDefault(item._id),
+                  },
+                ]
+              : []),
+            {
+              label: "Delete",
+              icon: "trash-outline",
+              danger: true,
+              onPress: () => onDelete(item._id),
+            },
+          ]}
+        />
+      </Pressable>
+    </Swipeable>
   );
 }
 
@@ -709,10 +778,15 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
     cardActions: { flexDirection: "row", gap: 2, flexShrink: 0 },
     actionBtn: { width: 36, height: 36, justifyContent: "center", alignItems: "center" },
 
-    /* Address card — v3 design (replaces .card on the list view) */
+    /**
+     * Address card — v3 design (replaces .card on the list view).
+     * Aligns content to flex-start so the kebab sits at the top
+     * with the label rather than centred between label + sub line —
+     * matches the design exactly.
+     */
     cardV3: {
       flexDirection: "row",
-      alignItems: "center",
+      alignItems: "flex-start",
       gap: theme.space.s3,
       padding: theme.space.s3 + 2,
       marginBottom: theme.space.s3,

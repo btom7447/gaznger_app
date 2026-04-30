@@ -74,13 +74,26 @@ export default function CompleteScreen() {
     return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}.`;
   }, [rating, riderFirstName, pointsEarned]);
 
+  /**
+   * Reorder = "same fuel, same address, same station — but with
+   * today's price." We DON'T resetOrder here because the just-
+   * delivered draft already carries product / fuelTypeId / qty /
+   * deliveryAddressId / cylinder details; nuking it would force
+   * the user back through Order + Cylinder + Photo + Delivery.
+   * Instead we route straight to Stations so the user picks a
+   * station + the server re-locks the per-unit price for today.
+   * Per locked decision (5).
+   */
   const handleReorder = useCallback(() => {
-    resetOrder();
-    router.replace("/(customer)/(order)" as never);
-  }, [resetOrder, router]);
+    router.replace("/(customer)/(order)/stations" as never);
+  }, [router]);
 
   const handleSchedule = useCallback(() => {
-    router.replace("/(customer)/(order)" as never);
+    // Same shape as Reorder for now — full scheduling lives at
+    // /(customer)/(order)/schedule but only the swap flow uses it
+    // today. Leaving the station re-pick as the entry until the
+    // schedule-anything-from-Complete feature lands.
+    router.replace("/(customer)/(order)/stations" as never);
   }, [router]);
 
   const handleRefer = useCallback(async () => {
@@ -104,7 +117,23 @@ export default function CompleteScreen() {
       edges={["top", "bottom"]}
       contentStyle={styles.scroll}
     >
-      <StatusBadge kind="neutral">Order closed</StatusBadge>
+      {/* Gray-circle hero — matches the design's neutral closure
+          marker. The Delivered screen uses a green check; Complete
+          uses a muted gray-on-gray check to signal "all wrapped up,
+          nothing more to do" without re-celebrating. */}
+      <View style={styles.heroWrap}>
+        <View style={styles.heroCircle}>
+          <Ionicons
+            name="checkmark"
+            size={32}
+            color={theme.fgMuted}
+          />
+        </View>
+      </View>
+
+      <View style={styles.badgeWrap}>
+        <StatusBadge kind="neutral">Order closed</StatusBadge>
+      </View>
 
       <Text style={styles.h1} accessibilityRole="header">
         All done, {firstName}.
@@ -233,13 +262,39 @@ const makeStyles = (theme: Theme) =>
       paddingBottom: theme.space.s5 + 80,
       gap: theme.space.s3,
     },
+    heroWrap: {
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: theme.space.s2,
+      marginBottom: theme.space.s1,
+    },
+    heroCircle: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: theme.bgMuted,
+      borderWidth: 1,
+      borderColor: theme.border,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    badgeWrap: {
+      alignItems: "center",
+    },
     h1: {
       ...theme.type.h1,
       color: theme.fg,
+      textAlign: "center",
+    },
+    body1Center: {
+      ...theme.type.body,
+      color: theme.fgMuted,
+      textAlign: "center",
     },
     body1: {
       ...theme.type.body,
       color: theme.fgMuted,
+      textAlign: "center",
     },
     summaryCard: {
       flexDirection: "row",

@@ -103,6 +103,7 @@ export interface OrderDraft {
     rating?: number;
     phone?: string;
     initials?: string;
+    profileImage?: string;
   };
 
   /** Server-issued delivery timestamp from the delivery-confirm event. */

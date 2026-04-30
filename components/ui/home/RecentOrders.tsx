@@ -61,7 +61,7 @@ export default function RecentOrders() {
     <View style={s.container}>
       <View style={s.sectionHeader}>
         <Text style={[s.sectionTitle, { color: theme.text }]}>Recent Orders</Text>
-        <TouchableOpacity onPress={() => router.push("/(screens)/order-history" as any)}>
+        <TouchableOpacity onPress={() => router.push("/(customer)/(order)/history" as any)}>
           <Text style={[s.seeAll, { color: theme.primary }]}>See all</Text>
         </TouchableOpacity>
       </View>
@@ -75,7 +75,7 @@ export default function RecentOrders() {
               s.row,
               { backgroundColor: theme.surface, borderColor: theme.ash },
             ]}
-            onPress={() => router.push("/(screens)/order-history" as any)}
+            onPress={() => router.push("/(customer)/(order)/history" as any)}
             activeOpacity={0.8}
           >
             <View style={[s.iconWrap, { backgroundColor: theme.tertiary }]}>

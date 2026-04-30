@@ -51,6 +51,8 @@ async function syncUserSession() {
       lpgOrderCount: user.lpgOrderCount,
       savedCylinder: user.savedCylinder,
       preferences: user.preferences,
+      hasPin: user.hasPin,
+      addressBook: Array.isArray(user.addressBook) ? user.addressBook : undefined,
     });
   } catch {
     // Non-fatal — stale session still works; token refresh / 401 logout is handled by api wrapper

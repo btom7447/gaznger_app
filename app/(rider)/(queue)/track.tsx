@@ -25,10 +25,22 @@ import BackButton from "@/components/ui/global/BackButton";
 import NotificationButton from "@/components/ui/global/NotificationButton";
 import ProfileButton from "@/components/ui/global/ProfileButton";
 
+/**
+ * Delivery status mirrors the server's expanded enum. Spans both
+ * legacy values (`accepted`/`picked_up`) AND the v3 granular pipeline
+ * (`at_plant`/`refilling`/`returning`/`arrived`/`dispensing`). The
+ * rider-side UX drives the granular flow now; legacy values stay as
+ * a fallback for old delivery rows already in the pipeline.
+ */
 type DeliveryStatus =
   | "pending"
   | "accepted"
   | "picked_up"
+  | "at_plant"
+  | "refilling"
+  | "returning"
+  | "arrived"
+  | "dispensing"
   | "awaiting_confirmation"
   | "delivered"
   | "dropped"
@@ -60,7 +72,10 @@ interface ActiveDelivery {
   };
 }
 
-const LOCATION_POLL_MS = 30_000;
+// 6s gives the customer a fluid-feeling rider pin without burning
+// the rider's battery or our rate limiter. The map marker's pulse
+// + interpolation-on-coord-change masks the gap between pings.
+const LOCATION_POLL_MS = 6_000;
 
 export default function RiderTrackScreen() {
   const theme = useTheme();
@@ -179,35 +194,86 @@ export default function RiderTrackScreen() {
     }
   }, [delivery?.status]);
 
-  // Pick Up Order — no optimistic update; server emits delivery:update on success
+  /**
+   * Single helper used by every granular phase button below.
+   * Posts to the matching v3 endpoint; the server transitions both
+   * Delivery + Order statuses and emits the customer-side
+   * `order:update` event we need to keep the customer screen in
+   * sync. We don't optimistically flip local state — the
+   * `delivery:update` socket event from the server is authoritative
+   * and lands within ~100ms.
+   */
+  const [transitioning, setTransitioning] = useState(false);
+  const runTransition = useCallback(
+    async (slug: string, errorMsg: string) => {
+      if (!delivery || transitioning) return;
+      setTransitioning(true);
+      try {
+        await api.patch(`/api/rider/deliveries/${delivery._id}/${slug}`);
+        await load();
+      } catch (err: any) {
+        toast.error(errorMsg, { description: err.message });
+      } finally {
+        setTransitioning(false);
+      }
+    },
+    [delivery, transitioning, load]
+  );
+
+  // Granular handlers — each maps to one server endpoint.
+  const handleAtPlant = useCallback(
+    () => runTransition("at-plant", "Couldn't mark at plant"),
+    [runTransition]
+  );
+  const handleRefilling = useCallback(
+    () => runTransition("refilling", "Couldn't start refilling"),
+    [runTransition]
+  );
+  const handleHeadingBack = useCallback(
+    () => runTransition("heading-back", "Couldn't mark heading back"),
+    [runTransition]
+  );
+  const handleArrived = useCallback(
+    () => runTransition("arrived", "Couldn't mark arrived"),
+    [runTransition]
+  );
+  const handleDispensing = useCallback(
+    () => runTransition("dispensing", "Couldn't start dispensing"),
+    [runTransition]
+  );
+  const handleFinalise = useCallback(
+    () => runTransition("finalise", "Couldn't finalise delivery"),
+    [runTransition]
+  );
+
+  // Legacy fallbacks — kept so any in-flight delivery still in the
+  // legacy `accepted` / `picked_up` states can be wrapped up by an
+  // upgraded rider client.
   const handlePickup = useCallback(async () => {
     if (!delivery || pickupLoading) return;
     setPickupLoading(true);
     try {
       await api.patch(`/api/rider/deliveries/${delivery._id}/pickup`);
-      await load();  // TODO Fix Confirm Order Flow
-      // State update comes via delivery:update socket event from server
+      await load();
     } catch (err: any) {
       toast.error("Failed to confirm pickup", { description: err.message });
     } finally {
       setPickupLoading(false);
     }
-  }, [delivery, pickupLoading]);
+  }, [delivery, pickupLoading, load]);
 
-  // Deliver Order — no optimistic update; server emits delivery:update on success
   const handleComplete = useCallback(async () => {
     if (!delivery || deliverLoading) return;
     setDeliverLoading(true);
     try {
       await api.patch(`/api/rider/deliveries/${delivery._id}/complete`);
-      await load(); // TODO Fix confirm order flow  r
-      // State update comes via delivery:update socket event from server
+      await load();
     } catch (err: any) {
       toast.error("Failed to mark delivery", { description: err.message });
     } finally {
       setDeliverLoading(false);
     }
-  }, [delivery, deliverLoading]);
+  }, [delivery, deliverLoading, load]);
 
   const handleDropSubmit = useCallback(async () => {
     if (!delivery || !dropReason.trim()) return;
@@ -269,21 +335,43 @@ export default function RiderTrackScreen() {
   // Only navigate to station (customer navigation is a future in-app feature)
   const stationNavTarget = stationLoc;
 
+  // Per-phase label + colour. Granular v3 statuses get sharper
+  // wording so the rider knows exactly what step they're on.
   const statusLabel =
     delivery.status === "accepted"
       ? "Head to Station"
+      : delivery.status === "at_plant"
+      ? "At Station · Awaiting Fill"
+      : delivery.status === "refilling"
+      ? "Filling Order"
+      : delivery.status === "returning"
+      ? "Heading to Customer"
       : delivery.status === "picked_up"
       ? "In Transit · Delivering"
+      : delivery.status === "arrived"
+      ? "At Customer's Gate"
+      : delivery.status === "dispensing"
+      ? "Dispensing Now"
       : delivery.status === "awaiting_confirmation"
       ? "Awaiting Confirmation"
       : "Active";
 
   const statusColor =
-    delivery.status === "picked_up"
+    delivery.status === "picked_up" || delivery.status === "returning"
       ? "#F97316"
-      : delivery.status === "awaiting_confirmation"
+      : delivery.status === "awaiting_confirmation" ||
+        delivery.status === "arrived" ||
+        delivery.status === "dispensing"
       ? "#10B981"
       : theme.primary;
+
+  // Is this an LPG-Swap order? Drives the at_plant short-circuit
+  // (swap goes at_plant → returning, skipping refilling) and the
+  // arrived → finalise short-circuit (swap skips dispensing).
+  const isSwap =
+    delivery.order.fuel?.name?.toLowerCase().includes("gas") ||
+    delivery.order.fuel?.name?.toLowerCase().includes("lpg") ||
+    false;
 
   const initialRegion = stationLoc
     ? { latitude: stationLoc.lat, longitude: stationLoc.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 }
@@ -429,9 +517,15 @@ export default function RiderTrackScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Action row — always 2 buttons */}
+        {/* No litres-dispensed tracker on the rider side — the
+            customer ordered a fixed quantity, so there's nothing to
+            tally up. The customer's Arrival screen plays a brief
+            count-up animation when status flips to `dispensing`,
+            which is enough feedback for both sides. */}
+
+        {/* Action row — always 2 buttons. Left = Drop. Right CTA
+            varies per phase along the granular ladder. */}
         <View style={s.actionRow}>
-          {/* Left button: always Drop */}
           <TouchableOpacity
             style={[s.actionSecondary, { borderColor: theme.error }]}
             onPress={() => setShowDropModal(true)}
@@ -441,23 +535,130 @@ export default function RiderTrackScreen() {
             <Text style={[s.actionSecondaryText, { color: theme.error }]}>Drop</Text>
           </TouchableOpacity>
 
-          {/* Right button: action changes by status */}
+          {/* Granular phase CTAs (v3). Each maps to one server endpoint. */}
           {delivery.status === "accepted" && (
             <TouchableOpacity
               style={[s.actionPrimary, { backgroundColor: theme.primary }]}
-              onPress={handlePickup}
-              disabled={pickupLoading}
+              onPress={handleAtPlant}
+              disabled={transitioning}
               activeOpacity={0.85}
             >
-              {pickupLoading
-                ? <ActivityIndicator color="#fff" />
-                : <>
-                    <Ionicons name="bag-outline" size={18} color="#fff" />
-                    <Text style={s.actionPrimaryText}>Pick Up Order</Text>
-                  </>}
+              {transitioning ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <MaterialIcons name="local-gas-station" size={18} color="#fff" />
+                  <Text style={s.actionPrimaryText}>Mark at station</Text>
+                </>
+              )}
             </TouchableOpacity>
           )}
 
+          {delivery.status === "at_plant" && (
+            <TouchableOpacity
+              style={[s.actionPrimary, { backgroundColor: theme.primary }]}
+              onPress={isSwap ? handleHeadingBack : handleRefilling}
+              disabled={transitioning}
+              activeOpacity={0.85}
+            >
+              {transitioning ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons
+                    name={isSwap ? "swap-horizontal" : "water"}
+                    size={18}
+                    color="#fff"
+                  />
+                  <Text style={s.actionPrimaryText}>
+                    {isSwap ? "Cylinder swapped" : "Start refilling"}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {delivery.status === "refilling" && (
+            <TouchableOpacity
+              style={[s.actionPrimary, { backgroundColor: "#F97316" }]}
+              onPress={handleHeadingBack}
+              disabled={transitioning}
+              activeOpacity={0.85}
+            >
+              {transitioning ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="arrow-forward" size={18} color="#fff" />
+                  <Text style={s.actionPrimaryText}>Heading back</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {delivery.status === "returning" && (
+            <TouchableOpacity
+              style={[s.actionPrimary, { backgroundColor: "#10B981" }]}
+              onPress={handleArrived}
+              disabled={transitioning}
+              activeOpacity={0.85}
+            >
+              {transitioning ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="location" size={18} color="#fff" />
+                  <Text style={s.actionPrimaryText}>I've arrived</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {delivery.status === "arrived" && (
+            <TouchableOpacity
+              style={[s.actionPrimary, { backgroundColor: "#10B981" }]}
+              onPress={isSwap ? handleFinalise : handleDispensing}
+              disabled={transitioning}
+              activeOpacity={0.85}
+            >
+              {transitioning ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons
+                    name={isSwap ? "checkmark-done" : "water"}
+                    size={18}
+                    color="#fff"
+                  />
+                  <Text style={s.actionPrimaryText}>
+                    {isSwap ? "Cylinder handed over" : "Start dispensing"}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {delivery.status === "dispensing" && (
+            <TouchableOpacity
+              style={[s.actionPrimary, { backgroundColor: "#10B981" }]}
+              onPress={handleFinalise}
+              disabled={transitioning}
+              activeOpacity={0.85}
+            >
+              {transitioning ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="bag-check-outline" size={18} color="#fff" />
+                  <Text style={s.actionPrimaryText}>Done · ask to confirm</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {/* Legacy fallback — shown only if a delivery row is still
+              in `picked_up` (created before the v3 rollout). The new
+              ladder bypasses this state entirely. */}
           {delivery.status === "picked_up" && (
             <TouchableOpacity
               style={[s.actionPrimary, { backgroundColor: "#10B981" }]}
@@ -465,19 +666,23 @@ export default function RiderTrackScreen() {
               disabled={deliverLoading}
               activeOpacity={0.85}
             >
-              {deliverLoading
-                ? <ActivityIndicator color="#fff" />
-                : <>
-                    <Ionicons name="bag-check-outline" size={18} color="#fff" />
-                    <Text style={s.actionPrimaryText}>Deliver Order</Text>
-                  </>}
+              {deliverLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="bag-check-outline" size={18} color="#fff" />
+                  <Text style={s.actionPrimaryText}>Deliver Order</Text>
+                </>
+              )}
             </TouchableOpacity>
           )}
 
           {delivery.status === "awaiting_confirmation" && (
             <View style={[s.actionPrimary, { backgroundColor: "#10B981" + "40" }]}>
               <Ionicons name="time-outline" size={16} color="#065F46" />
-              <Text style={[s.actionPrimaryText, { color: "#065F46" }]}>Customer Confirming…</Text>
+              <Text style={[s.actionPrimaryText, { color: "#065F46" }]}>
+                Customer Confirming…
+              </Text>
             </View>
           )}
         </View>

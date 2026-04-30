@@ -8,13 +8,7 @@ export default function TrackLayout() {
       <Stack.Screen name="arrival" />
       <Stack.Screen name="handoff" />
       <Stack.Screen name="delivered" />
-      <Stack.Screen
-        name="rate"
-        options={{
-          presentation: "modal",
-          animation: "slide_from_bottom",
-        }}
-      />
+      <Stack.Screen name="rate" />
       <Stack.Screen name="complete" />
     </Stack>
   );

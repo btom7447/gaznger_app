@@ -6,6 +6,7 @@ import { useOrderStore } from "@/store/useOrderStore";
 import { api } from "@/lib/api";
 import { Station } from "@/types";
 import {
+  Chip,
   EmptyState,
   ErrorStrip,
   FloatingCTA,
@@ -17,6 +18,10 @@ import {
 import StationCard, {
   StationCardData,
 } from "@/components/ui/customer/order/StationCard";
+import StationsViewToggle, {
+  StationsViewMode,
+} from "@/components/ui/customer/order/StationsViewToggle";
+import StationsMapView from "@/components/ui/customer/order/StationsMapView";
 import { useFlowProgress } from "@/components/ui/customer/order/useFlowProgress";
 import { useUserLocation } from "@/hooks/useUserLocation";
 
@@ -69,6 +74,8 @@ function adapt(s: Station, fuelTypeId: string, unit: string): StationCardData {
     perUnit: priceForFuel(s, fuelTypeId),
     unit,
     verified: s.verified || s.isPartner,
+    lat: s.location?.lat,
+    lng: s.location?.lng,
     imageUrl: s.image,
   };
 }
@@ -84,6 +91,7 @@ export default function StationsScreen() {
   const { location: userLocation } = useUserLocation();
 
   const [sort, setSort] = useState<SortKey>("nearest");
+  const [viewMode, setViewMode] = useState<StationsViewMode>("list");
   const [stations, setStations] = useState<StationCardData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -191,63 +199,80 @@ export default function StationsScreen() {
     router.push("/(customer)/(order)/payment" as never);
   }, [selected, lockStation, router]);
 
+  const ctaFooter = (
+    <FloatingCTA
+      label={
+        selected
+          ? `Continue · ${selected.shortName ?? selected.name}`
+          : "Pick a station to continue"
+      }
+      subtitle={
+        selected
+          ? `${qty} ${unit} × ${formatCurrency(selected.perUnit)} = ${formatCurrency(total)}`
+          : undefined
+      }
+      disabled={!selected}
+      onPress={handleContinue}
+      floating={false}
+    />
+  );
+
+  // Map view replaces the scrollable body entirely — it owns the full
+  // canvas with its own bottom sheet for the station list, and renders
+  // its own top-row chrome (back chip + "Delivering to" pill). The
+  // List/Map toggle moves into the bottom sheet header instead of the
+  // screen header, per the v3 design's map layout.
+  if (viewMode === "map") {
+    return (
+      <ScreenContainer edges={["top", "bottom"]} footer={ctaFooter}>
+        <StationsMapView
+          stations={sorted}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          destination={draft.deliveryCoords ?? userLocation ?? null}
+          destinationLabel={draft.deliveryLabel}
+          sort={sort}
+          onSort={setSort}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+        />
+      </ScreenContainer>
+    );
+  }
+
   return (
     <ScreenContainer
       edges={["top", "bottom"]}
       contentStyle={styles.scroll}
-      header={<ScreenHeader title="Choose your station" />}
-      footer={
-        <FloatingCTA
-          label={
-            selected
-              ? `Continue · ${selected.shortName ?? selected.name}`
-              : "Pick a station to continue"
+      header={
+        <ScreenHeader
+          title="Choose your station"
+          rightNode={
+            <StationsViewToggle mode={viewMode} onChange={setViewMode} />
           }
-          subtitle={
-            selected
-              ? `${qty} ${unit} × ${formatCurrency(selected.perUnit)} = ${formatCurrency(total)}`
-              : undefined
-          }
-          disabled={!selected}
-          onPress={handleContinue}
-          floating={false}
         />
       }
+      footer={ctaFooter}
     >
       <View style={styles.body}>
         <ProgressDots step={progressStep} total={progressTotal} variant="bars" />
 
-        {/* Sort chips */}
+        {/* Sort chips — v3 Chip primitive, neutral kind. The
+            "Cheapest" preset is the single most-asked-for sort; we
+            keep "Nearest" first (most useful default for people who
+            want fast fuel) per UX direction. */}
         <View style={styles.sortRow}>
-          {(["nearest", "cheapest", "top-rated"] as SortKey[]).map((k) => {
-            const isSel = k === sort;
-            return (
-              <Pressable
-                key={k}
-                onPress={() => setSort(k)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: isSel }}
-                accessibilityLabel={`Sort by ${SORT_LABELS[k]}`}
-                style={({ pressed }) => [
-                  styles.chip,
-                  isSel && styles.chipSelected,
-                  pressed && { opacity: 0.85 },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.chipText,
-                    { color: isSel ? theme.bg : theme.fg },
-                  ]}
-                >
-                  {SORT_LABELS[k]}
-                </Text>
-              </Pressable>
-            );
-          })}
+          {(["nearest", "cheapest", "top-rated"] as SortKey[]).map((k) => (
+            <Chip
+              key={k}
+              selected={k === sort}
+              onPress={() => setSort(k)}
+              accessibilityLabel={`Sort by ${SORT_LABELS[k]}`}
+            >
+              {SORT_LABELS[k]}
+            </Chip>
+          ))}
         </View>
-
-        <Text style={styles.sectionLabel}>STATIONS · SORTED LIVE</Text>
 
         {error ? (
           <ErrorStrip
@@ -310,30 +335,6 @@ const makeStyles = (theme: Theme) =>
     sortRow: {
       flexDirection: "row",
       gap: theme.space.s2,
-    },
-    chip: {
-      flex: 1,
-      height: 36,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: theme.surface,
-      borderColor: theme.border,
-      borderWidth: 1,
-      borderRadius: theme.radius.pill,
-    },
-    chipSelected: {
-      backgroundColor: theme.fg,
-      borderColor: theme.fg,
-    },
-    chipText: {
-      ...theme.type.caption,
-      fontWeight: "700",
-    },
-    sectionLabel: {
-      ...theme.type.micro,
-      fontSize: 13,
-      letterSpacing: 0.6,
-      color: theme.fgMuted,
     },
     col: { gap: theme.space.s2 },
   });

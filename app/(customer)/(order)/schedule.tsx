@@ -49,10 +49,15 @@ export default function ScheduleScreen() {
   const setReturnSwapAt = useOrderStore((s) => s.setReturnSwapAt);
   const setNote = useOrderStore((s) => s.setNote);
 
-  // Local state — never seeded from store. Default = same-trip ("now").
-  // Persisted on Continue.
-  const [whenChoice, setWhenLocal] = useState<"now" | "schedule">("now");
-  const [returnAt, setReturnAt] = useState<string | null>(null);
+  // Local state — seeded from store so that returning to this screen
+  // (e.g. via back from Stations) restores the user's previous pick
+  // instead of resetting to "Now". Persisted on Continue.
+  const [whenChoice, setWhenLocal] = useState<"now" | "schedule">(
+    draft.returnSwapAt ? "schedule" : "now"
+  );
+  const [returnAt, setReturnAt] = useState<string | null>(
+    draft.returnSwapAt ?? null
+  );
   // Note here is specific to the cylinder handoff; Delivery's note is for
   // the rider finding the address. Both are saved on the order draft —
   // we'll merge them on Continue with a separator.
@@ -60,16 +65,27 @@ export default function ScheduleScreen() {
 
   const sheetRef = useRef<ReturnSwapSheetRef>(null);
 
-  const handleWhenChange = useCallback((v: string) => {
-    const next = v === "schedule" ? "schedule" : "now";
-    setWhenLocal(next);
-    if (next === "schedule") sheetRef.current?.open();
-    else setReturnAt(null);
-  }, []);
+  const handleWhenChange = useCallback(
+    (v: string) => {
+      const next = v === "schedule" ? "schedule" : "now";
+      setWhenLocal(next);
+      if (next === "schedule") {
+        // Open the picker only if we don't already have a confirmed time;
+        // re-tapping the Schedule radio after confirming should NOT
+        // reopen the sheet — the user already scheduled.
+        if (!returnAt) sheetRef.current?.open();
+      } else {
+        setReturnAt(null);
+      }
+    },
+    [returnAt]
+  );
 
   const handleConfirmed = useCallback((iso: string) => {
-    setWhenLocal("schedule");
+    // Set time first so a render seeing whenChoice="schedule" already has
+    // returnAt populated and the CTA enables in a single batch.
     setReturnAt(iso);
+    setWhenLocal("schedule");
   }, []);
 
   const handleContinue = useCallback(() => {

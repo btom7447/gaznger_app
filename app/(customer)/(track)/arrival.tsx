@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   Linking,
   Pressable,
   StyleSheet,
@@ -10,15 +11,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { toast } from "sonner-native";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
+import { useActiveOrder } from "@/hooks/useActiveOrder";
 import { getSocket } from "@/lib/socket";
+import { api } from "@/lib/api";
 import {
   FloatingCTA,
   LiveBadge,
   StatusBadge,
 } from "@/components/ui/primitives";
 import DispenseRing from "@/components/ui/customer/track/DispenseRing";
+import PulseRings from "@/components/ui/customer/track/PulseRings";
 
 /**
  * Arrival screen — liquid only. Replaces Track once status === 'arrived'.
@@ -31,35 +36,66 @@ export default function ArrivalScreen() {
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   const draft = useOrderStore((s) => s.order);
+  // Server-side fallback when the local draft is empty (Track auto-
+  // routed to Arrival via the active-order hook, not via a hot
+  // place-order flow). Without this the confirm CTA would silently
+  // bail since `draft.orderId` is undefined post-migration.
+  const { activeOrder } = useActiveOrder();
+  const effectiveOrderId = draft.orderId ?? activeOrder?._id ?? null;
 
-  const [filled, setFilled] = useState(0);
   const total = draft.qty ?? 15;
 
-  // Dispense progress driven by real socket events from the rider app.
-  // No client-side demo timer — that caused haunted-state bugs
-  // (auto-completion firing on a screen left mounted in the navigation
-  // stack). Once the rider starts pumping, `dispense:progress` events
-  // fire with `litres` and the ring fills.
+  /**
+   * Dispense animation. The rider's app no longer tracks litres —
+   * the customer ordered an exact quantity, so there's nothing to
+   * tally up. Instead, when the server flips status to `dispensing`
+   * (rider tapped "Dispense"), we run a one-shot 3-second count up
+   * from 0 → total. It's a pure UX confirmation that pumping
+   * started; the actual quantity isn't measured client-side.
+   *
+   * Animated.Value drives both the ring progress and the litres
+   * counter. The native driver is off because the counter Text
+   * needs to listen to the value via addListener.
+   */
+  const dispenseAnim = useRef(new Animated.Value(0)).current;
+  const [filled, setFilled] = useState(0);
+
+  // Track the server status locally so the animation triggers
+  // exactly once when `dispensing` arrives. We seed from `arrived`
+  // (the screen's entry condition) and listen for order:update.
+  const [serverStatus, setServerStatus] = useState<string>("arrived");
+
   useEffect(() => {
     const socket = getSocket();
-    if (!socket || !draft.orderId) return;
-
-    const handler = (data: { orderId?: string; litres?: number }) => {
-      // Filter by order id when present so a stale event from a prior
-      // order can't update this screen.
-      if (data.orderId && data.orderId !== draft.orderId) return;
-      if (typeof data.litres === "number") {
-        setFilled(Math.max(0, Math.min(total, data.litres)));
-      }
+    if (!socket || !effectiveOrderId) return;
+    const handler = (data: { orderId?: string; status?: string }) => {
+      if (data.orderId && data.orderId !== effectiveOrderId) return;
+      if (data.status) setServerStatus(data.status);
     };
-    socket.on("dispense:progress", handler);
+    socket.on("order:update", handler);
     return () => {
-      socket.off("dispense:progress", handler);
+      socket.off("order:update", handler);
     };
-  }, [draft.orderId, total]);
+  }, [effectiveOrderId]);
+
+  useEffect(() => {
+    if (serverStatus !== "dispensing") return;
+    dispenseAnim.setValue(0);
+    const id = dispenseAnim.addListener(({ value }) => {
+      setFilled(value * total);
+    });
+    Animated.timing(dispenseAnim, {
+      toValue: 1,
+      duration: 3000,
+      useNativeDriver: false,
+    }).start();
+    return () => {
+      dispenseAnim.removeListener(id);
+    };
+  }, [serverStatus, total, dispenseAnim]);
 
   const progress = total > 0 ? filled / total : 0;
-  const remainingMin = Math.max(0, Math.round((1 - progress) * 3));
+  const remainingSec = Math.max(0, Math.round((1 - progress) * 3));
 
   const riderFirstName = draft.rider?.firstName ?? "Your rider";
   const riderFullName = useMemo(() => {
@@ -69,15 +105,65 @@ export default function ArrivalScreen() {
     );
   }, [draft.rider?.firstName, draft.rider?.lastName]);
 
-  const handleConfirm = useCallback(() => {
-    router.replace("/(customer)/(track)/delivered" as never);
-  }, [router]);
+  const [confirming, setConfirming] = useState(false);
+  const handleConfirm = useCallback(async () => {
+    if (!effectiveOrderId) {
+      toast.error("Order not loaded", {
+        description: "Pull down to refresh and try again.",
+      });
+      return;
+    }
+    if (confirming) return;
+    setConfirming(true);
+    try {
+      // PATCH /confirm-delivery flips order.status → "delivered" on
+      // the server, which fires the points/notification side-effects
+      // and emits order:update. Routing to /delivered immediately
+      // gives an instant feel; the next screen reads the same draft.
+      // The server only allows this transition from
+      // `awaiting_confirmation` (the legacy rider app's "delivered"
+      // signal) — if the rider hasn't tapped Delivered yet the
+      // server returns 400, which we surface as a friendly toast
+      // instead of a stuck button.
+      await api.patch(`/api/orders/${effectiveOrderId}/confirm-delivery`);
+      router.replace("/(customer)/(track)/delivered" as never);
+    } catch (err: any) {
+      toast.error("Couldn't confirm delivery", {
+        description:
+          err?.message ??
+          "Ask your rider to tap Delivered, then try again.",
+      });
+      setConfirming(false);
+    }
+  }, [effectiveOrderId, confirming, router]);
 
   const handleCall = useCallback(() => {
     if (draft.rider?.phone) Linking.openURL(`tel:${draft.rider.phone}`);
   }, [draft.rider?.phone]);
 
-  const totalNaira = (draft.station?.totalKobo ?? 0) / 100;
+  /**
+   * Money figures shown in the receipt block. We prefer the active-
+   * order hook's server values (they include `deliveryFee`, which the
+   * local draft never tracks) and fall back to the locked-station
+   * snapshot from the order draft when the hook hasn't returned yet.
+   * Without the fallback the receipt would flash zeros for ~1 round-
+   * trip on a fresh navigation into Arrival.
+   */
+  const perUnitNaira = (draft.station?.perUnitKobo ?? 0) / 100;
+  const fuelCostNaira =
+    activeOrder?.fuelCost ?? (draft.station?.totalKobo ?? 0) / 100;
+  const deliveryFeeNaira = activeOrder?.deliveryFee ?? 0;
+  const totalNaira =
+    activeOrder?.totalPrice ??
+    fuelCostNaira + deliveryFeeNaira;
+  const paymentLabel =
+    activeOrder?.paymentStatus === "paid"
+      ? "Wallet"
+      : activeOrder?.paymentStatus === "unpaid"
+      ? "Pay on delivery"
+      : draft.paymentMethodId
+      ? "Wallet"
+      : "Pay on delivery";
 
   return (
     <View style={[styles.root, { backgroundColor: theme.bg }]}>
@@ -98,12 +184,10 @@ export default function ArrivalScreen() {
           end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFill}
         />
-        {/* Pulse rings around the rider's "here" marker */}
-        <View style={styles.pulseLg} />
-        <View style={styles.pulseMd} />
-        <View style={styles.pulseSm}>
-          <Ionicons name="checkmark" size={20} color="#fff" />
-        </View>
+        {/* Animated pulse rings around the rider's "here" check icon.
+            The infinite ripple signals "rider is on-site" without
+            needing copy — the screen already says RIDER ARRIVED below. */}
+        <PulseRings />
 
         {/* Top overlay buttons */}
         <View
@@ -135,9 +219,13 @@ export default function ArrivalScreen() {
           RIDER ARRIVED
         </StatusBadge>
 
-        <Text style={styles.h1}>Dispensing now</Text>
+        <Text style={styles.h1}>
+          {serverStatus === "dispensing" ? "Dispensing now" : "Rider here"}
+        </Text>
         <Text style={styles.body1}>
-          {riderFirstName} is filling your tank. Stay close — you'll confirm in a sec.
+          {serverStatus === "dispensing"
+            ? `${riderFirstName} is filling your tank. Stay close — you'll confirm in a sec.`
+            : `${riderFirstName} has arrived. Pumping starts as soon as they tap Dispense.`}
         </Text>
 
         <View style={styles.dispenseCard}>
@@ -147,9 +235,11 @@ export default function ArrivalScreen() {
               {filled.toFixed(1)} L of {total} L
             </Text>
             <Text style={styles.dispenseSub}>
-              {remainingMin < 1
+              {serverStatus !== "dispensing"
+                ? "Waiting for rider to start"
+                : remainingSec < 1
                 ? "Almost done"
-                : `~${remainingMin} min remaining`}
+                : `~${remainingSec}s remaining`}
             </Text>
           </View>
         </View>
@@ -188,27 +278,67 @@ export default function ArrivalScreen() {
         </View>
 
         <View style={styles.summaryCard}>
+          <Text style={styles.summaryEyebrow}>RECEIPT</Text>
+
+          <View style={styles.summaryLineRow}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.summaryLineTitle} numberOfLines={1}>
+                {draft.fuelTypeId
+                  ? draft.fuelTypeId.charAt(0).toUpperCase() +
+                    draft.fuelTypeId.slice(1)
+                  : "Petrol"}
+              </Text>
+              <Text style={styles.summaryLineSub} numberOfLines={1}>
+                {total} {draft.unit ?? "L"}
+                {perUnitNaira > 0
+                  ? ` · ${formatCurrency(perUnitNaira)}/${draft.unit ?? "L"}`
+                  : ""}
+              </Text>
+            </View>
+            <Text style={styles.summaryLineTotal}>
+              {formatCurrency(fuelCostNaira)}
+            </Text>
+          </View>
+
+          <View style={styles.summaryDivider} />
+
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Order</Text>
+            <Text style={styles.summaryLabel}>Delivery fee</Text>
             <Text style={styles.summaryValue}>
-              #{draft.orderId ?? "—"}
+              {formatCurrency(deliveryFeeNaira)}
+            </Text>
+          </View>
+
+          <View style={styles.summaryTotalRow}>
+            <Text style={styles.summaryTotalLabel}>Total</Text>
+            <Text style={styles.summaryTotalValue}>
+              {formatCurrency(totalNaira)}
+            </Text>
+          </View>
+
+          <View style={styles.summaryDivider} />
+
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Payment</Text>
+            <Text style={styles.summaryValue} numberOfLines={1}>
+              {paymentLabel}
             </Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>
-              {total} L {draft.fuelTypeId ?? ""}
-            </Text>
+            <Text style={styles.summaryLabel}>Order ID</Text>
             <Text style={styles.summaryValue}>
-              {formatCurrency(totalNaira)}
+              #{(effectiveOrderId ?? "—").slice(-6).toUpperCase()}
             </Text>
           </View>
         </View>
       </View>
 
       <FloatingCTA
-        label="I have my fuel"
+        label={confirming ? "Confirming…" : "I have my fuel"}
         subtitle="Confirms delivery · final step"
         onPress={handleConfirm}
+        loading={confirming}
+        disabled={confirming}
         accessibilityLabel="I have my fuel — confirms delivery"
       />
     </View>
@@ -248,29 +378,6 @@ const makeStyles = (theme: Theme) =>
       borderRadius: theme.radius.pill,
       paddingHorizontal: 8,
       paddingVertical: 4,
-      ...theme.elevation.card,
-    },
-    pulseLg: {
-      position: "absolute",
-      width: 130,
-      height: 130,
-      borderRadius: 65,
-      backgroundColor: "rgba(255,255,255,0.18)",
-    },
-    pulseMd: {
-      position: "absolute",
-      width: 86,
-      height: 86,
-      borderRadius: 43,
-      backgroundColor: "rgba(255,255,255,0.32)",
-    },
-    pulseSm: {
-      width: 42,
-      height: 42,
-      borderRadius: 21,
-      backgroundColor: theme.success,
-      alignItems: "center",
-      justifyContent: "center",
       ...theme.elevation.card,
     },
     body: {
@@ -354,6 +461,40 @@ const makeStyles = (theme: Theme) =>
       paddingVertical: theme.space.s3,
       gap: 6,
     },
+    summaryEyebrow: {
+      fontSize: 10.5,
+      fontWeight: "800",
+      color: theme.fgMuted,
+      letterSpacing: 0.5,
+      marginBottom: 4,
+    },
+    summaryLineRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 12,
+    },
+    summaryLineTitle: {
+      fontSize: 13,
+      fontWeight: "800",
+      color: theme.fg,
+    },
+    summaryLineSub: {
+      fontSize: 11.5,
+      color: theme.fgMuted,
+      marginTop: 2,
+      ...theme.type.money,
+    },
+    summaryLineTotal: {
+      fontSize: 13,
+      fontWeight: "800",
+      color: theme.fg,
+      ...theme.type.money,
+    },
+    summaryDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.divider,
+      marginVertical: 4,
+    },
     summaryRow: {
       flexDirection: "row",
       justifyContent: "space-between",
@@ -368,5 +509,23 @@ const makeStyles = (theme: Theme) =>
       ...theme.type.money,
       color: theme.fg,
       fontWeight: "700",
+    },
+    summaryTotalRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: 2,
+    },
+    summaryTotalLabel: {
+      fontSize: 12.5,
+      fontWeight: "800",
+      color: theme.fg,
+      letterSpacing: 0.2,
+    },
+    summaryTotalValue: {
+      fontSize: 16,
+      fontWeight: "800",
+      color: theme.fg,
+      ...theme.type.money,
     },
   });

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useMemo } from "react";
 import {
   FlatList,
   Pressable,
@@ -12,19 +12,28 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
 import { useWalletStore, WalletTransaction } from "@/store/useWalletStore";
 import {
-  Button,
-  EmptyState,
   ScreenContainer,
   ScreenHeader,
 } from "@/components/ui/primitives";
 
 /**
- * Customer wallet hub. Three sections:
- *   1. Hero balance card (Available + Pending). Pending only renders
- *      when > 0 — most customer accounts have no pending balance.
- *   2. Top up + Transfer out CTA row. Transfer out is hidden until we
- *      ship the customer-side withdraw flow (post-v1).
- *   3. Recent transactions list (server-driven, cursor paginated).
+ * Customer wallet hub — v3.
+ *
+ * Layout:
+ *   1. Primary-green hero card with watermark circles, "Available
+ *      balance" eyebrow, big tabular-nums amount, optional Pending
+ *      pill, and a 2-CTA grid (Top up + Withdraw "Coming soon"). Per
+ *      locked decision (7) the Withdraw button is HIDDEN entirely on
+ *      the customer wallet — customers don't withdraw, only top up
+ *      and spend. Top up takes the full row.
+ *   2. "Recent activity" section header with a "See all" affordance
+ *      that scrolls to the activity card (no-op for now since the list
+ *      already shows them; reserved for the eventual full-history
+ *      route).
+ *   3. Activity card — rounded surface with internal hairline dividers
+ *      between TxRows. Empty state inside the card. Loading shimmers
+ *      for the first hydration.
+ *   4. "Powered by Paystack · funds settled in Naira" footnote.
  */
 export default function WalletHome() {
   const theme = useTheme();
@@ -38,6 +47,7 @@ export default function WalletHome() {
   const isLoadingTx = useWalletStore((s) => s.isLoadingTx);
   const refresh = useWalletStore((s) => s.refresh);
   const loadMoreTransactions = useWalletStore((s) => s.loadMoreTransactions);
+  const resetTransactions = useWalletStore((s) => s.resetTransactions);
 
   useFocusEffect(
     useCallback(() => {
@@ -46,61 +56,124 @@ export default function WalletHome() {
     }, [refresh, loadMoreTransactions])
   );
 
+  // Pull-to-refresh resets the cursor so the next loadMoreTransactions
+  // pulls a fresh first page rather than respecting the "exhausted"
+  // short-circuit that prevents the infinite-fetch loop.
   const onRefresh = useCallback(() => {
     refresh();
-    // Reset cursor by triggering a new load.
+    resetTransactions();
     loadMoreTransactions();
-  }, [refresh, loadMoreTransactions]);
+  }, [refresh, resetTransactions, loadMoreTransactions]);
+
+  const isEmpty = !isLoadingTx && transactions.length === 0;
 
   return (
     <ScreenContainer
       edges={["top", "bottom"]}
+      noScroll
       header={<ScreenHeader title="Wallet" />}
     >
       <FlatList
         data={transactions}
         keyExtractor={(t) => t.id}
-        renderItem={({ item }) => <TxRow tx={item} theme={theme} />}
-        ItemSeparatorComponent={() => <View style={styles.divider} />}
+        renderItem={({ item, index }) => (
+          <TxRow
+            tx={item}
+            theme={theme}
+            divider={index < transactions.length - 1}
+          />
+        )}
         ListHeaderComponent={
           <View>
+            {/* Hero */}
             <View style={styles.hero}>
-              <Text style={styles.heroLabel}>Available balance</Text>
-              <Text style={styles.heroAmount}>{formatCurrency(available)}</Text>
+              <View style={styles.heroWatermarkA} />
+              <View style={styles.heroWatermarkB} />
+              <Text style={styles.heroLabel}>AVAILABLE BALANCE</Text>
+              <Text style={styles.heroAmount}>
+                {formatCurrency(available)}
+              </Text>
               {pending > 0 ? (
-                <View style={styles.pendingChip}>
-                  <Ionicons name="time-outline" size={12} color={theme.fgMuted} />
+                <View style={styles.pendingPill}>
+                  <Ionicons name="lock-closed" size={11} color="#fff" />
                   <Text style={styles.pendingText}>
-                    {formatCurrency(pending)} pending
+                    Pending: {formatCurrency(pending)}
                   </Text>
                 </View>
               ) : null}
+
+              <View style={styles.heroCtaRow}>
+                <Pressable
+                  onPress={() =>
+                    router.push("/(customer)/wallet/topup" as never)
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel="Top up wallet"
+                  style={({ pressed }) => [
+                    styles.heroPrimaryCta,
+                    pressed && { opacity: 0.9 },
+                  ]}
+                >
+                  <Ionicons
+                    name="add"
+                    size={16}
+                    color={theme.palette.green700}
+                  />
+                  <Text style={styles.heroPrimaryCtaText}>Top up</Text>
+                </Pressable>
+              </View>
             </View>
 
-            <View style={styles.ctaRow}>
-              <Button
-                variant="primary"
-                size="md"
-                full
-                onPress={() => router.push("/(customer)/wallet/topup" as never)}
-              >
-                Top up
-              </Button>
+            {/* Section header */}
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionTitle}>Recent activity</Text>
             </View>
-
-            <Text style={styles.sectionLabel}>RECENT ACTIVITY</Text>
           </View>
         }
         ListEmptyComponent={
-          isLoadingTx ? null : (
-            <EmptyState
-              icon="wallet-outline"
-              title="No activity yet"
-              body="Top up your wallet or pay for an order to see transactions here."
-            />
+          isLoadingTx ? (
+            <ActivityLoading theme={theme} />
+          ) : (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIconWrap}>
+                <Ionicons
+                  name="receipt-outline"
+                  size={26}
+                  color={theme.fgMuted}
+                />
+              </View>
+              <Text style={styles.emptyTitle}>No activity yet</Text>
+              <Text style={styles.emptyBody}>
+                Top up your wallet or pay for an order to see transactions
+                here.
+              </Text>
+            </View>
           )
         }
-        contentContainerStyle={styles.listContent}
+        ListFooterComponent={
+          <Text style={styles.footnote}>
+            Powered by Paystack · funds settled in Naira
+          </Text>
+        }
+        // The card chrome is supplied by per-section wrappers, not the
+        // FlatList. We use CellRendererComponent to wrap each row in the
+        // shared activity card; first/last get rounded corners and the
+        // group gets a single border.
+        CellRendererComponent={({ children, index }) => (
+          <View
+            style={[
+              styles.activityCell,
+              index === 0 && styles.activityCellFirst,
+              index === transactions.length - 1 && styles.activityCellLast,
+            ]}
+          >
+            {children}
+          </View>
+        )}
+        contentContainerStyle={[
+          styles.listContent,
+          isEmpty && { paddingHorizontal: 0 },
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={isLoading}
@@ -110,6 +183,7 @@ export default function WalletHome() {
         }
         onEndReached={() => loadMoreTransactions()}
         onEndReachedThreshold={0.4}
+        showsVerticalScrollIndicator={false}
       />
     </ScreenContainer>
   );
@@ -118,7 +192,7 @@ export default function WalletHome() {
 /* ─────────────────────── Transaction row ─────────────────────────── */
 
 const KIND_LABEL: Record<WalletTransaction["kind"], string> = {
-  topup_credit: "Top-up",
+  topup_credit: "Wallet top-up",
   order_charge_credit: "Order charge",
   order_wallet_debit: "Paid order",
   points_redeem: "Points redeemed",
@@ -133,52 +207,154 @@ const KIND_LABEL: Record<WalletTransaction["kind"], string> = {
   admin_adjust: "Adjustment",
 };
 
-const KIND_ICON: Record<WalletTransaction["kind"], string> = {
-  topup_credit: "arrow-down-circle-outline",
-  order_charge_credit: "card-outline",
-  order_wallet_debit: "cart-outline",
-  points_redeem: "star-outline",
-  refund_credit: "return-down-back-outline",
-  escrow_release_debit: "lock-open-outline",
-  vendor_earning_credit: "cash-outline",
-  rider_earning_credit: "cash-outline",
-  platform_commission_credit: "business-outline",
-  withdraw_debit: "arrow-up-circle-outline",
-  withdraw_fee_debit: "pricetag-outline",
-  withdraw_reversal_credit: "refresh-outline",
-  admin_adjust: "construct-outline",
-};
+interface TxKindStyle {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  bg: string;
+  fg: string;
+}
 
-function TxRow({ tx, theme }: { tx: WalletTransaction; theme: Theme }) {
+function getKindStyle(
+  kind: WalletTransaction["kind"],
+  theme: Theme
+): TxKindStyle {
+  const dark = theme.mode === "dark";
+  const muted = dark ? "rgba(255,255,255,0.06)" : theme.bgMuted;
+
+  switch (kind) {
+    case "topup_credit":
+      return {
+        icon: "add",
+        bg: dark ? muted : theme.palette.success50,
+        fg: dark ? "#fff" : theme.palette.success700,
+      };
+    case "order_charge_credit":
+    case "order_wallet_debit":
+      return {
+        icon: "flame",
+        bg: dark ? muted : theme.palette.error50,
+        fg: dark ? "#fff" : theme.palette.error700,
+      };
+    case "refund_credit":
+    case "withdraw_reversal_credit":
+      return {
+        icon: "refresh",
+        bg: dark ? muted : theme.palette.success50,
+        fg: dark ? "#fff" : theme.palette.success700,
+      };
+    case "points_redeem":
+      return {
+        icon: "star",
+        bg: dark ? muted : theme.palette.gold50,
+        fg: dark ? "#fff" : theme.palette.gold700,
+      };
+    case "vendor_earning_credit":
+    case "rider_earning_credit":
+      return {
+        icon: "cash",
+        bg: dark ? muted : theme.palette.success50,
+        fg: dark ? "#fff" : theme.palette.success700,
+      };
+    case "platform_commission_credit":
+      return {
+        icon: "business",
+        bg: dark ? muted : theme.palette.info50,
+        fg: dark ? "#fff" : theme.palette.info700,
+      };
+    case "escrow_release_debit":
+      return {
+        icon: "lock-open",
+        bg: dark ? muted : theme.palette.success50,
+        fg: dark ? "#fff" : theme.palette.success700,
+      };
+    case "withdraw_debit":
+      return {
+        icon: "arrow-up",
+        bg: muted,
+        fg: dark ? "#fff" : theme.palette.neutral700,
+      };
+    case "withdraw_fee_debit":
+      return {
+        icon: "card",
+        bg: muted,
+        fg: dark ? "#fff" : theme.palette.neutral700,
+      };
+    case "admin_adjust":
+      return {
+        icon: "shield-checkmark",
+        bg: dark ? muted : theme.palette.info50,
+        fg: dark ? "#fff" : theme.palette.info700,
+      };
+  }
+}
+
+function TxRow({
+  tx,
+  theme,
+  divider,
+}: {
+  tx: WalletTransaction;
+  theme: Theme;
+  divider: boolean;
+}) {
   const isCredit = tx.amount >= 0;
   const sign = isCredit ? "+" : "−";
-  // Credit amounts use the semantic success token so the colour
-  // adjusts with the theme; debits stay on default foreground.
-  const color = isCredit ? theme.success : theme.fg;
-  const icon = (KIND_ICON[tx.kind] ?? "swap-horizontal-outline") as any;
+  const amountColor = isCredit ? theme.success : theme.fg;
+  const { icon, bg, fg } = getKindStyle(tx.kind, theme);
   const label = KIND_LABEL[tx.kind] ?? "Transaction";
-  const date = new Date(tx.createdAt).toLocaleDateString("en-NG", {
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+
+  // Date format: "Today · 09:14" / "Yesterday · 18:42" / "Mon · 18:42" / "Oct 4"
+  const meta = useMemo(() => {
+    const d = new Date(tx.createdAt);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = d.toDateString() === yesterday.toDateString();
+    const time = d.toLocaleTimeString("en-NG", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    let prefix: string;
+    if (sameDay) prefix = "Today";
+    else if (isYesterday) prefix = "Yesterday";
+    else if (now.getTime() - d.getTime() < 7 * 24 * 60 * 60 * 1000)
+      prefix = d.toLocaleDateString("en-NG", { weekday: "short" });
+    else
+      prefix = d.toLocaleDateString("en-NG", {
+        month: "short",
+        day: "numeric",
+      });
+    const head = `${prefix} · ${time}`;
+    return tx.description ? `${head} · ${tx.description}` : head;
+  }, [tx.createdAt, tx.description]);
 
   return (
-    <View style={txStyles.row}>
-      <View style={[txStyles.iconWrap, { backgroundColor: theme.bgMuted }]}>
-        <Ionicons name={icon} size={18} color={theme.fgMuted} />
+    <View
+      style={[
+        txStyles.row,
+        divider && {
+          borderBottomColor: theme.divider,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+        },
+      ]}
+    >
+      <View style={[txStyles.iconWrap, { backgroundColor: bg }]}>
+        <Ionicons name={icon} size={16} color={fg} />
       </View>
       <View style={txStyles.body}>
         <Text style={[txStyles.label, { color: theme.fg }]} numberOfLines={1}>
           {label}
         </Text>
-        <Text style={[txStyles.sub, { color: theme.fgMuted }]} numberOfLines={1}>
-          {tx.description || date}
+        <Text
+          style={[txStyles.sub, { color: theme.fgMuted }]}
+          numberOfLines={1}
+        >
+          {meta}
         </Text>
       </View>
       <View style={{ alignItems: "flex-end" }}>
-        <Text style={[txStyles.amount, { color }]}>
+        <Text style={[txStyles.amount, { color: amountColor }]}>
           {sign}
           {formatCurrency(Math.abs(tx.amount))}
         </Text>
@@ -190,23 +366,58 @@ function TxRow({ tx, theme }: { tx: WalletTransaction; theme: Theme }) {
   );
 }
 
+/* ─────────────────────── Activity loading state ──────────────────── */
+
+function ActivityLoading({ theme }: { theme: Theme }) {
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+  return (
+    <View style={styles.loadingCard}>
+      {[0, 1, 2, 3].map((i) => (
+        <View
+          key={i}
+          style={[
+            txStyles.row,
+            i < 3 && {
+              borderBottomColor: theme.divider,
+              borderBottomWidth: StyleSheet.hairlineWidth,
+            },
+          ]}
+        >
+          <View style={[txStyles.iconWrap, { backgroundColor: theme.bgMuted }]} />
+          <View style={txStyles.body}>
+            <View
+              style={[
+                styles.skel,
+                { width: "60%", height: 12, marginBottom: 6 },
+              ]}
+            />
+            <View style={[styles.skel, { width: "40%", height: 10 }]} />
+          </View>
+          <View style={[styles.skel, { width: 64, height: 14 }]} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const txStyles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   iconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
   },
-  body: { flex: 1, gap: 2 },
-  label: { fontSize: 14, fontWeight: "700" },
-  sub: { fontSize: 12 },
+  body: { flex: 1, gap: 2, minWidth: 0 },
+  label: { fontSize: 13.5, fontWeight: "700" },
+  sub: { fontSize: 11.5 },
   amount: { fontSize: 14, fontWeight: "800" },
 });
 
@@ -216,52 +427,172 @@ const makeStyles = (theme: Theme) =>
       paddingHorizontal: theme.space.s4,
       paddingBottom: theme.space.s5,
     },
+
+    /* Hero */
     hero: {
-      backgroundColor: theme.primaryTint,
-      borderRadius: theme.radius.lg,
-      padding: theme.space.s4,
-      gap: 4,
-      marginTop: theme.space.s2,
+      backgroundColor: theme.primary,
+      borderRadius: 20,
+      paddingHorizontal: 22,
+      paddingTop: 22,
+      paddingBottom: 22,
+      marginTop: theme.space.s1,
+      marginBottom: theme.space.s4,
+      overflow: "hidden",
+      // soft cast shadow on light mode; subtle on dark
+      shadowColor: theme.palette.green700,
+      shadowOffset: { width: 0, height: 12 },
+      shadowOpacity: theme.mode === "dark" ? 0.3 : 0.25,
+      shadowRadius: 20,
+      elevation: 6,
+    },
+    heroWatermarkA: {
+      position: "absolute",
+      top: -30,
+      right: -30,
+      width: 140,
+      height: 140,
+      borderRadius: 70,
+      backgroundColor: "rgba(255,255,255,0.08)",
+    },
+    heroWatermarkB: {
+      position: "absolute",
+      bottom: -50,
+      right: 30,
+      width: 100,
+      height: 100,
+      borderRadius: 50,
+      backgroundColor: "rgba(255,255,255,0.06)",
     },
     heroLabel: {
-      ...theme.type.caption,
-      color: theme.fgMuted,
-      letterSpacing: 0.4,
-      textTransform: "uppercase",
+      fontSize: 11,
+      fontWeight: "800",
+      letterSpacing: 0.6,
+      color: "#fff",
+      opacity: 0.85,
     },
     heroAmount: {
-      ...theme.type.h1,
-      color: theme.primary,
+      fontSize: 42,
       fontWeight: "800",
+      color: "#fff",
+      letterSpacing: -0.8,
+      marginTop: 4,
+      ...theme.type.money,
     },
-    pendingChip: {
+    pendingPill: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 4,
-      backgroundColor: theme.surface,
-      borderRadius: theme.radius.pill,
-      paddingHorizontal: theme.space.s2 + 2,
-      paddingVertical: 2,
+      gap: 6,
+      backgroundColor: "rgba(255,255,255,0.15)",
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
       alignSelf: "flex-start",
-      marginTop: 6,
+      marginTop: 8,
     },
     pendingText: {
-      ...theme.type.caption,
+      fontSize: 11,
+      fontWeight: "700",
+      color: "#fff",
+    },
+    heroCtaRow: {
+      marginTop: 18,
+    },
+    heroPrimaryCta: {
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: "#fff",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+    },
+    heroPrimaryCtaText: {
+      fontSize: 13.5,
+      fontWeight: "800",
+      color: theme.palette.green700,
+    },
+
+    /* Section header */
+    sectionRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "baseline",
+      paddingBottom: theme.space.s2,
+    },
+    sectionTitle: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: theme.fg,
+    },
+
+    /* Empty + loading cards */
+    emptyCard: {
+      backgroundColor: theme.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: theme.divider,
+      paddingVertical: 40,
+      paddingHorizontal: 20,
+      alignItems: "center",
+      marginHorizontal: theme.space.s4,
+    },
+    emptyIconWrap: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: theme.bgMuted,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 12,
+    },
+    emptyTitle: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: theme.fg,
+      marginBottom: 6,
+    },
+    emptyBody: {
+      fontSize: 12,
       color: theme.fgMuted,
+      textAlign: "center",
+      lineHeight: 18,
+      maxWidth: 240,
     },
-    ctaRow: {
-      marginTop: theme.space.s3,
-      marginBottom: theme.space.s4,
+    loadingCard: {
+      backgroundColor: theme.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: theme.divider,
+      overflow: "hidden",
     },
-    sectionLabel: {
-      ...theme.type.micro,
-      fontSize: 13,
-      letterSpacing: 0.6,
+    skel: {
+      backgroundColor: theme.skeleton,
+      borderRadius: 4,
+    },
+
+    /* Activity card chrome (CellRendererComponent wraps each TxRow) */
+    activityCell: {
+      backgroundColor: theme.surface,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderColor: theme.divider,
+    },
+    activityCellFirst: {
+      borderTopWidth: 1,
+      borderTopLeftRadius: 14,
+      borderTopRightRadius: 14,
+    },
+    activityCellLast: {
+      borderBottomWidth: 1,
+      borderBottomLeftRadius: 14,
+      borderBottomRightRadius: 14,
+    },
+
+    footnote: {
+      textAlign: "center",
+      fontSize: 11,
       color: theme.fgMuted,
-      marginBottom: theme.space.s2,
-    },
-    divider: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: theme.border,
+      lineHeight: 18,
+      paddingVertical: 20,
     },
   });

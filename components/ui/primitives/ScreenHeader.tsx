@@ -13,12 +13,21 @@ interface TrailingAction {
 
 interface ScreenHeaderProps {
   title?: string;
+  /** Optional second-line subtitle below the title (e.g. "12 orders" or "Step 4 of 4"). */
+  subtitle?: string;
   /** Show a back chip; default true unless this is a tab root. */
   showBack?: boolean;
   /** Override the default `router.back()` behavior. */
   onBack?: () => void;
   /** Optional trailing icon button. */
   trailing?: TrailingAction;
+  /**
+   * Optional right-slot custom node. When set, replaces the trailing
+   * icon button entirely — used for richer affordances like a List/Map
+   * segmented toggle. If both `trailing` and `rightNode` are provided,
+   * `rightNode` wins.
+   */
+  rightNode?: React.ReactNode;
   /** When set, replaces title with a custom node (e.g., for hero screens). */
   custom?: React.ReactNode;
   /** Title left-aligned (next to back chip) instead of centered. Default false. */
@@ -30,9 +39,11 @@ interface ScreenHeaderProps {
  */
 export default function ScreenHeader({
   title,
+  subtitle,
   showBack = true,
   onBack,
   trailing,
+  rightNode,
   custom,
   titleLeft = false,
 }: ScreenHeaderProps) {
@@ -65,13 +76,23 @@ export default function ScreenHeader({
         {custom ? (
           custom
         ) : title ? (
-          <Text
-            style={[styles.titleLeft, { color: theme.fg }]}
-            numberOfLines={1}
-            accessibilityRole="header"
-          >
-            {title}
-          </Text>
+          <View style={{ flex: 1 }}>
+            <Text
+              style={[styles.titleLeft, { color: theme.fg }]}
+              numberOfLines={1}
+              accessibilityRole="header"
+            >
+              {title}
+            </Text>
+            {subtitle ? (
+              <Text
+                style={[styles.subtitle, { color: theme.fgMuted }]}
+                numberOfLines={1}
+              >
+                {subtitle}
+              </Text>
+            ) : null}
+          </View>
         ) : null}
       </View>
     );
@@ -100,18 +121,30 @@ export default function ScreenHeader({
         {custom ? (
           custom
         ) : title ? (
-          <Text
-            style={[styles.title, { color: theme.fg }]}
-            numberOfLines={1}
-            accessibilityRole="header"
-          >
-            {title}
-          </Text>
+          <View style={{ alignItems: "center" }}>
+            <Text
+              style={[styles.title, { color: theme.fg }]}
+              numberOfLines={1}
+              accessibilityRole="header"
+            >
+              {title}
+            </Text>
+            {subtitle ? (
+              <Text
+                style={[styles.subtitle, { color: theme.fgMuted }]}
+                numberOfLines={1}
+              >
+                {subtitle}
+              </Text>
+            ) : null}
+          </View>
         ) : null}
       </View>
 
-      <View style={[styles.side, styles.sideRight]}>
-        {trailing ? (
+      <View style={[styles.side, styles.sideRight, !!rightNode && styles.sideRightWide]}>
+        {rightNode ? (
+          rightNode
+        ) : trailing ? (
           <Pressable
             onPress={trailing.onPress}
             accessibilityRole="button"
@@ -162,6 +195,13 @@ const makeStyles = (theme: Theme) =>
       justifyContent: "center",
     },
     sideRight: { alignItems: "flex-end" },
+    /**
+     * Wider right slot used when a custom `rightNode` is supplied (e.g.
+     * the Stations List/Map segmented toggle, which is wider than a 40
+     * pixel back-chip). Lets the toggle render at its natural width
+     * without forcing it into the default narrow slot.
+     */
+    sideRightWide: { width: "auto", minWidth: 40 },
     center: { flex: 1, alignItems: "center", justifyContent: "center" },
     backChip: {
       width: 36,
@@ -178,7 +218,11 @@ const makeStyles = (theme: Theme) =>
     titleLeft: {
       ...theme.type.h1,
       fontWeight: "800",
-      flex: 1,
+    },
+    subtitle: {
+      ...theme.type.caption,
+      fontSize: 12,
+      marginTop: 2,
     },
     badge: {
       position: "absolute",

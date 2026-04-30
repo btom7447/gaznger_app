@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useMemo } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
 
@@ -22,12 +22,29 @@ export interface StationCardData {
   verified?: boolean;
   /** Station logo / hero image (optional). */
   imageUrl?: string;
+  /**
+   * Geo coordinates (decimal degrees). Required for the Map view so
+   * pins land on real station locations. The List view ignores these.
+   */
+  lat?: number;
+  lng?: number;
 }
 
 interface StationCardProps {
   station: StationCardData;
   selected: boolean;
   onPress: () => void;
+}
+
+/**
+ * Pull a 2-letter brand monogram off a station name. We slice the
+ * shortName when supplied, otherwise the full name; non-alphanum
+ * characters are stripped so "TotalEnergies" → "TO" not "TO" with
+ * the leading dot the regex would have left.
+ */
+function brandLetters(s: { shortName?: string; name: string }): string {
+  const source = s.shortName ?? s.name;
+  return source.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase();
 }
 
 export default function StationCard({
@@ -38,19 +55,8 @@ export default function StationCard({
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  const initials = (station.shortName ?? station.name)
-    .replace(/[^A-Za-z0-9]/g, "")
-    .slice(0, 4)
-    .toUpperCase();
-
-  // Track image load failures so we fall back to the initials tile.
-  const [imgFailed, setImgFailed] = useState(false);
-  const showImage = !!station.imageUrl && !imgFailed;
-
   const a11y = `${station.name}${
     station.distanceKm != null ? `, ${station.distanceKm.toFixed(1)} km away` : ""
-  }${
-    station.etaMinutes != null ? `, ETA ${station.etaMinutes} minutes` : ""
   }${station.rating != null ? `, rating ${station.rating} stars` : ""}, ${formatCurrency(
     station.perUnit
   )} per ${station.unit}${station.verified ? ", verified partner" : ""}.`;
@@ -67,26 +73,17 @@ export default function StationCard({
         pressed && { opacity: 0.92, transform: [{ scale: 0.99 }] },
       ]}
     >
-      <View style={styles.logoTile}>
-        {showImage ? (
-          <Image
-            source={{ uri: station.imageUrl }}
-            style={styles.logoImage}
-            resizeMode="cover"
-            onError={() => setImgFailed(true)}
-            accessibilityLabel={`${station.name} logo`}
-          />
-        ) : (
-          <Text style={styles.logoText}>{initials}</Text>
-        )}
+      {/* Brand-letter tile — primary-tinted bg + green700 text. We
+          intentionally don't render `imageUrl` logos here because the
+          v3 design uses uniform brand letters across rows for visual
+          rhythm, regardless of whether the station has a logo. */}
+      <View style={styles.brandTile}>
+        <Text style={styles.brandText}>{brandLetters(station)}</Text>
       </View>
 
       <View style={styles.info}>
         <View style={styles.titleRow}>
-          <Text
-            style={styles.name}
-            numberOfLines={1}
-          >
+          <Text style={styles.name} numberOfLines={1}>
             {station.name}
           </Text>
           {station.verified ? (
@@ -107,23 +104,20 @@ export default function StationCard({
           {station.rating != null ? (
             <>
               <Text style={styles.metaDot}>·</Text>
-              <Ionicons
-                name="star"
-                size={11}
-                color={theme.accent}
-                style={styles.starIcon}
-              />
-              <Text style={styles.meta} numberOfLines={1}>
-                {station.rating.toFixed(1)}
-              </Text>
-            </>
-          ) : null}
-          {station.etaMinutes != null ? (
-            <>
-              <Text style={styles.metaDot}>·</Text>
-              <Text style={styles.meta} numberOfLines={1}>
-                ~{station.etaMinutes} min
-              </Text>
+              <View style={styles.ratingPill}>
+                <Ionicons
+                  name="star"
+                  size={10}
+                  color={
+                    theme.mode === "dark"
+                      ? theme.palette.gold300
+                      : theme.palette.gold700
+                  }
+                />
+                <Text style={styles.meta} numberOfLines={1}>
+                  {station.rating.toFixed(1)}
+                </Text>
+              </View>
             </>
           ) : null}
         </View>
@@ -131,7 +125,7 @@ export default function StationCard({
 
       <View style={styles.priceCol}>
         <Text style={styles.priceMain}>{formatCurrency(station.perUnit)}</Text>
-        <Text style={styles.priceUnit}>per {station.unit}</Text>
+        <Text style={styles.priceUnit}>per {station.unit.toLowerCase()}</Text>
       </View>
     </Pressable>
   );
@@ -139,52 +133,49 @@ export default function StationCard({
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
+    /**
+     * v3 station card. 14px padding, 14px radius, 1.5px border that
+     * flips to primary green on selection (no background tint — the
+     * border alone carries the selection state).
+     */
     card: {
       flexDirection: "row",
       alignItems: "center",
-      gap: theme.space.s3,
+      gap: 12,
       backgroundColor: theme.surface,
-      borderColor: theme.border,
-      borderWidth: 1,
-      borderRadius: theme.radius.lg,
-      paddingHorizontal: theme.space.s3 + 2,
-      paddingVertical: theme.space.s3,
+      borderColor: theme.divider,
+      borderWidth: 1.5,
+      borderRadius: 14,
+      padding: 14,
     },
     cardSelected: {
-      backgroundColor: theme.primaryTint,
       borderColor: theme.primary,
-      borderWidth: 1.5,
     },
-    logoTile: {
-      width: 48,
-      height: 48,
-      borderRadius: theme.radius.md,
-      backgroundColor: theme.bgMuted,
+    brandTile: {
+      width: 44,
+      height: 44,
+      borderRadius: 11,
+      backgroundColor: theme.primaryTint,
       alignItems: "center",
       justifyContent: "center",
-      overflow: "hidden",
+      flexShrink: 0,
     },
-    logoImage: {
-      width: "100%",
-      height: "100%",
-    },
-    logoText: {
-      ...theme.type.micro,
-      fontSize: 11,
-      letterSpacing: 0.4,
-      color: theme.fgMuted,
+    brandText: {
+      fontSize: 13,
       fontWeight: "800",
+      color: theme.mode === "dark" ? "#fff" : theme.palette.green700,
     },
-    info: { flex: 1, gap: 2 },
+    info: { flex: 1, minWidth: 0, gap: 2 },
     titleRow: {
       flexDirection: "row",
       alignItems: "center",
       gap: 6,
+      marginBottom: 2,
     },
     name: {
-      ...theme.type.body,
+      fontSize: 14,
+      fontWeight: "800",
       color: theme.fg,
-      fontWeight: "700",
       flexShrink: 1,
     },
     verifiedBadge: {
@@ -198,31 +189,33 @@ const makeStyles = (theme: Theme) =>
     metaRow: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 4,
-      flexWrap: "wrap",
+      gap: 6,
     },
     meta: {
-      ...theme.type.caption,
+      fontSize: 11.5,
       color: theme.fgMuted,
     },
     metaDot: {
-      ...theme.type.caption,
+      fontSize: 11.5,
       color: theme.fgMuted,
     },
-    starIcon: {
-      marginLeft: 2,
+    ratingPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
     },
     priceCol: {
       alignItems: "flex-end",
     },
     priceMain: {
-      ...theme.type.body,
-      ...theme.type.money,
-      color: theme.fg,
+      fontSize: 16,
       fontWeight: "800",
+      color: theme.fg,
+      ...theme.type.money,
     },
     priceUnit: {
-      ...theme.type.caption,
+      fontSize: 10,
       color: theme.fgMuted,
+      marginTop: 1,
     },
   });

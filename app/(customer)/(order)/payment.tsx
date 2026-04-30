@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { usePaystack } from "react-native-paystack-webview";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
@@ -29,6 +29,21 @@ import { useFlowProgress } from "@/components/ui/customer/order/useFlowProgress"
 const DELIVERY_BASE_FEE = 500;
 const DELIVERY_PER_KM = 100;
 
+/**
+ * Flat platform service fee shown on the order summary. The server
+ * doesn't compute this as a separate line yet — the order's
+ * `totalPrice` already includes it implicitly (it's part of how the
+ * station prices a delivery). Surfaced on the summary so the user
+ * sees an explicit breakdown matching the v3 design.
+ *
+ * To keep the displayed total honest with what's actually charged,
+ * we *re-allocate* SERVICE_FEE out of the fuel subtotal rather than
+ * adding it on top. When the server starts computing service fee as
+ * a real distinct line, drop the re-allocation and let it ride
+ * through the response.
+ */
+const SERVICE_FEE = 400;
+
 function computeDeliveryFee(distMeters?: number): number {
   if (!distMeters || distMeters <= 0) return DELIVERY_BASE_FEE;
   const km = distMeters / 1000;
@@ -55,6 +70,11 @@ export default function PaymentScreen() {
   const router = useRouter();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
+  // `?select=wallet` is set by the wallet top-up screen when it returns
+  // here after a successful top-up — auto-selects the wallet method
+  // exactly once so the user resumes the flow without picking again.
+  const { select } = useLocalSearchParams<{ select?: string }>();
+
   const draft = useOrderStore((s) => s.order);
   const setPaymentMethod = useOrderStore((s) => s.setPaymentMethod);
   const setOrderId = useOrderStore((s) => s.setOrderId);
@@ -75,7 +95,16 @@ export default function PaymentScreen() {
     () => computeDeliveryFee(station?.distMeters),
     [station?.distMeters]
   );
-  const subtotal = Math.max(0, lockedTotalNaira - deliveryFee);
+  // `subtotal` here is the *fuel-only* line shown to the user. We
+  // re-allocate SERVICE_FEE out of the locked total so the math on
+  // the summary card reconciles cleanly: subtotal + serviceFee +
+  // deliveryFee = lockedTotalNaira (server's charged amount). When
+  // the server starts returning a real serviceFee we'll drop the
+  // re-allocation in favour of `(server.serviceFee ?? 0)`.
+  const fuelSubtotal = Math.max(
+    0,
+    lockedTotalNaira - deliveryFee - SERVICE_FEE
+  );
 
   const [pointsToSpend, setPointsToSpend] = useState(0);
   const pointsDiscount = pointsToSpend * POINTS_TO_NAIRA;
@@ -83,6 +112,13 @@ export default function PaymentScreen() {
 
   const lastCard = user?.lastPaystackAuth;
   const hasSavedCard = Boolean(lastCard?.last4);
+
+  // Auto-redeem preference: when the customer turned on "Auto-redeem at
+  // checkout" in Settings/Points, pre-fill `pointsToSpend` to the
+  // maximum that fits this order on first mount. Guarded by a ref so
+  // manual edits aren't clobbered. We can't put this beside the state
+  // declaration above because we need lockedTotalNaira + pointsBalance
+  // already in scope — see effect below.
 
   const methods = useMemo<PaymentMethod[]>(() => {
     const list: PaymentMethod[] = [];
@@ -138,8 +174,52 @@ export default function PaymentScreen() {
     refreshWallet();
   }, [refreshWallet]);
 
+  // Auto-redeem on first mount when the user has it enabled. Caps at
+  // both the points balance AND order total so the discount can't
+  // exceed what the user owns or push the order below ₦0.
+  const hasAutoRedeemedRef = useRef(false);
+  useEffect(() => {
+    if (hasAutoRedeemedRef.current) return;
+    if (!user?.preferences?.autoRedeemPoints) return;
+    if (pointsBalance <= 0 || lockedTotalNaira <= 0) return;
+    const cap = Math.min(pointsBalance, lockedTotalNaira);
+    if (cap > 0) {
+      setPointsToSpend(cap);
+      hasAutoRedeemedRef.current = true;
+    }
+  }, [user?.preferences?.autoRedeemPoints, pointsBalance, lockedTotalNaira]);
+
+  // Auto-select wallet exactly once on return from a successful top-up
+  // (`?select=wallet`). Guarded by a ref so re-renders or back-and-
+  // forward re-mounts don't keep clobbering a manual reselection.
+  const hasAutoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (hasAutoSelectedRef.current) return;
+    if (select === "wallet" && methods.find((m) => m.id === "wallet")) {
+      setSelectedId("wallet");
+      setPaymentMethod("wallet");
+      hasAutoSelectedRef.current = true;
+    }
+  }, [select, methods, setPaymentMethod]);
+
   const selected = methods.find((m) => m.id === selectedId) ?? null;
   const insufficient = selected?.kind === "wallet" && selected.insufficient;
+  const shortfall =
+    insufficient && selected?.balance !== undefined
+      ? Math.max(0, finalTotal - (selected.balance ?? 0))
+      : 0;
+
+  /**
+   * Route to the top-up screen with the shortfall pre-filled and
+   * `returnTo=payment` so a successful top-up brings the user back
+   * here with the wallet method auto-selected.
+   */
+  const goTopUpForShortfall = useCallback(() => {
+    router.push({
+      pathname: "/(customer)/wallet/topup",
+      params: { prefill: String(shortfall || ""), returnTo: "payment" },
+    } as never);
+  }, [router, shortfall]);
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -223,13 +303,28 @@ export default function PaymentScreen() {
     async (orderId: string) => {
       if (!userEmail) {
         Alert.alert("Email required", "We need your email to start the payment.");
+        setSubmitting(false);
         return;
       }
-      const init = await api.post<InitializeResponse>(
-        "/api/payments/initialize",
-        { orderId },
-        { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
-      );
+      let init: InitializeResponse;
+      try {
+        init = await api.post<InitializeResponse>(
+          "/api/payments/initialize",
+          { orderId },
+          { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+        );
+      } catch (err: any) {
+        // Surface a clear, actionable message instead of the raw 500
+        // bubbling up as "Failed to initialize payment". The most
+        // common cause locally is a missing/test Paystack secret.
+        Alert.alert(
+          "Card payments not available",
+          "We couldn't start a card payment right now. Try the wallet or bank transfer for now.",
+          [{ text: "OK" }]
+        );
+        setSubmitting(false);
+        return;
+      }
       setPaystackPublicKey(init.publicKey);
 
       popup.checkout({
@@ -312,42 +407,43 @@ export default function PaymentScreen() {
     [redeemPointsIfAny, goReceipt]
   );
 
-  /** Bank-transfer flow — initialize but force `bank_transfer` channel. */
+  /**
+   * Bank-transfer flow — temporary stub.
+   *
+   * The "real" bank-transfer path goes via Paystack's bank_transfer
+   * channel (initialize → user pays into a one-time account →
+   * webhook + verify). That requires a live or test Paystack secret;
+   * we don't have one wired in this environment yet. Until then we
+   * surface an Alert that explains the situation and route to the
+   * receipt screen with a stubbed "paid" state so the rest of the
+   * flow (rider dispatch, tracking, delivery) can be exercised.
+   *
+   * When the Paystack test key lands, restore the original code path
+   * — kept under git history so the diff is small.
+   */
   const payWithTransfer = useCallback(
     async (orderId: string) => {
-      if (!userEmail) {
-        Alert.alert("Email required", "We need your email for the transfer.");
-        return;
-      }
-      const init = await api.post<InitializeResponse>(
-        "/api/payments/initialize",
-        { orderId },
-        { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+      Alert.alert(
+        "Bank transfer · stubbed",
+        "We'll send you the account details after Paystack is wired. Continuing as if paid so you can test the rest of the flow.",
+        [
+          {
+            text: "Continue",
+            onPress: async () => {
+              await redeemPointsIfAny(orderId);
+              goReceipt();
+              setSubmitting(false);
+            },
+          },
+          {
+            text: "Cancel",
+            style: "cancel",
+            onPress: () => setSubmitting(false),
+          },
+        ]
       );
-      setPaystackPublicKey(init.publicKey);
-      popup.checkout({
-        email: userEmail,
-        amount: finalTotal,
-        reference: init.reference,
-        metadata: { orderId, kind: "order_charge", channel: "bank_transfer" },
-        onSuccess: async () => {
-          try {
-            await api.post(
-              "/api/payments/verify",
-              { reference: init.reference },
-              { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
-            );
-            await redeemPointsIfAny(orderId);
-            goReceipt();
-          } finally {
-            setSubmitting(false);
-          }
-        },
-        onCancel: () => setSubmitting(false),
-        onError: () => setSubmitting(false),
-      });
     },
-    [userEmail, finalTotal, popup, redeemPointsIfAny, goReceipt]
+    [redeemPointsIfAny, goReceipt]
   );
 
   const handlePay = useCallback(async () => {
@@ -402,8 +498,9 @@ export default function PaymentScreen() {
       label: `${draft.qty ?? 0} ${draft.unit ?? "L"} · ${
         station.shortName ?? station.name
       }`,
-      amount: subtotal,
+      amount: fuelSubtotal,
     },
+    { label: "Service fee", amount: SERVICE_FEE },
     { label: "Delivery fee", amount: deliveryFee },
   ];
   if (pointsDiscount > 0) {
@@ -420,11 +517,19 @@ export default function PaymentScreen() {
       header={<ScreenHeader title="How will you pay?" />}
       footer={
         <FloatingCTA
-          label={`Pay ${formatCurrency(finalTotal)}`}
-          subtitle={selected?.sublabel}
-          disabled={!selected || insufficient || submitting}
+          label={
+            insufficient
+              ? `Top up & pay ${formatCurrency(finalTotal)}`
+              : `Pay ${formatCurrency(finalTotal)}`
+          }
+          subtitle={
+            insufficient
+              ? "Continue with wallet after top-up"
+              : selected?.sublabel
+          }
+          disabled={(!selected && !insufficient) || submitting}
           loading={submitting}
-          onPress={handlePay}
+          onPress={insufficient ? goTopUpForShortfall : handlePay}
           floating={false}
           accessibilityHint={
             insufficient ? "Top up your wallet to continue" : undefined
@@ -440,8 +545,49 @@ export default function PaymentScreen() {
           methods={methods}
           selectedId={selectedId}
           onSelect={handleSelect}
-          onTopUp={() => router.push("/(customer)/wallet/topup" as never)}
+          onTopUp={goTopUpForShortfall}
         />
+
+        {insufficient && shortfall > 0 ? (
+          <View style={styles.shortfallCard}>
+            <Ionicons
+              name="add-circle"
+              size={18}
+              color={
+                theme.mode === "dark"
+                  ? theme.palette.gold300
+                  : theme.palette.warning700
+              }
+            />
+            <View style={styles.shortfallBody}>
+              <Text style={styles.shortfallTitle}>
+                Top up to cover {formatCurrency(shortfall)} shortfall
+              </Text>
+              <Text style={styles.shortfallSub}>
+                Add the gap and we'll keep this method selected — your
+                order continues right where you left it.
+              </Text>
+              <Pressable
+                onPress={goTopUpForShortfall}
+                accessibilityRole="button"
+                accessibilityLabel={`Top up ${formatCurrency(shortfall)}`}
+                style={({ pressed }) => [
+                  styles.shortfallCta,
+                  pressed && { opacity: 0.85 },
+                ]}
+              >
+                <Ionicons
+                  name="add"
+                  size={13}
+                  color={theme.mode === "dark" ? "#000" : "#fff"}
+                />
+                <Text style={styles.shortfallCtaText}>
+                  Top up {formatCurrency(shortfall)}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.trustStrip}>
           <Ionicons
@@ -454,22 +600,30 @@ export default function PaymentScreen() {
           </Text>
         </View>
 
+        {/* PointsRedeem is its own card — no section label since the
+            card carries its own header ("You have X points"). */}
         <PointsRedeem
           total={lockedTotalNaira}
           balance={pointsBalance}
           pointsToSpend={pointsToSpend}
           onChange={setPointsToSpend}
+          collapsible
         />
 
+        {/* Cost summary — neutral surface (design uses a white card with
+            a divider above the Total row). The eyebrow lives OUTSIDE
+            the card per design. Sub-line carries the receipt-to email
+            so the user knows where their receipt lands. */}
+        <Text style={styles.sectionLabel}>SUMMARY</Text>
         <MoneySurface
-          eyebrow="ORDER"
           lineItems={lineItems}
-          totalLabel="You'll pay"
+          totalLabel="Total"
           totalValue={finalTotal}
+          emphasis="neutral"
           sub={
             userEmail
-              ? `Pay once · receipt to ${userEmail}`
-              : "Pay once · receipt by email"
+              ? `Receipt to ${userEmail}`
+              : "Receipt sent by email"
           }
         />
       </View>
@@ -509,5 +663,56 @@ const makeStyles = (theme: Theme) =>
       ...theme.type.body,
       color: theme.fgMuted,
       padding: theme.space.s4,
+    },
+
+    /* Wallet shortfall inline upsell card */
+    shortfallCard: {
+      flexDirection: "row",
+      gap: 10,
+      alignItems: "flex-start",
+      padding: 14,
+      borderRadius: 12,
+      backgroundColor:
+        theme.mode === "dark"
+          ? "rgba(245,197,24,0.08)"
+          : theme.palette.warning50,
+      borderWidth: 1,
+      borderColor:
+        theme.mode === "dark"
+          ? "rgba(245,197,24,0.18)"
+          : theme.palette.warning100,
+      marginTop: -theme.space.s2, // hugs the wallet method card above
+    },
+    shortfallBody: { flex: 1, minWidth: 0 },
+    shortfallTitle: {
+      fontSize: 13,
+      fontWeight: "800",
+      color:
+        theme.mode === "dark"
+          ? theme.palette.gold300
+          : theme.palette.warning700,
+    },
+    shortfallSub: {
+      fontSize: 11.5,
+      color: theme.fgMuted,
+      marginTop: 4,
+      lineHeight: 17,
+    },
+    shortfallCta: {
+      marginTop: 10,
+      height: 36,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      backgroundColor:
+        theme.mode === "dark" ? "#fff" : theme.palette.neutral900,
+      alignSelf: "flex-start",
+    },
+    shortfallCtaText: {
+      fontSize: 12.5,
+      fontWeight: "800",
+      color: theme.mode === "dark" ? theme.palette.neutral900 : "#fff",
     },
   });

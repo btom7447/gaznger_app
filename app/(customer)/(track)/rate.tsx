@@ -182,10 +182,18 @@ export default function RateScreen() {
                     pressed && { opacity: 0.85 },
                   ]}
                 >
+                  {isSel ? (
+                    <Ionicons
+                      name="checkmark"
+                      size={14}
+                      color="#fff"
+                      style={{ marginRight: 4 }}
+                    />
+                  ) : null}
                   <Text
                     style={[
                       styles.tagText,
-                      { color: isSel ? theme.primary : theme.fg },
+                      { color: isSel ? "#fff" : theme.fg },
                     ]}
                   >
                     {t}
@@ -328,6 +336,8 @@ const makeStyles = (theme: Theme) =>
       gap: theme.space.s2,
     },
     tag: {
+      flexDirection: "row",
+      alignItems: "center",
       backgroundColor: theme.bgMuted,
       borderColor: theme.border,
       borderWidth: 1,
@@ -336,8 +346,8 @@ const makeStyles = (theme: Theme) =>
       paddingVertical: 6,
     },
     tagSelected: {
-      backgroundColor: theme.primaryTint,
-      borderColor: theme.palette.green200,
+      backgroundColor: theme.primary,
+      borderColor: theme.primary,
     },
     tagText: {
       ...theme.type.caption,

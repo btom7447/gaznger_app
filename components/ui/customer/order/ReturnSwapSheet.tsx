@@ -181,7 +181,11 @@ const ReturnSwapSheet = forwardRef<ReturnSwapSheetRef, ReturnSwapSheetProps>(
     };
 
     return (
-      <BottomSheet ref={sheetRef} snapPoints={["80%"]}>
+      <BottomSheet
+        ref={sheetRef}
+        snapPoints={["85%"]}
+        contentStyle={styles.sheetContent}
+      >
         <View style={styles.header}>
           <Text style={styles.title}>Schedule return swap</Text>
           <Text style={styles.sub}>
@@ -321,6 +325,21 @@ export default ReturnSwapSheet;
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
+    /**
+     * Override the BottomSheet primitive's default content padding so
+     * the footer sits flush at the bottom edge. The ScrollView's
+     * `flex: 1` then reliably bounds itself to (sheet height − header −
+     * footer), which is what keeps the Confirm CTA on screen even when
+     * the time list is long. Without this override the sheet's padding
+     * + the BottomSheetView's flex behaviour can push the footer below
+     * the visible area on smaller phones.
+     */
+    sheetContent: {
+      flex: 1,
+      paddingHorizontal: theme.space.s4,
+      paddingTop: 0,
+      paddingBottom: theme.space.s4,
+    },
     header: {
       gap: 6,
       marginBottom: theme.space.s3,
@@ -402,7 +421,18 @@ const makeStyles = (theme: Theme) =>
       color: theme.fgMuted,
       paddingVertical: theme.space.s3,
     },
+    /**
+     * Sticky footer holding the Confirm CTA. Sits OUTSIDE the
+     * ScrollView in the column flex layout, so it stays visible
+     * regardless of how long the time-slot grid scrolls. The hairline
+     * top border separates it visually from the scrolling content
+     * above.
+     */
     footer: {
       paddingTop: theme.space.s3,
+      paddingBottom: theme.space.s2,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.divider,
+      backgroundColor: theme.surfaceElevated,
     },
   });

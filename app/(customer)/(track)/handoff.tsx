@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   Linking,
   Pressable,
@@ -10,13 +10,17 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { toast } from "sonner-native";
 import { Theme, useTheme } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
+import { useActiveOrder } from "@/hooks/useActiveOrder";
+import { api } from "@/lib/api";
 import {
   FloatingCTA,
   LiveBadge,
   StatusBadge,
 } from "@/components/ui/primitives";
+import PulseRings from "@/components/ui/customer/track/PulseRings";
 
 interface Step {
   label: string;
@@ -31,6 +35,11 @@ export default function HandoffScreen() {
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   const draft = useOrderStore((s) => s.order);
+  // Server-side fallback so the confirm CTA works when Track auto-
+  // routed here without a hot draft (e.g. user opened the app fresh
+  // mid-delivery and the rider had already tapped Delivered).
+  const { activeOrder } = useActiveOrder();
+  const effectiveOrderId = draft.orderId ?? activeOrder?._id ?? null;
   const isSwap = draft.serviceType === "swap";
 
   // Demo state — derive from server `order:update` events when wired.
@@ -49,9 +58,32 @@ export default function HandoffScreen() {
 
   const riderFirstName = draft.rider?.firstName ?? "Your rider";
 
-  const handleConfirm = useCallback(() => {
-    router.replace("/(customer)/(track)/delivered" as never);
-  }, [router]);
+  const [confirming, setConfirming] = useState(false);
+  const handleConfirm = useCallback(async () => {
+    if (!effectiveOrderId) {
+      toast.error("Order not loaded", {
+        description: "Pull down to refresh and try again.",
+      });
+      return;
+    }
+    if (confirming) return;
+    setConfirming(true);
+    try {
+      // Server permits this transition only from
+      // `awaiting_confirmation`. If the rider hasn't tapped Delivered
+      // yet we surface the 400 as a friendly toast rather than a
+      // stuck spinner.
+      await api.patch(`/api/orders/${effectiveOrderId}/confirm-delivery`);
+      router.replace("/(customer)/(track)/delivered" as never);
+    } catch (err: any) {
+      toast.error("Couldn't confirm delivery", {
+        description:
+          err?.message ??
+          "Ask your rider to tap Delivered, then try again.",
+      });
+      setConfirming(false);
+    }
+  }, [effectiveOrderId, confirming, router]);
 
   const handleCall = useCallback(() => {
     if (draft.rider?.phone) Linking.openURL(`tel:${draft.rider.phone}`);
@@ -75,11 +107,8 @@ export default function HandoffScreen() {
           end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFill}
         />
-        <View style={styles.pulseLg} />
-        <View style={styles.pulseMd} />
-        <View style={styles.pulseSm}>
-          <Ionicons name="checkmark" size={20} color="#fff" />
-        </View>
+        {/* Animated pulse rings — matches arrival.tsx */}
+        <PulseRings />
 
         <View
           style={[
@@ -224,9 +253,17 @@ export default function HandoffScreen() {
       </View>
 
       <FloatingCTA
-        label={isSwap ? "Cylinder back · all good" : "Cylinder received"}
+        label={
+          confirming
+            ? "Confirming…"
+            : isSwap
+            ? "Cylinder back · all good"
+            : "Cylinder received"
+        }
         subtitle="Confirms delivery · final step"
         onPress={handleConfirm}
+        loading={confirming}
+        disabled={confirming}
       />
     </View>
   );
@@ -265,29 +302,6 @@ const makeStyles = (theme: Theme) =>
       borderRadius: theme.radius.pill,
       paddingHorizontal: 8,
       paddingVertical: 4,
-      ...theme.elevation.card,
-    },
-    pulseLg: {
-      position: "absolute",
-      width: 130,
-      height: 130,
-      borderRadius: 65,
-      backgroundColor: "rgba(255,255,255,0.18)",
-    },
-    pulseMd: {
-      position: "absolute",
-      width: 86,
-      height: 86,
-      borderRadius: 43,
-      backgroundColor: "rgba(255,255,255,0.32)",
-    },
-    pulseSm: {
-      width: 42,
-      height: 42,
-      borderRadius: 21,
-      backgroundColor: theme.success,
-      alignItems: "center",
-      justifyContent: "center",
       ...theme.elevation.card,
     },
     body: {

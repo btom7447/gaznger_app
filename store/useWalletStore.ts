@@ -51,10 +51,21 @@ interface WalletState {
 
   transactions: WalletTransaction[];
   txCursor: string | null;
+  /**
+   * `true` when the server returned `nextCursor: null` AND we already
+   * fetched at least one page. Used to short-circuit `loadMoreTransactions`
+   * so the FlatList's `onEndReached` doesn't keep refetching the first
+   * page in a loop on small accounts (where the list never scrolls past
+   * the threshold).
+   */
+  txExhausted: boolean;
   isLoadingTx: boolean;
 
   refresh: () => Promise<void>;
   loadMoreTransactions: () => Promise<void>;
+  /** Reset cursor + exhausted flag so the next loadMoreTransactions
+   *  starts from page 1. Used by pull-to-refresh. */
+  resetTransactions: () => void;
   /** Wire socket subscriptions. Call once after login. */
   attachSocket: () => () => void;
   /** Local-only after a confirmed pay-with-wallet so UI feels instant. */
@@ -70,6 +81,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
 
   transactions: [],
   txCursor: null,
+  txExhausted: false,
   isLoadingTx: false,
 
   refresh: async () => {
@@ -94,8 +106,12 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   loadMoreTransactions: async () => {
-    const { txCursor, isLoadingTx, transactions } = get();
+    const { txCursor, isLoadingTx, transactions, txExhausted } = get();
     if (isLoadingTx) return;
+    // Hard stop once the server has confirmed there's no more data.
+    // FlatList's onEndReached otherwise fires on every render of a list
+    // shorter than the viewport, looping forever.
+    if (txExhausted) return;
     set({ isLoadingTx: true });
     try {
       const qs = txCursor ? `?cursor=${encodeURIComponent(txCursor)}` : "";
@@ -103,16 +119,24 @@ export const useWalletStore = create<WalletState>((set, get) => ({
         transactions: WalletTransaction[];
         nextCursor: string | null;
       }>(`/api/wallet/transactions${qs}`);
-      // Initial load replaces; subsequent appends.
+      // Initial load replaces; subsequent pages append.
       const merged = txCursor
         ? [...transactions, ...data.transactions]
         : data.transactions;
-      set({ transactions: merged, txCursor: data.nextCursor });
+      set({
+        transactions: merged,
+        txCursor: data.nextCursor,
+        txExhausted: data.nextCursor == null,
+      });
     } catch {
       // Non-fatal
     } finally {
       set({ isLoadingTx: false });
     }
+  },
+
+  resetTransactions: () => {
+    set({ transactions: [], txCursor: null, txExhausted: false });
   },
 
   attachSocket: () => {
@@ -121,7 +145,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     const handler = (data: { available: number; pending: number }) => {
       set({ available: data.available, pending: data.pending });
       // Reset transaction cursor so the wallet screen pulls fresh on next view.
-      set({ transactions: [], txCursor: null });
+      set({ transactions: [], txCursor: null, txExhausted: false });
     };
     s.on("wallet:update", handler);
     return () => {

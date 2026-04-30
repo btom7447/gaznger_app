@@ -1,41 +1,39 @@
-import React, { useCallback, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { toast } from "sonner-native";
-import * as ImagePicker from "expo-image-picker";
+import Constants from "expo-constants";
 import { useSessionStore } from "@/store/useSessionStore";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
 import { useWalletStore } from "@/store/useWalletStore";
 import { api } from "@/lib/api";
+import { pickAndUploadProfileImage } from "@/lib/uploadProfileImage";
 import {
   Row,
   ScreenContainer,
   ScreenHeader,
   Skeleton,
 } from "@/components/ui/primitives";
-
-const APP_VERSION = "2.4.1";
+import CountUpNumber from "@/components/ui/global/CountUpNumber";
 
 /**
- * Profile screen — v3 design.
+ * Profile screen — v3.
  *
- * Three hero blocks + two row groups + sign-out:
+ * Layout:
  *   1. Avatar + name + phone (tap avatar to change profile pic)
- *   2. Points hero (gold) — current balance + earned-this-month + redeem CTA
- *   3. Wallet quick card — current balance + Top up CTA
- *   4. Your account: Saved addresses / Payment methods / Order history / Settings
- *   5. Get help: Help & support / Terms / Privacy
- *   6. Sign out (danger row, no chevron)
- *
- * Routes:
- *   - Order History → /(customer)/(order)/history (per SURFACES_V3_PLAN §2)
- *   - Wallet        → /(customer)/wallet
- *   - Points        → /(screens)/points
- *
- * Reads `lastPaystackAuth` (saved-card existence) and `lpgOrderCount`
- * from the session store; both populated by /auth/me on app boot.
+ *   2. Points hero (gold, watermark circle, taller than v3.0) — current
+ *      balance + sub + "Redeem at next order" CTA inside.
+ *   3. Wallet quick card — current balance + Top up CTA. Both balances
+ *      animate via CountUpNumber on focus + balance change.
+ *   4. Your account: addresses + payment methods + order history (each
+ *      with a count badge) + Settings.
+ *   5. Get help: Help & support, Terms, Privacy.
+ *   6. Sign out + real app version (no hardcoded "Lagos").
  */
+const APP_VERSION =
+  (Constants.expoConfig?.version as string | undefined) ?? "2.0.0";
+
 export default function ProfileScreen() {
   const theme = useTheme();
   const router = useRouter();
@@ -47,6 +45,7 @@ export default function ProfileScreen() {
 
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [orderCount, setOrderCount] = useState<number | null>(null);
 
   const initials =
     user?.displayName
@@ -59,33 +58,36 @@ export default function ProfileScreen() {
 
   const points = user?.points ?? 0;
   const phoneDisplay = user?.phone ?? "Add phone number";
+  const addressCount = user?.addressBook?.length ?? 0;
+  const paymentCount = user?.lastPaystackAuth?.last4 ? 1 : 0;
+
+  // Lazy fetch the order count on focus. We use limit=1 so the response
+  // stays small; only `total` matters here.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      api
+        .get<{ total?: number }>("/api/orders?limit=1&page=1")
+        .then((res) => {
+          if (!cancelled) setOrderCount(res.total ?? 0);
+        })
+        .catch(() => {
+          // Non-fatal — badge just stays hidden.
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [])
+  );
 
   const handleAvatarTap = useCallback(async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-    if (result.canceled) return;
-    const uri = result.assets[0].uri;
     setUploadingAvatar(true);
     try {
-      const formData = new FormData();
-      formData.append("image", { uri, name: "profile.jpg", type: "image/jpeg" } as any);
-      const res = await fetch(`${process.env.EXPO_PUBLIC_BASE_URL}/api/upload/image`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${useSessionStore.getState().accessToken}`,
-        },
-        body: formData,
-      });
-      if (!res.ok) throw new Error("Upload failed");
-      const data = (await res.json()) as { url?: string };
-      if (!data.url) throw new Error("No URL returned");
-      await api.put("/auth/me", { profileImage: data.url });
-      updateUser({ profileImage: data.url });
-      toast.success("Profile photo updated.");
+      const url = await pickAndUploadProfileImage();
+      if (!url) return; // user cancelled
+      await api.put("/auth/me", { profileImage: url });
+      updateUser({ profileImage: url });
+      toast.success("Profile photo updated");
     } catch (err: any) {
       toast.error("Couldn't update photo", {
         description: err?.message ?? "Try again in a moment.",
@@ -98,12 +100,23 @@ export default function ProfileScreen() {
   const handleSignOut = useCallback(async () => {
     setSigningOut(true);
     try {
-      await api.post("/auth/logout").catch(() => {});
+      // Pass refresh token so the server can drop the session row.
+      const refreshToken = useSessionStore.getState().refreshToken;
+      await api
+        .post("/auth/logout", refreshToken ? { refreshToken } : {})
+        .catch(() => {});
     } finally {
       logout();
       router.replace("/(auth)/authentication" as never);
     }
   }, [logout, router]);
+
+  const handleRedeemAtNext = useCallback(() => {
+    // Routes into Points hub where the auto-redeem toggle lives. From
+    // there the user can flip auto-redeem on or just earmark the next
+    // order via the manual PointsRedeem on Payment.
+    router.push("/(screens)/points" as never);
+  }, [router]);
 
   return (
     <ScreenContainer
@@ -127,6 +140,12 @@ export default function ProfileScreen() {
             <View style={styles.avatar}>
               {uploadingAvatar ? (
                 <Skeleton width={64} height={64} borderRadius={32} />
+              ) : user?.profileImage ? (
+                <Image
+                  source={{ uri: user.profileImage }}
+                  style={styles.avatarImg}
+                  accessibilityLabel="Profile photo"
+                />
               ) : (
                 <Text style={styles.avatarText}>{initials}</Text>
               )}
@@ -146,28 +165,48 @@ export default function ProfileScreen() {
         </View>
 
         {/* ── Points hero (gold) ─────────────────────────────── */}
-        <Pressable
-          onPress={() => router.push("/(screens)/points" as never)}
-          accessibilityRole="button"
-          accessibilityLabel={`${points.toLocaleString("en-NG")} Gaznger points. Tap to manage.`}
-          style={({ pressed }) => [
-            styles.pointsHero,
-            pressed && { opacity: 0.95 },
-          ]}
-        >
+        <View style={styles.pointsHero}>
+          {/* Watermark circle (top-right) — design accent. */}
+          <View style={styles.pointsWatermark} pointerEvents="none" />
+
           <View style={styles.pointsHeader}>
             <Ionicons name="star" size={14} color={theme.palette.gold700} />
             <Text style={styles.pointsEyebrow}>GAZNGER POINTS</Text>
           </View>
-          <Text style={styles.pointsNumber}>
-            {points.toLocaleString("en-NG")}
-          </Text>
+          <CountUpNumber
+            value={points}
+            format={(n) => n.toLocaleString("en-NG")}
+            style={styles.pointsNumber}
+            accessibilityLabel={`${points} Gaznger points`}
+          />
           <Text style={styles.pointsSub}>
             {points === 0
               ? "Earn 50 on your first order."
               : `≈ ${formatCurrency(points)} to spend`}
           </Text>
-        </Pressable>
+          <Pressable
+            onPress={handleRedeemAtNext}
+            accessibilityRole="button"
+            accessibilityLabel={
+              points === 0
+                ? "Learn how points work"
+                : "Redeem points on next order"
+            }
+            style={({ pressed }) => [
+              styles.pointsCta,
+              pressed && { opacity: 0.9 },
+            ]}
+          >
+            <Ionicons
+              name={points === 0 ? "help-circle-outline" : "checkmark"}
+              size={14}
+              color={theme.mode === "dark" ? theme.palette.neutral900 : "#fff"}
+            />
+            <Text style={styles.pointsCtaText}>
+              {points === 0 ? "How points work" : "Redeem at next order"}
+            </Text>
+          </Pressable>
+        </View>
 
         {/* ── Wallet quick card ───────────────────────────────── */}
         <View style={styles.walletCard}>
@@ -176,9 +215,12 @@ export default function ProfileScreen() {
             <Text style={styles.walletEyebrow}>WALLET BALANCE</Text>
           </View>
           <View style={styles.walletRow}>
-            <Text style={styles.walletAmount}>
-              {formatCurrency(walletAvailable)}
-            </Text>
+            <CountUpNumber
+              value={walletAvailable}
+              format={(n) => formatCurrency(n)}
+              style={styles.walletAmount}
+              accessibilityLabel={`${formatCurrency(walletAvailable)} wallet balance`}
+            />
             <Pressable
               onPress={() => router.push("/(customer)/wallet" as never)}
               accessibilityRole="button"
@@ -200,11 +242,13 @@ export default function ProfileScreen() {
           <Row
             icon="location-outline"
             label="Saved addresses"
+            badge={addressCount}
             onPress={() => router.push("/(screens)/address-book" as never)}
           />
           <Row
             icon="card-outline"
             label="Payment methods"
+            badge={paymentCount}
             sub={
               user?.lastPaystackAuth?.last4
                 ? `•••• ${user.lastPaystackAuth.last4}`
@@ -215,6 +259,13 @@ export default function ProfileScreen() {
           <Row
             icon="receipt-outline"
             label="Order history"
+            badge={
+              orderCount === null
+                ? undefined
+                : orderCount === 1
+                ? "1 order"
+                : `${orderCount} orders`
+            }
             onPress={() =>
               router.push("/(customer)/(order)/history" as never)
             }
@@ -265,9 +316,7 @@ export default function ProfileScreen() {
           </Text>
         </Pressable>
 
-        <Text style={styles.versionText}>
-          Gaznger v{APP_VERSION} · Lagos
-        </Text>
+        <Text style={styles.versionText}>Gaznger v{APP_VERSION}</Text>
       </ScrollView>
     </ScreenContainer>
   );
@@ -300,6 +349,11 @@ const makeStyles = (theme: Theme) =>
       color: theme.mode === "dark" ? "#fff" : theme.palette.green700,
       fontWeight: "800",
     },
+    avatarImg: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+    },
     avatarBadge: {
       position: "absolute",
       bottom: -2,
@@ -325,17 +379,32 @@ const makeStyles = (theme: Theme) =>
       marginTop: 2,
     },
 
-    /* Points hero — gold */
+    /* Points hero — gold, taller than v3.0 to fit watermark + CTA */
     pointsHero: {
       marginHorizontal: theme.space.s4,
       marginBottom: theme.space.s3,
-      padding: theme.space.s4,
+      padding: 16,
+      paddingBottom: 18,
       borderRadius: theme.radius.lg,
       backgroundColor: theme.accentTint,
       borderWidth: 1,
       borderColor:
         theme.mode === "dark" ? theme.palette.gold700 : theme.palette.gold100,
       gap: 4,
+      overflow: "hidden",
+      position: "relative",
+    },
+    pointsWatermark: {
+      position: "absolute",
+      top: -10,
+      right: -10,
+      width: 70,
+      height: 70,
+      borderRadius: 35,
+      backgroundColor:
+        theme.mode === "dark"
+          ? "rgba(245,197,24,0.10)"
+          : "rgba(245,197,24,0.30)",
     },
     pointsHeader: {
       flexDirection: "row",
@@ -350,23 +419,41 @@ const makeStyles = (theme: Theme) =>
       letterSpacing: 0.5,
     },
     pointsNumber: {
-      ...theme.type.display,
+      fontSize: 32,
       ...theme.type.money,
       color: theme.fg,
       fontWeight: "800",
       letterSpacing: -0.6,
+      marginTop: 2,
     },
     pointsSub: {
       ...theme.type.caption,
       color:
         theme.mode === "dark" ? theme.palette.gold300 : theme.palette.gold700,
+      marginBottom: 12,
+    },
+    pointsCta: {
+      alignSelf: "flex-start",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 36,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      backgroundColor:
+        theme.mode === "dark" ? "#fff" : theme.palette.neutral900,
+    },
+    pointsCtaText: {
+      fontSize: 12.5,
+      fontWeight: "800",
+      color: theme.mode === "dark" ? theme.palette.neutral900 : "#fff",
     },
 
     /* Wallet card — green */
     walletCard: {
       marginHorizontal: theme.space.s4,
       marginBottom: theme.space.s4,
-      padding: theme.space.s4,
+      padding: 16,
       borderRadius: theme.radius.lg,
       backgroundColor: theme.primaryTint,
       borderWidth: 1,
@@ -391,7 +478,7 @@ const makeStyles = (theme: Theme) =>
       justifyContent: "space-between",
     },
     walletAmount: {
-      ...theme.type.display,
+      fontSize: 32,
       ...theme.type.money,
       color: theme.fg,
       fontWeight: "800",
@@ -428,7 +515,7 @@ const makeStyles = (theme: Theme) =>
     rowGroup: {
       backgroundColor: theme.surface,
       marginHorizontal: theme.space.s4,
-      borderRadius: theme.radius.md + 2, // 14 per design
+      borderRadius: theme.radius.md + 2,
       borderWidth: 1,
       borderColor: theme.divider,
       overflow: "hidden",

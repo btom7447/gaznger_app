@@ -18,6 +18,10 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import {
+  CommonActions,
+  getFocusedRouteNameFromRoute,
+} from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { Theme, useTheme } from "@/constants/theme";
@@ -76,10 +80,60 @@ const TABS: TabConfig[] = [
 // includes them; the custom tab bar must filter explicitly.
 const HIDDEN_TAB_ROUTES = new Set(["notifications", "(history)"]);
 
-// Routes whose presence in the active tab should HIDE the entire tab bar
-// (full-bleed checkout flow per design). The tab bar reappears as soon as
-// the user navigates away from the order group.
-const FULLBLEED_TABS = new Set(["(order)"]);
+/**
+ * Per-tab "terminal" child routes. When the focused child of a
+ * fullbleed tab is one of these, pressing ANY tab pops the
+ * fullbleed stack back to its index so the user re-enters the
+ * group at the entry screen instead of returning to the terminal
+ * screen.
+ *
+ * Why: after the user finishes ordering or finishes a delivery
+ * (Complete / Receipt), the terminal screen is a "wrap-up" view
+ * with no further forward path. If they bounce away via the tab
+ * bar and come back, the stack would otherwise restore them to
+ * the terminal — confusing because they implicitly closed it.
+ */
+const TERMINAL_CHILDREN_BY_TAB: Record<string, Set<string>> = {
+  "(track)": new Set(["complete"]),
+  "(order)": new Set(["receipt"]),
+};
+
+// Tab groups whose presence should HIDE the entire tab bar — the
+// user expects an immersive screen here without the persistent nav.
+// Covers:
+//   - `(order)`  — full-bleed checkout flow (every child)
+//   - `wallet`   — per UX direction "no tab bar in wallet"
+//   - `(track)`  — every track child is full-bleed, INCLUDING the
+//     index (live map). The user wants the customer's attention on
+//     the map + sheet without a competing nav surface; the track
+//     pill on the bar lives in the home/order tabs anyway, so they
+//     can still navigate back.
+const FULLBLEED_TABS = new Set(["(order)", "wallet", "(track)"]);
+
+/**
+ * Child routes that should KEEP the tab bar visible even though
+ * their parent tab is in FULLBLEED_TABS. Keyed by `${tab}.${child}`.
+ *   - `(track).complete` — the post-delivery "All done" terminus
+ *     screen. The flow is over here, so the user is back in
+ *     navigation mode (Reorder, Schedule, Refer, Home) and benefits
+ *     from the tab bar being available again.
+ */
+const FULLBLEED_EXCLUDE_BY_TAB = new Set<string>(["(track).complete"]);
+
+/**
+ * Subset of FULLBLEED_EXCLUDE_BY_TAB whose carve-outs should still
+ * keep the parent tab "focused" in the bar — i.e. the user is
+ * conceptually on this tab. Without this membership, the carve-out
+ * keeps the bar visible but suppresses the tab's focused highlight,
+ * making it look like NO tab is selected.
+ *
+ * Why a separate set: the original suppression existed for routes
+ * like (order)/(history) where the user lands without consciously
+ * tapping the Order tab; we don't want the Order pill lit up there.
+ * `(track).complete` is the opposite — the user IS on the Track
+ * flow, just at its terminus, so the Track pill should stay lit.
+ */
+const KEEP_FOCUSED_CARVE_OUTS = new Set<string>(["(track).complete"]);
 
 function PulsingDot({ color }: { color: string }) {
   const opacity = useRef(new RNAnimated.Value(1)).current;
@@ -130,10 +184,25 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   // profile button which has no route in this navigator.
   const focusedRouteName = state.routes[state.index]?.name ?? "";
 
+  // For nested groups (e.g. "(order)"), inspect the focused CHILD route
+  // so we can keep the tab bar visible on order-group routes that aren't
+  // part of the checkout flow (history + [id]).
+  const focusedRoute = state.routes[state.index];
+  const focusedChildName = focusedRoute
+    ? getFocusedRouteNameFromRoute(focusedRoute as any)
+    : undefined;
+
   // Slide-fade transition when entering / leaving order group (full-bleed
   // checkout). Always mount so the animation has something to drive; the
   // bar is purely visual when fully translated off-screen.
-  const isHidden = FULLBLEED_TABS.has(focusedRouteName);
+  const inFullbleedGroup = FULLBLEED_TABS.has(focusedRouteName);
+  // Compose the `${tab}.${child}` key so we can carve out one tab's
+  // child without affecting another's (e.g. keep the bar on
+  // `(track).index` but hide it on `(order).index`).
+  const childIsExcluded =
+    !!focusedChildName &&
+    FULLBLEED_EXCLUDE_BY_TAB.has(`${focusedRouteName}.${focusedChildName}`);
+  const isHidden = inFullbleedGroup && !childIsExcluded;
   const visibility = useSharedValue(isHidden ? 0 : 1);
 
   useEffect(() => {
@@ -187,9 +256,24 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
           }
 
           const route = state.routes[routeIndex];
+          // When the focused tab's CHILD route is in FULLBLEED_EXCLUDE
+          // (history / [id] inside the order group), suppress the
+          // "tab focused" highlight — the user got here via Profile or
+          // Home, not by tapping the tab. EXCEPT for carve-outs
+          // explicitly listed in KEEP_FOCUSED_CARVE_OUTS (e.g.
+          // `(track).complete`), where the tab pill should stay lit
+          // because the user is still conceptually on that tab.
+          const carveOutKey = `${focusedRouteName}.${focusedChildName ?? ""}`;
+          const carveOutKeepsFocus =
+            childIsExcluded && KEEP_FOCUSED_CARVE_OUTS.has(carveOutKey);
+          const suppressFocusForExcludedChild =
+            inFullbleedGroup &&
+            childIsExcluded &&
+            !carveOutKeepsFocus &&
+            tab.match === focusedRouteName;
           const isFocused =
-            state.index === routeIndex ||
-            (focusedRouteName === tab.match);
+            !suppressFocusForExcludedChild &&
+            (state.index === routeIndex || focusedRouteName === tab.match);
           const showBadge = tab.match === "(track)" && hasActiveOrder;
 
           const onPress = () => {
@@ -198,9 +282,51 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
               target: route.key,
               canPreventDefault: true,
             });
-            if (!isFocused && !event.defaultPrevented) {
-              navigation.navigate(route.name);
+            if (event.defaultPrevented) return;
+
+            // Decide whether to reset the target tab's nested stack
+            // back to its index. We do this when the target tab's
+            // own focused child is a terminal screen (Complete /
+            // Receipt) — the user is conceptually "done" with that
+            // flow and should re-enter at the start, not the
+            // wrap-up. Inspect the route's saved state directly
+            // (Expo Router persists each tab's substate even when
+            // the tab isn't focused).
+            const subState = (route as any).state as
+              | {
+                  index?: number;
+                  routes?: { name?: string }[];
+                }
+              | undefined;
+            const targetChild =
+              subState?.routes?.[subState.index ?? 0]?.name;
+            const terminals = TERMINAL_CHILDREN_BY_TAB[route.name];
+            const targetIsOnTerminal =
+              !!targetChild && !!terminals?.has(targetChild);
+
+            // Both branches (re-press while focused, switching in
+            // from another tab) handle terminal-child reset the same
+            // way: dispatch a `reset` directly to the inner stack's
+            // navigator so the next time it's shown, it's parked on
+            // its index. Then issue a navigate so the focused-tab
+            // index updates and the screen actually transitions.
+            if (targetIsOnTerminal) {
+              navigation.dispatch({
+                ...CommonActions.reset({
+                  index: 0,
+                  routes: [{ name: "index" }],
+                }),
+                target: route.key,
+              });
             }
+
+            if (isFocused) {
+              // Already on this tab — the reset above handles the
+              // inner stack. Nothing else to do.
+              return;
+            }
+
+            navigation.navigate(route.name);
           };
 
           return (

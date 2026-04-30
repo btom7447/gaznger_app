@@ -69,8 +69,21 @@ export interface SessionUser {
     autoRedeemPoints?: boolean;
     priceAlertsEnabled?: boolean;
     pushEnabled?: boolean;
+    /** Sub-toggle for order/rider/delivery push (gated by pushEnabled). */
+    orderUpdates?: boolean;
+    /** Sub-toggle for marketing/referral push (gated by pushEnabled). */
+    promotions?: boolean;
     notificationsFilter?: string;
   };
+
+  /** Whether the user has a 4-digit PIN configured server-side. */
+  hasPin?: boolean;
+
+  /**
+   * Saved address ids. Mirrored from the server's User.addressBook so
+   * the Profile row badge can show the count without an extra fetch.
+   */
+  addressBook?: string[];
 }
 
 interface SessionState {

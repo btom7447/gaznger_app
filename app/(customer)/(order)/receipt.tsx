@@ -31,9 +31,13 @@ type ReceiptStatus = "matching" | "assigned" | "in_transit" | "arrived";
 
 const STATUS_DISPLAY: Record<
   ReceiptStatus,
-  { label: string; kind: "info" | "success" | "primary" }
+  { label: string; kind: "info" | "success" | "primary"; pulse?: boolean }
 > = {
-  matching: { label: "Matching rider", kind: "info" },
+  // The "matching" phase pulses to communicate active matching work.
+  // Copy is "Matching rider" so it lines up with the Track-screen
+  // pre-assignment headline ("Matching rider…") — both states are the
+  // same conceptual phase, so they read the same word.
+  matching: { label: "Matching rider", kind: "info", pulse: true },
   assigned: { label: "Rider on the way", kind: "success" },
   in_transit: { label: "On the way", kind: "primary" },
   arrived: { label: "At your gate", kind: "success" },
@@ -210,7 +214,9 @@ export default function ReceiptScreen() {
       <View style={styles.receiptCard}>
         <View style={styles.receiptHeaderRow}>
           <Text style={styles.eyebrow}>RECEIPT</Text>
-          <StatusBadge kind={display.kind}>{display.label}</StatusBadge>
+          <StatusBadge kind={display.kind} pulse={display.pulse}>
+            {display.label}
+          </StatusBadge>
         </View>
 
         <ReceiptRow label="Fuel" value={fuelLine} />

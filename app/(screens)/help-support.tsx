@@ -1,164 +1,415 @@
-import React, { useState, useRef } from "react";
+import React, { useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  StatusBar,
   Linking,
-  LayoutAnimation,
-  Platform,
-  UIManager,
-  Animated,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
-import { useTheme } from "@/constants/theme";
-import BackButton from "@/components/ui/global/BackButton";
+import { Theme, useTheme } from "@/constants/theme";
+import {
+  Row,
+  ScreenContainer,
+  ScreenHeader,
+} from "@/components/ui/primitives";
 
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+/**
+ * Help & support — v3.
+ *
+ * Layout:
+ *   1. Search field — filters the FAQ accordion below.
+ *   2. Quick topic cards (4 large tile shortcuts to common help routes).
+ *   3. FAQ accordion grouped under "Common questions".
+ *   4. Footer row → Contact support (route: /(screens)/contact-support).
+ *
+ * No server fetch — FAQ content is static. The accordion is driven by
+ * a single open-index, not LayoutAnimation, so it works the same on
+ * iOS + Android without `setLayoutAnimationEnabledExperimental`.
+ */
 
-const FAQS = [
-  { q: "How do I place a fuel order?", a: "Tap a fuel type on the home screen, fill in quantity and delivery details, then confirm your order." },
-  { q: "How long does delivery take?", a: "Typical delivery is 30–60 minutes depending on your location and station distance." },
-  { q: "Can I cancel an order?", a: "Yes — go to Order History and tap Cancel on any pending order before it is confirmed." },
-  { q: "How do Gaznger Points work?", a: "You earn points on every successful delivery. Points can be redeemed for discounts on future orders." },
-  { q: "What payment methods are accepted?", a: "We currently support card payments via Paystack. More options coming soon." },
+const FAQS: Array<{ q: string; a: string }> = [
+  {
+    q: "How do I place a fuel order?",
+    a: "Tap a fuel on the home screen, set the quantity and delivery address, pick a station, then pay. We'll match you with the closest rider in under a minute.",
+  },
+  {
+    q: "How long does delivery take?",
+    a: "Typical delivery is 30–60 minutes depending on traffic and station distance. The Track screen shows a live ETA the moment a rider is matched.",
+  },
+  {
+    q: "Can I cancel an order?",
+    a: "Yes — open the order from Order History and tap Cancel. Cancellation is free until a rider picks up your fuel from the station.",
+  },
+  {
+    q: "How do Gaznger Points work?",
+    a: "You earn 50–200 points per delivered order. 1 point = ₦1 off any future order. Apply them on the Payment screen, or flip on Auto-redeem in Settings.",
+  },
+  {
+    q: "What payment methods are accepted?",
+    a: "Cards (saved or one-off via Paystack), the Gaznger wallet, and bank transfer. Cash on delivery isn't supported — every order needs an audit trail.",
+  },
+  {
+    q: "Why is my wallet balance pending?",
+    a: "Top-ups settle instantly. Refunds and earnings sit in pending until the order closes (delivery confirmed + 24-hour dispute window).",
+  },
+  {
+    q: "How do I update my saved card?",
+    a: "Tap any payment method in Settings → Payment methods. We don't store your card — Paystack does — so removing means re-entering on next checkout.",
+  },
+  {
+    q: "Is the LPG cylinder I receive new?",
+    a: "We swap your empty for a refilled, weighed cylinder of the same brand from a verified depot. We don't sell brand-new cylinders.",
+  },
 ];
 
-function FaqItem({ faq, isExpanded, onToggle }: { faq: typeof FAQS[0]; isExpanded: boolean; onToggle: () => void }) {
-  const theme = useTheme();
-  const s = styles(theme);
-  const rotation = useRef(new Animated.Value(isExpanded ? 1 : 0)).current;
-
-  const handleToggle = () => {
-    LayoutAnimation.configureNext({
-      duration: 250,
-      create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-      update: { type: LayoutAnimation.Types.easeInEaseOut },
-    });
-    Animated.timing(rotation, {
-      toValue: isExpanded ? 0 : 1,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-    onToggle();
-  };
-
-  const rotate = rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] });
-
-  return (
-    <TouchableOpacity
-      style={[s.faqCard, { backgroundColor: theme.surface, borderColor: isExpanded ? theme.primary : theme.ash }]}
-      onPress={handleToggle}
-      activeOpacity={0.75}
-    >
-      <View style={s.faqHeader}>
-        <Text style={[s.faqQ, { color: theme.text, flex: 1 }]}>{faq.q}</Text>
-        <Animated.View style={{ transform: [{ rotate }] }}>
-          <Ionicons name="chevron-down" size={16} color={isExpanded ? theme.primary : theme.icon} />
-        </Animated.View>
-      </View>
-      {isExpanded && (
-        <View style={[s.faqAnswerWrap, { borderTopColor: theme.ash }]}>
-          <Text style={[s.faqA, { color: theme.icon }]}>{faq.a}</Text>
-        </View>
-      )}
-    </TouchableOpacity>
-  );
-}
+const QUICK_TOPICS: Array<{
+  id: string;
+  label: string;
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  route: string;
+}> = [
+  {
+    id: "order",
+    label: "Order help",
+    icon: "flame-outline",
+    route: "/(customer)/(order)/history",
+  },
+  {
+    id: "wallet",
+    label: "Wallet & payment",
+    icon: "wallet-outline",
+    route: "/(customer)/wallet",
+  },
+  {
+    id: "points",
+    label: "Points",
+    icon: "star-outline",
+    route: "/(screens)/points",
+  },
+  {
+    id: "account",
+    label: "Account",
+    icon: "person-outline",
+    route: "/(screens)/personal-info",
+  },
+];
 
 export default function HelpSupportScreen() {
   const theme = useTheme();
-  const [expanded, setExpanded] = useState<number | null>(null);
-  const s = styles(theme);
+  const router = useRouter();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  const CONTACT = [
-    { id: "email", label: "Email Support", value: "support@gaznger.com", icon: "mail-outline" as const, onPress: () => Linking.openURL("mailto:support@gaznger.com") },
-    { id: "chat", label: "Live Chat", value: "Chat with an agent", icon: "chatbubbles-outline" as const, onPress: () => toast.info("Live Chat", { description: "Live chat is coming soon — email us in the meantime!" }) },
-    { id: "call", label: "Call Us", value: "+234 800 000 0000", icon: "call-outline" as const, onPress: () => Linking.openURL("tel:+2348000000000") },
-  ];
+  const [query, setQuery] = useState("");
+  const [openIdx, setOpenIdx] = useState<number | null>(0);
+
+  const visibleFaqs = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return FAQS.map((f, i) => ({ ...f, originalIdx: i }));
+    return FAQS.map((f, i) => ({ ...f, originalIdx: i })).filter(
+      (f) =>
+        f.q.toLowerCase().includes(q) || f.a.toLowerCase().includes(q)
+    );
+  }, [query]);
 
   return (
-    <SafeAreaView style={s.safe}>
-      <StatusBar barStyle={theme.mode === "dark" ? "light-content" : "dark-content"} />
-      <View style={s.header}>
-        <BackButton />
-        <Text style={s.headerTitle}>Help & Support</Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-        <Text style={s.sectionTitle}>Contact Us</Text>
-        {CONTACT.map((item) => (
-          <TouchableOpacity
-            key={item.id}
-            style={[s.row, { backgroundColor: theme.surface, borderColor: theme.ash }]}
-            onPress={item.onPress}
-            activeOpacity={0.75}
-          >
-            <View style={[s.iconWrap, { backgroundColor: theme.tertiary }]}>
-              <Ionicons name={item.icon} size={20} color={theme.primary} />
-            </View>
-            <View style={s.rowText}>
-              <Text style={[s.rowLabel, { color: theme.text }]}>{item.label}</Text>
-              <Text style={[s.rowDesc, { color: theme.icon }]}>{item.value}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={theme.icon} />
-          </TouchableOpacity>
-        ))}
-
-        <Text style={[s.sectionTitle, { marginTop: 24 }]}>FAQs</Text>
-        {FAQS.map((faq, i) => (
-          <FaqItem
-            key={i}
-            faq={faq}
-            isExpanded={expanded === i}
-            onToggle={() => setExpanded(expanded === i ? null : i)}
+    <ScreenContainer
+      edges={["top", "bottom"]}
+      header={
+        <ScreenHeader title="Help & support" onBack={() => router.back()} />
+      }
+    >
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Search */}
+        <View style={styles.searchWrap}>
+          <Ionicons name="search" size={16} color={theme.fgMuted} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search articles"
+            placeholderTextColor={theme.fgSubtle}
+            style={styles.searchInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
           />
-        ))}
+          {query.length > 0 ? (
+            <Pressable
+              onPress={() => setQuery("")}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              hitSlop={10}
+            >
+              <Ionicons
+                name="close-circle"
+                size={16}
+                color={theme.fgMuted}
+              />
+            </Pressable>
+          ) : null}
+        </View>
+
+        {/* Quick topics — only shown when not searching. Sits at the
+            top so the most-visited paths are reachable in one tap. */}
+        {!query ? (
+          <>
+            <Text style={styles.sectionLabel}>QUICK TOPICS</Text>
+            <View style={styles.topicGrid}>
+              {QUICK_TOPICS.map((t) => (
+                <Pressable
+                  key={t.id}
+                  onPress={() => router.push(t.route as never)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t.label}
+                  style={({ pressed }) => [
+                    styles.topicCard,
+                    pressed && { opacity: 0.92 },
+                  ]}
+                >
+                  <View style={styles.topicIconTile}>
+                    <Ionicons
+                      name={t.icon}
+                      size={18}
+                      color={
+                        theme.mode === "dark"
+                          ? "#fff"
+                          : theme.palette.green700
+                      }
+                    />
+                  </View>
+                  <Text style={styles.topicLabel}>{t.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        {/* Talk to us — escalation channels. Moved ABOVE Common
+            Questions per UX direction so users who already know they
+            need to contact someone don't have to scroll past the FAQ
+            to find the channels. */}
+        {!query ? (
+          <>
+            <Text style={styles.sectionLabel}>TALK TO US</Text>
+            <View style={styles.rowGroup}>
+              <Row
+                icon="chatbubble-ellipses-outline"
+                label="Live chat"
+                sub="Coming soon · for now use WhatsApp"
+                onPress={() =>
+                  toast.info("Live chat is on the way", {
+                    description:
+                      "We're shipping in-app chat soon. WhatsApp is the fastest channel for now.",
+                  })
+                }
+              />
+              <Row
+                icon="logo-whatsapp"
+                label="WhatsApp"
+                sub="Fastest · 8am–10pm daily"
+                onPress={() => {
+                  const text = encodeURIComponent(
+                    "Hi Gaznger, I need help with…"
+                  );
+                  Linking.openURL(
+                    `https://wa.me/2347000000000?text=${text}`
+                  ).catch(() => {});
+                }}
+              />
+              <Row
+                icon="chatbubble-outline"
+                label="Contact support"
+                sub="WhatsApp · phone · email"
+                divider={false}
+                onPress={() =>
+                  router.push("/(screens)/contact-support" as never)
+                }
+              />
+            </View>
+          </>
+        ) : null}
+
+        {/* Common questions — moved to the bottom per UX direction.
+            Most users solve their problem from a quick topic or by
+            messaging us; the FAQ catches the tail. When the user is
+            actively searching, this stays the only block visible. */}
+        <Text style={styles.sectionLabel}>
+          {query ? "MATCHING ARTICLES" : "COMMON QUESTIONS"}
+        </Text>
+        {visibleFaqs.length === 0 ? (
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyTitle}>No matches</Text>
+            <Text style={styles.emptyBody}>
+              Try a different word, or contact support directly.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.faqGroup}>
+            {visibleFaqs.map((f, i) => {
+              const isOpen = openIdx === f.originalIdx;
+              return (
+                <Pressable
+                  key={f.q}
+                  onPress={() =>
+                    setOpenIdx(isOpen ? null : f.originalIdx)
+                  }
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: isOpen }}
+                  style={({ pressed }) => [
+                    styles.faqRow,
+                    i < visibleFaqs.length - 1 && styles.faqRowDivider,
+                    pressed && { opacity: 0.92 },
+                  ]}
+                >
+                  <View style={styles.faqHead}>
+                    <Text style={styles.faqQ}>{f.q}</Text>
+                    <Ionicons
+                      name={isOpen ? "chevron-down" : "chevron-forward"}
+                      size={14}
+                      color={theme.fgMuted}
+                    />
+                  </View>
+                  {isOpen ? <Text style={styles.faqA}>{f.a}</Text> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
       </ScrollView>
-    </SafeAreaView>
+    </ScreenContainer>
   );
 }
 
-const styles = (theme: ReturnType<typeof useTheme>) =>
+const makeStyles = (theme: Theme) =>
   StyleSheet.create({
-    safe: { flex: 1, backgroundColor: theme.background },
-    header: {
-      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-      paddingHorizontal: 16, paddingVertical: 12,
+    scroll: {
+      paddingHorizontal: theme.space.s4,
+      paddingTop: theme.space.s2,
+      paddingBottom: theme.space.s5,
     },
-    headerTitle: { fontSize: 17, fontWeight: "500", color: theme.text },
-    scroll: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 32 },
-    sectionTitle: {
-      fontSize: 11, fontWeight: "600", color: theme.icon,
-      marginBottom: 10, paddingLeft: 2,
-      textTransform: "uppercase", letterSpacing: 0.8,
+
+    /* Search */
+    searchWrap: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      paddingHorizontal: 14,
+      height: 48,
+      borderRadius: 12,
+      backgroundColor: theme.bgMuted,
+      borderWidth: 1,
+      borderColor: theme.border,
     },
-    row: {
-      flexDirection: "row", alignItems: "center", gap: 12,
-      padding: 14, borderRadius: 16, borderWidth: 1, marginBottom: 10,
+    searchInput: {
+      flex: 1,
+      ...theme.type.body,
+      color: theme.fg,
+      padding: 0,
     },
-    iconWrap: { width: 38, height: 38, borderRadius: 10, justifyContent: "center", alignItems: "center" },
-    rowText: { flex: 1 },
-    rowLabel: { fontSize: 14, fontWeight: "400", marginBottom: 2 },
-    rowDesc: { fontSize: 12, fontWeight: "300" },
-    faqCard: {
-      borderRadius: 16, borderWidth: 1, marginBottom: 10, overflow: "hidden",
+
+    sectionLabel: {
+      ...theme.type.micro,
+      color: theme.fgMuted,
+      letterSpacing: 0.5,
+      paddingTop: theme.space.s4,
+      paddingBottom: theme.space.s2,
     },
-    faqHeader: {
-      flexDirection: "row", alignItems: "center", gap: 8,
-      padding: 14,
+
+    /* Quick topic grid (2x2) */
+    topicGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10,
     },
-    faqQ: { fontSize: 14, fontWeight: "400", lineHeight: 20 },
-    faqAnswerWrap: {
-      paddingHorizontal: 14, paddingBottom: 14, paddingTop: 10,
-      borderTopWidth: StyleSheet.hairlineWidth,
+    topicCard: {
+      width: "48%",
+      flexGrow: 1,
+      paddingVertical: 16,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.divider,
+      gap: 10,
     },
-    faqA: { fontSize: 13, fontWeight: "300", lineHeight: 20 },
+    topicIconTile: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      backgroundColor: theme.primaryTint,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    topicLabel: {
+      ...theme.type.body,
+      fontWeight: "800",
+      color: theme.fg,
+    },
+
+    /* FAQ */
+    faqGroup: {
+      backgroundColor: theme.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: theme.divider,
+      overflow: "hidden",
+    },
+    faqRow: {
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+    faqRowDivider: {
+      borderBottomColor: theme.divider,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+    },
+    faqHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    faqQ: {
+      fontSize: 13.5,
+      fontWeight: "700",
+      color: theme.fg,
+      flex: 1,
+    },
+    faqA: {
+      fontSize: 12.5,
+      color: theme.fgMuted,
+      marginTop: 8,
+      lineHeight: 19,
+    },
+
+    emptyWrap: {
+      alignItems: "center",
+      paddingVertical: 30,
+    },
+    emptyTitle: {
+      ...theme.type.body,
+      color: theme.fg,
+      fontWeight: "800",
+      marginBottom: 4,
+    },
+    emptyBody: {
+      ...theme.type.bodySm,
+      color: theme.fgMuted,
+      textAlign: "center",
+    },
+
+    /* Row group (escalation) */
+    rowGroup: {
+      backgroundColor: theme.surface,
+      borderRadius: theme.radius.md + 2,
+      borderWidth: 1,
+      borderColor: theme.divider,
+      overflow: "hidden",
+    },
   });

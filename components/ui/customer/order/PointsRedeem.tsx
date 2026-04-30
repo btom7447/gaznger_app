@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
@@ -75,207 +75,297 @@ export default function PointsRedeem({
   const [collapsed, setCollapsed] = useState<boolean>(
     defaultCollapsed ?? pointsToSpend === 0
   );
+  // Tracks whether the user explicitly tapped the chevron to close the
+  // accordion. Once true, we skip the "auto-expand when redemption is
+  // active" effect — otherwise tapping close re-renders, the effect
+  // sees `pointsToSpend > 0 && collapsed` and immediately re-opens it,
+  // making the close button look broken.
+  const userClosedRef = useRef(false);
 
-  // Auto-expand whenever a redemption is active so the user can always
-  // see + change their selection. Auto-collapse on Clear (back to 0).
+  /**
+   * Wraps `setCollapsed` so closing the accordion always sets the
+   * "user explicitly closed" sentinel. Reopening (programmatically or
+   * via header tap) clears it so subsequent close-then-pick cycles
+   * still auto-expand on the second opening.
+   */
+  const setCollapsedSafely = useCallback((next: boolean) => {
+    if (next) userClosedRef.current = true;
+    else userClosedRef.current = false;
+    setCollapsed(next);
+  }, []);
+
+  // Auto-expand whenever a redemption is active AND the user hasn't
+  // explicitly collapsed since the last activation. Auto-collapse on
+  // Clear (back to 0) — that's a programmatic close that doesn't trip
+  // the user-closed sentinel because the effect path drives it.
   useEffect(() => {
     if (!collapsible) return;
-    if (pointsToSpend > 0 && collapsed) setCollapsed(false);
+    if (
+      pointsToSpend > 0 &&
+      collapsed &&
+      !userClosedRef.current
+    ) {
+      setCollapsed(false);
+    }
+    if (pointsToSpend === 0) {
+      // Clean slate on Clear — next time the user picks an amount,
+      // auto-expand may fire again.
+      userClosedRef.current = false;
+    }
   }, [pointsToSpend, collapsible, collapsed]);
 
   const handlePreset = (n: number) => {
     onChange(n === pointsToSpend ? 0 : n);
   };
 
-  // ── Collapsed render (v3 only) ──
+  // Header — same shape across collapsed + expanded. Per v3 design:
+  //   gold-tinted icon tile (36×36) with filled star
+  //   "You have X points" / "≈ ₦X to spend on this order"
+  //   chevron right when collapsed, chevron down when expanded.
+  const Header = (
+    <View style={styles.headerRow}>
+      <View style={styles.coin}>
+        <Ionicons
+          name="star"
+          size={16}
+          color={
+            theme.mode === "dark"
+              ? theme.palette.gold300
+              : theme.palette.gold700
+          }
+        />
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={styles.title}>
+          {balance === 0
+            ? "No points yet"
+            : `You have ${balance.toLocaleString("en-NG")} points`}
+        </Text>
+        <Text style={styles.sub}>
+          {balance === 0
+            ? "Earn 50 on your first order."
+            : maxRedeemable > 0
+            ? `≈ ${formatCurrency(maxRedeemable * POINTS_TO_NAIRA)} to spend on this order`
+            : "Order total is too low to redeem points"}
+        </Text>
+      </View>
+      {collapsible ? (
+        <Ionicons
+          name={collapsed ? "chevron-forward" : "chevron-down"}
+          size={16}
+          color={
+            theme.mode === "dark"
+              ? theme.palette.gold300
+              : theme.palette.gold700
+          }
+        />
+      ) : null}
+    </View>
+  );
+
+  // ── Collapsed render (v3) ──
   if (collapsible && collapsed && balance > 0 && maxRedeemable > 0) {
     return (
       <Pressable
-        onPress={() => setCollapsed(false)}
+        onPress={() => setCollapsedSafely(false)}
         accessibilityRole="button"
-        accessibilityLabel="Redeem Gaznger Points"
+        accessibilityLabel={`Redeem points. You have ${balance} points, up to ${formatCurrency(maxRedeemable * POINTS_TO_NAIRA)} off this order.`}
         accessibilityHint="Expands the redemption options."
         style={({ pressed }) => [
           styles.card,
-          styles.collapsedCard,
           pressed && { opacity: 0.92 },
         ]}
       >
-        <View style={styles.headerLeft}>
-          <View style={styles.coin}>
-            <Ionicons name="star" size={13} color={theme.palette.neutral900} />
-          </View>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={styles.title}>Redeem points?</Text>
-            <Text style={styles.sub}>
-              {balance.toLocaleString("en-NG")} available · up to{" "}
-              {formatCurrency(maxRedeemable * POINTS_TO_NAIRA)} off
-            </Text>
-          </View>
-        </View>
-        <Ionicons
-          name="chevron-down"
-          size={18}
-          color={theme.fgMuted}
-        />
+        {Header}
       </Pressable>
     );
   }
 
-  // ── Expanded render (legacy + v3 expanded) ──
+  // ── Expanded render ──
   return (
-    <View style={styles.card}>
-      <View style={styles.headerRow}>
-        <View style={styles.headerLeft}>
-          <View style={styles.coin}>
-            <Ionicons name="star" size={13} color={theme.palette.neutral900} />
-          </View>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={styles.title}>Use Gaznger Points</Text>
-            <Text style={styles.sub}>
-              {balance.toLocaleString("en-NG")} points · 1 point = {formatCurrency(POINTS_TO_NAIRA)}
-            </Text>
-          </View>
-        </View>
-        {pointsToSpend > 0 ? (
-          <Pressable
-            onPress={() => {
-              onChange(0);
-              if (collapsible) setCollapsed(true);
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Don't redeem points"
-            hitSlop={8}
-          >
-            <Text style={styles.clear}>Clear</Text>
-          </Pressable>
-        ) : collapsible ? (
-          <Pressable
-            onPress={() => setCollapsed(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Hide redemption options"
-            hitSlop={8}
-          >
-            <Ionicons name="chevron-up" size={18} color={theme.fgMuted} />
-          </Pressable>
-        ) : null}
-      </View>
+    <Pressable
+      onPress={collapsible ? () => setCollapsedSafely(true) : undefined}
+      style={styles.card}
+      // Cards aren't "buttons" when expanded — only the header chevron
+      // closes it. The Pressable wrapper carries the press handler so
+      // the whole card surface is tappable when collapsible.
+      disabled={!collapsible}
+    >
+      {Header}
 
-      {balance === 0 ? (
-        <Text style={styles.empty}>
-          Earn points on every order — they'll appear here for your next checkout.
-        </Text>
-      ) : maxRedeemable === 0 ? (
-        <Text style={styles.empty}>Order total is too low to redeem points.</Text>
-      ) : (
-        <View style={styles.presetRow}>
-          {presets.map((p) => {
-            const isSel = p === pointsToSpend;
-            return (
+      {balance > 0 && maxRedeemable > 0 ? (
+        <>
+          <View style={styles.divider} />
+          <View style={styles.applyRow}>
+            <Text style={styles.applyLabel}>APPLY</Text>
+            {pointsToSpend > 0 ? (
               <Pressable
-                key={p}
-                onPress={() => handlePreset(p)}
+                onPress={() => onChange(0)}
                 accessibilityRole="button"
-                accessibilityState={{ selected: isSel }}
-                accessibilityLabel={`Redeem ${p} points (${formatCurrency(p * POINTS_TO_NAIRA)} off)`}
-                style={({ pressed }) => [
-                  styles.preset,
-                  isSel && styles.presetSelected,
-                  pressed && { opacity: 0.85 },
-                ]}
+                accessibilityLabel="Clear redemption"
+                hitSlop={8}
               >
-                <Text
-                  style={[
-                    styles.presetText,
-                    { color: isSel ? "#fff" : theme.fg },
+                <Text style={styles.clear}>Clear</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <View style={styles.presetGrid}>
+            {presets.map((p) => {
+              const isSel = p === pointsToSpend;
+              const isMax = p === maxRedeemable;
+              return (
+                <Pressable
+                  key={p}
+                  onPress={() => handlePreset(p)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSel }}
+                  accessibilityLabel={`Redeem ${p} points (${formatCurrency(p * POINTS_TO_NAIRA)} off)`}
+                  style={({ pressed }) => [
+                    styles.preset,
+                    isSel && styles.presetSelected,
+                    pressed && { opacity: 0.85 },
                   ]}
                 >
-                  {p === maxRedeemable && p !== 100 && p !== 250 && p !== 500 && p !== 1000 && p !== 2500
-                    ? `All ${p.toLocaleString("en-NG")}`
-                    : p.toLocaleString("en-NG")}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      )}
-    </View>
+                  <Text
+                    style={[
+                      styles.presetText,
+                      isSel && styles.presetTextSelected,
+                    ]}
+                  >
+                    {isMax ? "Max" : p.toLocaleString("en-NG")}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.footnote}>
+            Points apply after payment confirms.
+          </Text>
+        </>
+      ) : null}
+    </Pressable>
   );
 }
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
+    /**
+     * Gold-tinted card. Light mode = gold50 (#FEF7D6), dark mode =
+     * a translucent gold so the points always read as their own
+     * thing rather than blending into the green primary surfaces.
+     */
     card: {
-      backgroundColor: theme.accentTint,
-      borderRadius: theme.radius.lg,
-      padding: theme.space.s3 + 2,
-      gap: theme.space.s3,
-    },
-    collapsedCard: {
-      // Single-row variant: row layout, no inner gap.
-      flexDirection: "row",
-      alignItems: "center",
-      gap: theme.space.s3,
+      backgroundColor:
+        theme.mode === "dark"
+          ? "rgba(245,197,24,0.06)"
+          : theme.palette.gold50,
+      borderWidth: 1,
+      borderColor:
+        theme.mode === "dark"
+          ? "rgba(245,197,24,0.18)"
+          : theme.palette.gold100,
+      borderRadius: 14,
+      padding: 14,
     },
     headerRow: {
       flexDirection: "row",
       alignItems: "center",
-      gap: theme.space.s3,
-    },
-    headerLeft: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: theme.space.s3,
-      flex: 1,
+      gap: 12,
     },
     coin: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: theme.accent,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor:
+        theme.mode === "dark"
+          ? "rgba(245,197,24,0.18)"
+          : theme.palette.gold100,
       alignItems: "center",
       justifyContent: "center",
     },
     title: {
-      ...theme.type.body,
-      color: theme.fg,
+      fontSize: 13.5,
       fontWeight: "800",
+      color:
+        theme.mode === "dark"
+          ? theme.palette.gold300
+          : theme.palette.gold700,
     },
     sub: {
-      ...theme.type.caption,
+      fontSize: 11.5,
       color: theme.fgMuted,
+      marginTop: 2,
+    },
+    divider: {
+      height: 1,
+      backgroundColor:
+        theme.mode === "dark"
+          ? "rgba(245,197,24,0.18)"
+          : theme.palette.gold100,
+      marginVertical: 14,
+    },
+    applyRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "baseline",
+      marginBottom: 10,
+    },
+    applyLabel: {
+      fontSize: 11,
+      fontWeight: "800",
+      color: theme.fgMuted,
+      letterSpacing: 0.5,
     },
     clear: {
-      ...theme.type.caption,
-      color: theme.primary,
-      fontWeight: "800",
+      fontSize: 11.5,
+      fontWeight: "700",
+      color:
+        theme.mode === "dark"
+          ? theme.palette.gold300
+          : theme.palette.gold700,
     },
-    empty: {
-      ...theme.type.bodySm,
-      color: theme.fgMuted,
-    },
-    presetRow: {
+    presetGrid: {
       flexDirection: "row",
-      flexWrap: "wrap",
-      gap: theme.space.s2,
+      gap: 6,
     },
     preset: {
-      paddingHorizontal: theme.space.s3,
-      paddingVertical: theme.space.s2 + 2,
-      borderRadius: theme.radius.pill,
-      borderWidth: 1,
-      borderColor: theme.border,
-      backgroundColor: theme.surface,
-      minWidth: 70,
+      flex: 1,
+      height: 38,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderStyle: "dashed",
+      borderColor:
+        theme.mode === "dark"
+          ? "rgba(245,197,24,0.30)"
+          : theme.palette.gold300,
+      backgroundColor: "transparent",
       alignItems: "center",
+      justifyContent: "center",
     },
     presetSelected: {
-      backgroundColor: theme.primary,
-      borderColor: theme.primary,
+      backgroundColor:
+        theme.mode === "dark" ? theme.palette.gold300 : theme.palette.gold700,
+      borderStyle: "solid",
+      borderColor:
+        theme.mode === "dark" ? theme.palette.gold300 : theme.palette.gold700,
     },
     presetText: {
-      ...theme.type.caption,
-      ...theme.type.money,
+      fontSize: 12.5,
       fontWeight: "800",
+      color:
+        theme.mode === "dark"
+          ? theme.palette.gold300
+          : theme.palette.gold700,
+      ...theme.type.money,
+    },
+    presetTextSelected: {
+      color:
+        theme.mode === "dark" ? theme.palette.neutral900 : "#fff",
+    },
+    footnote: {
+      fontSize: 10.5,
+      color: theme.fgMuted,
+      marginTop: 10,
+      lineHeight: 14,
     },
   });

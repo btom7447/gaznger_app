@@ -175,8 +175,8 @@ export const api = {
   patch: <T = unknown>(path: string, body?: unknown, opts: CallOpts = {}) =>
     request<T>(path, { method: "PATCH", body, ...opts }),
 
-  delete: <T = unknown>(path: string, opts: CallOpts = {}) =>
-    request<T>(path, { method: "DELETE", ...opts }),
+  delete: <T = unknown>(path: string, body?: unknown, opts: CallOpts = {}) =>
+    request<T>(path, { method: "DELETE", body, ...opts }),
 
   /** Multipart form-data upload (FormData). No Content-Type header — fetch sets it with boundary. */
   uploadForm: async <T = unknown>(path: string, formData: FormData, method: "POST" | "PATCH" = "PATCH"): Promise<T> => {

@@ -151,3 +151,93 @@ export function isTerminalStatus(status: OrderStatus | string): boolean {
     s.startsWith("cancelled_")
   );
 }
+
+/**
+ * Customer-side track phase used by the Track screen's per-phase
+ * sheet body + map content. Folds BOTH the legacy enum (what the
+ * rider app emits today) AND the v3 granular enum (what the rider
+ * app will emit after upgrade) into the same five customer-facing
+ * phases — so the customer screen lands the right design without
+ * waiting for the rider app to upgrade.
+ *
+ * Mapping rationale:
+ *   - pre-assignment: order paid, no rider yet (`pending` |
+ *     `pending_payment` | `confirmed` | `assigning`).
+ *   - assigned: rider accepted, possibly heading to pickup
+ *     (`assigned`). v3 splits this into `assigned` (heading to
+ *     station) — same key.
+ *   - at-pickup: rider at the station refilling. Granular v3 emits
+ *     `at_plant` / `refilling`; legacy collapses these into
+ *     `assigned` so we currently can't see them. When the rider app
+ *     upgrades, the customer's body flips automatically.
+ *   - in-transit: rider has the fuel and is heading to the customer
+ *     (`in-transit` / `in_transit` / `picked_up` / `returning`).
+ *   - almost-there: rider is at the customer's gate or seconds away.
+ *     v3 emits `arrived`; legacy collapses to `awaiting_confirmation`.
+ *     We also derive almost-there client-side when in-transit ETA
+ *     drops to ≤ 1 min, so the design's "< 1 min" + I'm-here CTA
+ *     state still surfaces today.
+ *
+ * The fall-throughs default to `pre-assignment` so any unknown
+ * status from a future server doesn't crash the screen.
+ */
+export type TrackPhase =
+  | "pre-assignment"
+  | "assigned"
+  | "at-pickup"
+  | "in-transit"
+  | "almost-there";
+
+export function getTrackPhase(input: {
+  status: OrderStatus | string;
+  hasRider: boolean;
+  /** ETA in minutes. Drives the almost-there client-side derivation. */
+  etaMinutes?: number | null;
+}): TrackPhase {
+  const s = String(input.status);
+
+  // No rider yet — sheet shows the matching skeleton regardless of
+  // server status nuance. `assigning` covers the dispatch window;
+  // `pending` / `pending_payment` / `confirmed` cover the pre-dispatch
+  // window after payment lands.
+  if (
+    !input.hasRider ||
+    s === "pending" ||
+    s === "pending_payment" ||
+    s === "confirmed" ||
+    s === "assigning"
+  ) {
+    return "pre-assignment";
+  }
+
+  // v3 granular — rider at the station.
+  if (s === "at_plant" || s === "refilling") return "at-pickup";
+
+  // v3 granular — rider arriving / dispensing on the customer side.
+  if (s === "arrived" || s === "dispensing") return "almost-there";
+
+  // Legacy + v3 in-transit — rider has the fuel, heading to customer.
+  // We derive almost-there from a short ETA so the design's "< 1 min"
+  // state still surfaces with the legacy rider app (it never emits
+  // `arrived`).
+  if (
+    s === "in-transit" ||
+    s === "in_transit" ||
+    s === "picked_up" ||
+    s === "returning"
+  ) {
+    if (typeof input.etaMinutes === "number" && input.etaMinutes <= 1) {
+      return "almost-there";
+    }
+    return "in-transit";
+  }
+
+  // Legacy `awaiting_confirmation` — rider has marked delivery; we
+  // route the customer off Track to the Arrival/Handoff screen, but
+  // if we're still on Track for a render or two, present as
+  // almost-there so the layout doesn't flash back to in-transit.
+  if (s === "awaiting_confirmation") return "almost-there";
+
+  // Default: rider exists, status unknown → assigned.
+  return "assigned";
+}

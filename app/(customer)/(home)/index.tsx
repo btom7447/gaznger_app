@@ -11,9 +11,11 @@ import { EmptyState, OfflineStrip, Skeleton } from "@/components/ui/primitives";
 import HomeHeader from "@/components/ui/customer/home/HomeHeader";
 import AddressChip from "@/components/ui/customer/home/AddressChip";
 import PromoBanner from "@/components/ui/customer/home/PromoBanner";
-import ActiveOrderBanner, {
-  ActiveOrderInfo,
-} from "@/components/ui/customer/home/ActiveOrderBanner";
+// Active-order shape kept for typing the local `active` state used by
+// the orders-loading skeleton heuristic. The banner component itself
+// is intentionally not imported — per UX direction the home banner
+// slot is promo-only.
+import { ActiveOrderInfo } from "@/components/ui/customer/home/ActiveOrderBanner";
 import FuelGrid, {
   DEFAULT_FUEL_TILES,
   FuelTile,
@@ -75,13 +77,31 @@ const STATIC_FUEL_RATES: FuelRate[] = [
   { id: "kero", label: "Kero", amount: 1300, unit: "L" },
 ];
 
+/**
+ * Active statuses recognised by Home for swapping the PromoBanner
+ * with the ActiveOrderBanner. Mirrors the canonical
+ * `utils/orderStatusLabels.ts ACTIVE_STATUSES` list, but materialised
+ * as a Set for cheap lookups inside the orders.find callback. We
+ * also keep the legacy `in_transit` / `in-transit` / `pending` /
+ * `awaiting_confirmation` variants because older orders in the DB
+ * still report those values.
+ */
 const ACTIVE_STATUSES = new Set([
+  // Legacy enum values
   "pending",
   "confirmed",
   "assigned",
   "in_transit",
   "in-transit",
   "awaiting_confirmation",
+  // v2/v3 granular flow
+  "assigning",
+  "picked_up",
+  "at_plant",
+  "refilling",
+  "returning",
+  "arrived",
+  "dispensing",
 ]);
 
 function relativeTime(iso: string): string {
@@ -292,8 +312,8 @@ export default function HomeScreen() {
   const handleRecentRowPress = useCallback(
     (item: RecentOrderItem) => {
       router.push({
-        pathname: "/(screens)/order-history" as never,
-        params: { orderId: item.id } as never,
+        pathname: "/(customer)/(order)/[id]" as never,
+        params: { id: item.id } as never,
       });
     },
     [router]
@@ -373,13 +393,6 @@ export default function HomeScreen() {
     ]
   );
 
-  const handleActiveTrack = useCallback(
-    (_orderId: string) => {
-      router.push("/(customer)/(track)" as never);
-    },
-    [router]
-  );
-
   return (
     <SafeAreaView edges={["top"]} style={[styles.root, { backgroundColor: theme.bg }]}>
       <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
@@ -415,15 +428,19 @@ export default function HomeScreen() {
           onPress={handleAddressPress}
         />
 
-        {/* Active vs Promo: dynamic, sized skeleton matches banner height (200). */}
+        {/* Promo banner — strictly promo-only.
+            Per UX direction this slot NEVER swaps to a tracking
+            banner, an active-order banner, or anything else. Even
+            with an order in flight, the carousel keeps cycling
+            promo slides; tracking lives on the dedicated Track
+            screen, not here. We still reserve the same 200px height
+            during initial load so the layout doesn't jump. */}
         {ordersLoading && active === null && recent === null ? (
           <Skeleton
             width="100%"
             height={200}
             borderRadius={theme.radius.xl}
           />
-        ) : active ? (
-          <ActiveOrderBanner order={active} onPress={handleActiveTrack} />
         ) : (
           <PromoBanner />
         )}
@@ -445,7 +462,7 @@ export default function HomeScreen() {
           trailing={{
             label: "See all",
             onPress: () =>
-              router.push("/(screens)/order-history" as never),
+              router.push("/(customer)/(order)/history" as never),
           }}
         >
           Recent

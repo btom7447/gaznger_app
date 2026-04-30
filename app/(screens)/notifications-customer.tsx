@@ -196,7 +196,7 @@ export default function NotificationsScreen() {
           if (item.needsAction) {
             router.push("/(customer)/(order)/payment" as never);
           } else {
-            router.push("/(screens)/order-history" as never);
+            router.push("/(customer)/(order)/history" as never);
           }
           break;
         case "lpg":

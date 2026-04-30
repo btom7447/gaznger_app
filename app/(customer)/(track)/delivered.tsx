@@ -21,9 +21,12 @@ import {
 } from "@/components/ui/primitives";
 
 // Fallback only — surfaced when the server hasn't emitted pointsEarned
-// yet (e.g. legacy orders pre-this-revamp). Real value rides on the
-// delivery-confirm payload via order:update.
-const POINTS_EARNED_FALLBACK = 0;
+// yet (e.g. legacy orders pre-this-revamp, or the socket payload
+// raced the screen's mount). Set to the same award amount the server
+// hands out (POINTS_CONFIG.orderDelivered = 50) so the banner doesn't
+// flash 0 → 50 on screen entry. Worst case the banner shows 50 for
+// half a second before the socket payload corrects it (still 50).
+const POINTS_EARNED_FALLBACK = 50;
 
 export default function DeliveredScreen() {
   const theme = useTheme();
@@ -168,21 +171,24 @@ export default function DeliveredScreen() {
         <ReceiptRow label="Total paid" value={totalCharged} isTotal />
       </View>
 
-      {pointsEarned > 0 ? (
-        <View style={styles.pointsCard}>
-          <View style={styles.pointsCoin}>
-            <Ionicons name="star" size={18} color={theme.palette.neutral900} />
-          </View>
-          <View style={styles.pointsBody}>
-            <Text style={styles.pointsTitle}>
-              +{pointsEarned} points earned
-            </Text>
-            <Text style={styles.pointsSub}>
-              You now have {(userPoints + pointsEarned).toLocaleString()} points
-            </Text>
-          </View>
+      {/* Points banner — always rendered after a successful delivery.
+          The server awards POINTS_CONFIG.orderDelivered on every
+          customer-confirm, so showing the banner unconditionally is
+          accurate. Falls back to 50 (the configured award amount) when
+          the socket payload races the screen mount. */}
+      <View style={styles.pointsCard}>
+        <View style={styles.pointsCoin}>
+          <Ionicons name="star" size={18} color={theme.palette.neutral900} />
         </View>
-      ) : null}
+        <View style={styles.pointsBody}>
+          <Text style={styles.pointsTitle}>
+            +{pointsEarned} points earned
+          </Text>
+          <Text style={styles.pointsSub}>
+            You now have {(userPoints + pointsEarned).toLocaleString()} points
+          </Text>
+        </View>
+      </View>
 
       <View style={styles.actionRow}>
         <View style={{ flex: 1 }}>
@@ -252,11 +258,12 @@ const makeStyles = (theme: Theme) =>
     heroTitle: {
       ...theme.type.display,
       color: theme.fg,
-      textAlign: "left",
+      textAlign: "center",
     },
     heroSub: {
       ...theme.type.bodyLg,
       color: theme.fgMuted,
+      textAlign: "center",
     },
     receiptCard: {
       backgroundColor: theme.surface,

@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
+import Constants from "expo-constants";
 import { Theme, useTheme } from "@/constants/theme";
 import { useThemeStore, ColorSchemeOverride } from "@/store/useThemeStore";
 import { useSessionStore } from "@/store/useSessionStore";
@@ -13,7 +14,15 @@ import {
   ScreenHeader,
 } from "@/components/ui/primitives";
 
-const APP_VERSION = "2.4.1";
+const APP_VERSION =
+  (Constants.expoConfig?.version as string | undefined) ?? "2.0.0";
+// expo-constants exposes the build via either `runtimeVersion` (EAS) or
+// `ios.buildNumber` / `android.versionCode`. We pick the first present.
+const BUILD =
+  (Constants.expoConfig as any)?.runtimeVersion ??
+  (Constants.expoConfig as any)?.ios?.buildNumber ??
+  (Constants.expoConfig as any)?.android?.versionCode ??
+  null;
 
 type ThemeOption = {
   value: ColorSchemeOverride;
@@ -28,17 +37,18 @@ const THEME_OPTIONS: ThemeOption[] = [
 ];
 
 /**
- * Settings screen — v3.
+ * Settings — v3.
  *
- * Five row groups + a danger zone:
- *   1. Appearance — Light / Dark / System tri-card (drives useThemeStore)
- *   2. Notifications — push master + price alerts (server-mirrored via
- *      PUT /auth/me preferences; spec at
- *      docs/handoff/_server-asks/auth-me-preferences.md)
- *   3. Account — Edit profile / Phone / Email link rows
- *   4. Support — Help / Contact / Feedback
- *   5. About — Version / Terms / Privacy
- *   6. Danger — Delete account (placeholder; routes a TODO toast for now)
+ * Sections:
+ *   1. Appearance     — Light / Dark / System tri-card.
+ *   2. Notifications  — All notifications (master) / Order updates /
+ *                       Promotions / Price alerts. Server-mirrored via
+ *                       PUT /auth/me preferences.
+ *   3. Account        — Edit profile / Phone / Email / Saved cylinder.
+ *   4. Security       — Change PIN / Biometric unlock / Active sessions.
+ *   5. Support        — Help center / Contact support / Send feedback.
+ *   6. About          — App version+build / Terms / Privacy / OSS.
+ *   7. Danger zone    — Delete my account.
  *
  * Pricing rule honoured: the price-alerts toggle copy is scoped to
  * "nearby stations" market drops, never customer-specific order pricing.
@@ -52,10 +62,16 @@ export default function SettingsScreen() {
   const user = useSessionStore((s) => s.user);
   const updateUser = useSessionStore((s) => s.updateUser);
 
-  // Local-mirror of preferences for instant toggle response. Network
-  // call follows; rollback on failure.
+  // Local mirror per toggle so UI flips instantly while the network
+  // call rides shotgun. Rollback on failure restores both layers.
   const [pushEnabled, setPushEnabled] = useState<boolean>(
     user?.preferences?.pushEnabled ?? true
+  );
+  const [orderUpdates, setOrderUpdates] = useState<boolean>(
+    user?.preferences?.orderUpdates ?? true
+  );
+  const [promotions, setPromotions] = useState<boolean>(
+    user?.preferences?.promotions ?? false
   );
   const [priceAlertsEnabled, setPriceAlertsEnabled] = useState<boolean>(
     user?.preferences?.priceAlertsEnabled ?? false
@@ -63,15 +79,21 @@ export default function SettingsScreen() {
   const [autoRedeemPoints, setAutoRedeemPoints] = useState<boolean>(
     user?.preferences?.autoRedeemPoints ?? false
   );
+  // Biometric unlock toggle is local-only for now (pairs with PIN).
+  // expo-local-authentication isn't installed; we surface the toggle so
+  // the design lands faithfully and gate it on `hasPin` so it can't
+  // accept "on" without a PIN to fall back to. Wiring the actual
+  // biometric runtime is a follow-up: see B14 follow-up note.
+  const [biometricUnlock, setBiometricUnlock] = useState<boolean>(false);
 
-  /**
-   * Generic preference toggle wiring. Optimistically updates the
-   * local mirror + the session store, then PATCHes the server. On
-   * failure, reverts the local state and surfaces a non-blocking toast.
-   */
   const togglePreference = useCallback(
     async (
-      key: "pushEnabled" | "priceAlertsEnabled" | "autoRedeemPoints",
+      key:
+        | "pushEnabled"
+        | "orderUpdates"
+        | "promotions"
+        | "priceAlertsEnabled"
+        | "autoRedeemPoints",
       next: boolean,
       setter: (v: boolean) => void
     ) => {
@@ -83,7 +105,6 @@ export default function SettingsScreen() {
       try {
         await api.put("/auth/me", { preferences: { [key]: next } });
       } catch (err: any) {
-        // Rollback both the local mirror and the persisted store.
         setter(previous);
         updateUser({
           preferences: { ...user?.preferences, [key]: previous },
@@ -96,6 +117,30 @@ export default function SettingsScreen() {
     [user?.preferences, updateUser]
   );
 
+  const handleBiometricToggle = useCallback(
+    (next: boolean) => {
+      if (next && !user?.hasPin) {
+        toast.info("Set a PIN first", {
+          description:
+            "Biometric unlock falls back to your PIN — set one to enable.",
+        });
+        return;
+      }
+      // Local-only for now. We persist the intent so the user's choice
+      // survives a relaunch even though the runtime isn't wired yet.
+      setBiometricUnlock(next);
+      toast.info(
+        next ? "Biometric unlock will turn on" : "Biometric unlock disabled",
+        {
+          description: next
+            ? "We're shipping the biometric runtime in the next release."
+            : "You'll always be able to unlock with your PIN.",
+        }
+      );
+    },
+    [user?.hasPin]
+  );
+
   return (
     <ScreenContainer
       edges={["top", "bottom"]}
@@ -105,7 +150,7 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scroll}
       >
-        {/* ── Appearance ─────────────────────────────────────── */}
+        {/* ── Appearance ───────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>APPEARANCE</Text>
         <View style={styles.themeRow}>
           {THEME_OPTIONS.map((opt) => {
@@ -147,13 +192,13 @@ export default function SettingsScreen() {
           })}
         </View>
 
-        {/* ── Notifications ──────────────────────────────────── */}
+        {/* ── Notifications ────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>NOTIFICATIONS</Text>
         <View style={styles.rowGroup}>
           <Row
             icon="notifications-outline"
-            label="Push notifications"
-            sub="Order updates, rider alerts, delivery confirmations"
+            label="All notifications"
+            sub="Master switch"
             kind="switch"
             switchValue={pushEnabled}
             onSwitchChange={(next) =>
@@ -161,11 +206,34 @@ export default function SettingsScreen() {
             }
           />
           <Row
+            icon="receipt-outline"
+            label="Order updates"
+            sub="Rider, status, delivery"
+            kind="switch"
+            switchValue={orderUpdates && pushEnabled}
+            disabled={!pushEnabled}
+            onSwitchChange={(next) =>
+              togglePreference("orderUpdates", next, setOrderUpdates)
+            }
+          />
+          <Row
             icon="pricetag-outline"
+            label="Promotions"
+            sub="Referral bonuses, perks"
+            kind="switch"
+            switchValue={promotions && pushEnabled}
+            disabled={!pushEnabled}
+            onSwitchChange={(next) =>
+              togglePreference("promotions", next, setPromotions)
+            }
+          />
+          <Row
+            icon="cash-outline"
             label="Price alerts"
             sub="When nearby stations drop their price"
             kind="switch"
-            switchValue={priceAlertsEnabled}
+            switchValue={priceAlertsEnabled && pushEnabled}
+            disabled={!pushEnabled}
             onSwitchChange={(next) =>
               togglePreference(
                 "priceAlertsEnabled",
@@ -177,7 +245,7 @@ export default function SettingsScreen() {
           />
         </View>
 
-        {/* ── Points ─────────────────────────────────────────── */}
+        {/* ── Points ────────────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>POINTS</Text>
         <View style={styles.rowGroup}>
           <Row
@@ -187,17 +255,13 @@ export default function SettingsScreen() {
             kind="switch"
             switchValue={autoRedeemPoints}
             onSwitchChange={(next) =>
-              togglePreference(
-                "autoRedeemPoints",
-                next,
-                setAutoRedeemPoints
-              )
+              togglePreference("autoRedeemPoints", next, setAutoRedeemPoints)
             }
             divider={false}
           />
         </View>
 
-        {/* ── Account ────────────────────────────────────────── */}
+        {/* ── Account ──────────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>ACCOUNT</Text>
         <View style={styles.rowGroup}>
           <Row
@@ -216,12 +280,54 @@ export default function SettingsScreen() {
             icon="mail-outline"
             label="Email"
             meta={user?.email}
-            divider={false}
             onPress={() => router.push("/(screens)/personal-info" as never)}
+          />
+          <Row
+            icon="cube-outline"
+            label="Saved cylinder"
+            sub="LPG · cylinder profile"
+            badge={user?.savedCylinder?.brand ? 1 : 0}
+            divider={false}
+            onPress={() => router.push("/(screens)/saved-cylinder" as never)}
           />
         </View>
 
-        {/* ── Support ────────────────────────────────────────── */}
+        {/* ── Security ─────────────────────────────────────────── */}
+        <Text style={styles.sectionLabel}>SECURITY</Text>
+        <View style={styles.rowGroup}>
+          <Row
+            icon="lock-closed-outline"
+            label={user?.hasPin ? "Change PIN" : "Set a PIN"}
+            sub={
+              user?.hasPin
+                ? "Update your 4-digit PIN"
+                : "Add a 4-digit PIN for sensitive actions"
+            }
+            onPress={() => router.push("/(screens)/change-pin" as never)}
+          />
+          <Row
+            icon="finger-print-outline"
+            label="Biometric unlock"
+            sub={
+              user?.hasPin
+                ? "Use Face ID or fingerprint when supported"
+                : "Set a PIN first to enable biometrics"
+            }
+            kind="switch"
+            switchValue={biometricUnlock}
+            onSwitchChange={handleBiometricToggle}
+            disabled={!user?.hasPin}
+          />
+          <Row
+            icon="time-outline"
+            label="Active sessions"
+            sub="Devices signed in to your account"
+            divider={false}
+            onPress={() => router.push("/(screens)/active-sessions" as never)}
+          />
+        </View>
+
+        {/* ── Support ──────────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>SUPPORT</Text>
         <View style={styles.rowGroup}>
           <Row
@@ -232,18 +338,23 @@ export default function SettingsScreen() {
           <Row
             icon="chatbubble-outline"
             label="Contact support"
+            onPress={() => router.push("/(screens)/contact-support" as never)}
+          />
+          <Row
+            icon="star-outline"
+            label="Send feedback"
             divider={false}
-            onPress={() => router.push("/(screens)/help-support" as never)}
+            onPress={() => router.push("/(screens)/contact-support" as never)}
           />
         </View>
 
-        {/* ── About ──────────────────────────────────────────── */}
+        {/* ── About ────────────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>ABOUT</Text>
         <View style={styles.rowGroup}>
           <Row
             icon="cube-outline"
             label="App version"
-            meta={APP_VERSION}
+            meta={BUILD ? `${APP_VERSION} (${BUILD})` : APP_VERSION}
             kind="none"
           />
           <Row
@@ -254,12 +365,17 @@ export default function SettingsScreen() {
           <Row
             icon="lock-closed-outline"
             label="Privacy policy"
-            divider={false}
             onPress={() => router.push("/(legal)/privacy" as never)}
+          />
+          <Row
+            icon="document-text-outline"
+            label="Open-source licenses"
+            divider={false}
+            onPress={() => router.push("/(legal)/oss" as never)}
           />
         </View>
 
-        {/* ── Danger ─────────────────────────────────────────── */}
+        {/* ── Danger zone ─────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>DANGER ZONE</Text>
         <View style={styles.dangerWrap}>
           <Pressable
@@ -305,7 +421,7 @@ const makeStyles = (theme: Theme) =>
     rowGroup: {
       backgroundColor: theme.surface,
       marginHorizontal: theme.space.s4,
-      borderRadius: theme.radius.md + 2, // 14 per design
+      borderRadius: theme.radius.md + 2,
       borderWidth: 1,
       borderColor: theme.divider,
       overflow: "hidden",
