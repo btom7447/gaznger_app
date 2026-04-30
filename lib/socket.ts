@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AppState } from "react-native";
 import { io, Socket } from "socket.io-client";
 
 const BASE_URL = process.env.EXPO_PUBLIC_BASE_URL ?? "http://localhost:5000";
@@ -153,6 +154,9 @@ export function connectSocket(token?: string | null): Socket | null {
     clearOfflineTimer();
     setStatus("live");
     logSocketEvent({ ts: Date.now(), direction: "in", event: "connect" });
+    // Phase 8 — attach AppState listener on first successful connect
+    // so foreground transitions trigger catch-up. Idempotent.
+    attachAppStateListener();
 
     // Fire reconnect listeners on every connect AFTER the first.
     // The first connect is just initial bootstrap — there's nothing
@@ -221,6 +225,52 @@ export function disconnectSocket(): void {
   setStatus("offline");
   hasConnectedBefore = false;
   reconnectListeners.clear();
+  if (appStateSubscription) {
+    appStateSubscription.remove();
+    appStateSubscription = null;
+  }
+}
+
+/**
+ * AppState foreground catch-up (Phase 8).
+ *
+ * When the app returns from background to active, fire reconnect
+ * listeners — even if the socket was never disconnected. This
+ * catches the "soft background" case where iOS suspended the
+ * process briefly without dropping the socket: events emitted
+ * during that window may have been queued and delivered, but a
+ * single GET against the active order is cheap insurance against
+ * any that fell through.
+ *
+ * Only attached after the first connectSocket() call (i.e. after
+ * login) so we don't run this on the auth screen.
+ */
+let appStateSubscription: { remove: () => void } | null = null;
+let lastAppState: string = AppState.currentState;
+function attachAppStateListener() {
+  if (appStateSubscription) return; // already attached
+  appStateSubscription = AppState.addEventListener("change", (next) => {
+    const wasBackground =
+      lastAppState === "background" || lastAppState === "inactive";
+    lastAppState = next;
+    if (next === "active" && wasBackground && hasConnectedBefore) {
+      // Fire reconnect listeners as if the socket had reconnected.
+      // Listeners are idempotent (a single GET) so calling them on
+      // every foreground is fine even if no events were missed.
+      reconnectListeners.forEach((l) => {
+        try {
+          l();
+        } catch {
+          // listener errors must not break catch-up flow
+        }
+      });
+      logSocketEvent({
+        ts: Date.now(),
+        direction: "in",
+        event: "appstate:foreground-catchup",
+      });
+    }
+  });
 }
 
 /** Get the current socket instance (null if not connected). */
