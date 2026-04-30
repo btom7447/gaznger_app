@@ -13,6 +13,7 @@ import Constants from "expo-constants";
 import { api } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
 import { getPaystackPublicKey } from "@/lib/paystackKey";
+import DebugOverlay from "@/components/ui/global/DebugOverlay";
 
 const isExpoGo = Constants.appOwnership === "expo";
 
@@ -132,6 +133,12 @@ export default function RootLayout() {
                 <Stack.Screen name="(legal)/privacy" />
                 <Stack.Screen name="(legal)/terms" />
               </Stack>
+              {/* Phase 6 debug overlay — invisible long-press hit-area
+                  in the top-left corner. Mounted at root so it overlays
+                  every screen. Production builds keep it because the
+                  cost is one Pressable + one ring buffer; the modal
+                  only renders when the user deliberately opens it. */}
+              <DebugOverlay />
             </BottomSheetModalProvider>
           </PaystackProvider>
         </SafeAreaProvider>

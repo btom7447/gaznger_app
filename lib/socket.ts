@@ -28,6 +28,46 @@ export function subscribeReconnect(listener: ReconnectListener): () => void {
 }
 
 /**
+ * Recent socket event ring buffer — populated by client-side
+ * listeners and surfaced through the debug overlay (Phase 6).
+ *
+ * Anything we want to debug ad-hoc gets logged here. Keep the buffer
+ * small (default 20) so the memory footprint is bounded; old entries
+ * fall off as new ones land.
+ */
+export interface SocketLogEntry {
+  ts: number;
+  direction: "in" | "out";
+  event: string;
+  payload?: unknown;
+}
+
+const LOG_MAX = 20;
+const eventLog: SocketLogEntry[] = [];
+type LogListener = (snapshot: SocketLogEntry[]) => void;
+const logListeners = new Set<LogListener>();
+
+export function logSocketEvent(entry: SocketLogEntry): void {
+  eventLog.unshift(entry);
+  if (eventLog.length > LOG_MAX) eventLog.length = LOG_MAX;
+  // Snapshot for subscribers — they get a frozen copy so they can
+  // safely render without worrying about mid-render mutations.
+  const snap = eventLog.slice();
+  logListeners.forEach((l) => l(snap));
+}
+
+export function getSocketEventLog(): SocketLogEntry[] {
+  return eventLog.slice();
+}
+
+export function subscribeSocketEventLog(listener: LogListener): () => void {
+  logListeners.add(listener);
+  return () => {
+    logListeners.delete(listener);
+  };
+}
+
+/**
  * Lightweight pub/sub for socket status — survives module reload, lives outside
  * React. The LiveBadge subscribes via `useSocketStatus()`.
  */
@@ -112,6 +152,7 @@ export function connectSocket(token?: string | null): Socket | null {
     console.log("[Socket] connected:", socket?.id);
     clearOfflineTimer();
     setStatus("live");
+    logSocketEvent({ ts: Date.now(), direction: "in", event: "connect" });
 
     // Fire reconnect listeners on every connect AFTER the first.
     // The first connect is just initial bootstrap — there's nothing
@@ -130,6 +171,21 @@ export function connectSocket(token?: string | null): Socket | null {
     hasConnectedBefore = true;
   });
 
+  // Log every inbound application event (not transport plumbing).
+  // We use socket.onAny so new event types get logged without
+  // having to add explicit listeners here.
+  socket.onAny((event: string, payload: unknown) => {
+    if (
+      event === "connect" ||
+      event === "disconnect" ||
+      event === "reconnect_attempt" ||
+      event === "connect_error"
+    ) {
+      return; // already logged in their explicit handlers
+    }
+    logSocketEvent({ ts: Date.now(), direction: "in", event, payload });
+  });
+
   socket.on("reconnect_attempt", () => {
     setStatus("reconnecting");
   });
@@ -144,6 +200,12 @@ export function connectSocket(token?: string | null): Socket | null {
     console.log("[Socket] disconnected:", reason);
     setStatus("reconnecting");
     scheduleOffline();
+    logSocketEvent({
+      ts: Date.now(),
+      direction: "in",
+      event: "disconnect",
+      payload: { reason },
+    });
   });
 
   return socket;
