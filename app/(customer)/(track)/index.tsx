@@ -65,7 +65,13 @@ interface ServerOrder {
   } | null;
 }
 
-const ROUTE_REFETCH_MS = 60_000;
+// Polyline is pushed via the `route:update` socket event in Phase 3.
+// This interval is a fallback safety net for cases where the socket
+// drops between rider GPS pings — without it, a stuck polyline would
+// stay until the next reconnect catch-up. 5 minutes is conservative
+// because the customer also re-fetches whenever serverStatus or
+// riderCoord changes (see the fetchRoute effect).
+const ROUTE_REFETCH_MS = 5 * 60_000;
 
 export default function TrackScreen() {
   const theme = useTheme();
@@ -260,11 +266,32 @@ export default function TrackScreen() {
     const onLocation = (data: { lat: number; lng: number }) => {
       setRiderCoord({ latitude: data.lat, longitude: data.lng });
     };
+    // Phase 3 — server emits route:update from /api/orders/:id/route
+    // every time it computes a fresh polyline. Listening here means
+    // we don't have to refetch on a timer; the polyline reflows in
+    // real time as the rider moves.
+    const onRouteUpdate = (data: {
+      orderId?: string;
+      polyline?: [number, number][];
+      target?: "station" | "destination";
+    }) => {
+      if (!data.polyline) return;
+      // Filter by orderId so we don't accept stale updates from a
+      // prior delivery that lingered in our socket session.
+      if (data.orderId && data.orderId !== effectiveOrderId) return;
+      const points = data.polyline.map(([lat, lng]) => ({
+        latitude: lat,
+        longitude: lng,
+      }));
+      setRoutePolyline(points);
+    };
     socket.on("order:update", onUpdate);
     socket.on("rider:location", onLocation);
+    socket.on("route:update", onRouteUpdate);
     return () => {
       socket.off("order:update", onUpdate);
       socket.off("rider:location", onLocation);
+      socket.off("route:update", onRouteUpdate);
     };
   }, [effectiveOrderId]);
 

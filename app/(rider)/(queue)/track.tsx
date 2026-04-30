@@ -150,10 +150,16 @@ export default function RiderTrackScreen() {
     return () => { socket.off("order:update", onOrderUpdate); };
   }, []);
 
-  // Poll when awaiting_confirmation to catch customer confirm event even if socket misses
+  // Phase 3: socket-first — the customer's /confirm-delivery emits
+  // order:update with status=delivered, and the listener above
+  // clears the local delivery on the rider side. We keep a longer
+  // (30s) safety poll as a backstop for the rare case where the
+  // socket missed the event AND the reconnect catch-up hasn't fired
+  // yet (e.g. rider went background then foreground without a real
+  // disconnect). Was 8s — we can afford to relax.
   useEffect(() => {
     if (delivery?.status === "awaiting_confirmation") {
-      pollRef.current = setInterval(load, 8_000);
+      pollRef.current = setInterval(load, 30_000);
     }
     return () => {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -216,15 +222,19 @@ export default function RiderTrackScreen() {
       if (!delivery || transitioning) return;
       setTransitioning(true);
       try {
+        // Phase 3 — drop the post-transition `load()` GET. The
+        // server emits `delivery:update` to the rider's user room
+        // on every successful transition; the listener on this
+        // screen patches local state immediately. One less round-
+        // trip per CTA tap.
         await api.patch(`/api/rider/deliveries/${delivery._id}/${slug}`);
-        await load();
       } catch (err: any) {
         toast.error(errorMsg, { description: err.message });
       } finally {
         setTransitioning(false);
       }
     },
-    [delivery, transitioning, load]
+    [delivery, transitioning]
   );
 
   // Granular handlers — each maps to one server endpoint.
