@@ -12,6 +12,7 @@ import { useWalletStore } from "@/store/useWalletStore";
 import Constants from "expo-constants";
 import { api } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
+import { initActionQueue } from "@/lib/actionQueue";
 import { getPaystackPublicKey } from "@/lib/paystackKey";
 import DebugOverlay from "@/components/ui/global/DebugOverlay";
 
@@ -89,6 +90,7 @@ export default function RootLayout() {
       if (!prev && state.isLoggedIn && state.hasHydrated) {
         registerDeviceToken();
         connectSocket(state.accessToken);
+        initActionQueue();
         syncUserSession();
         detachWallet?.();
         detachWallet = syncWalletAndSubscribe();
@@ -100,6 +102,10 @@ export default function RootLayout() {
     if (session.isLoggedIn) {
       registerDeviceToken();
       connectSocket(session.accessToken);
+      // Phase 10 — wire the offline action queue to drain whenever
+      // the socket comes live. Idempotent — calling on every mount
+      // is fine.
+      initActionQueue();
       syncUserSession();
       detachWallet = syncWalletAndSubscribe();
     }
