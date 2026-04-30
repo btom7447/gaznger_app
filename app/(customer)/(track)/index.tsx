@@ -259,11 +259,25 @@ export default function TrackScreen() {
     });
   }, [refreshOrderState]);
 
+  // Keep a ref to the latest effectiveOrderId so socket handlers can
+  // filter without being in the effect dep array — avoids unbind/rebind
+  // on every orderId change while still rejecting cross-order events.
+  const effectiveOrderIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    effectiveOrderIdRef.current = effectiveOrderId;
+  }, [effectiveOrderId]);
+
   /* ───────────────── Socket subscriptions ───────────────── */
   useEffect(() => {
     const socket = getSocket();
-    if (!socket || !effectiveOrderId) return;
+    // Bind as soon as the socket exists — don't gate on effectiveOrderId
+    // here. The handlers filter by orderId via ref so events that arrive
+    // before useActiveOrder resolves are NOT missed. Previously this bail
+    // caused a blind window on screens opened before the active-order
+    // fetch returned.
+    if (!socket) return;
     const onUpdate = (data: {
+      orderId?: string;
       status?: string;
       eta?: number;
       rider?: RiderInfo;
@@ -272,6 +286,9 @@ export default function TrackScreen() {
       pointsEarned?: number;
       weighIn?: { emptyKg: number; fullKg: number; netKg: number };
     }) => {
+      // Filter: ignore events for other orders once we know our id.
+      const oid = effectiveOrderIdRef.current;
+      if (oid && data.orderId && String(data.orderId) !== oid) return;
       if (data.status) {
         setServerStatus(data.status);
         // Server signalled the rider is no longer on this order
@@ -316,9 +333,9 @@ export default function TrackScreen() {
       target?: "station" | "destination";
     }) => {
       if (!data.polyline) return;
-      // Filter by orderId so we don't accept stale updates from a
-      // prior delivery that lingered in our socket session.
-      if (data.orderId && data.orderId !== effectiveOrderId) return;
+      // Filter by orderId via ref — same pattern as onUpdate above.
+      const oid = effectiveOrderIdRef.current;
+      if (oid && data.orderId && data.orderId !== oid) return;
       const points = data.polyline.map(([lat, lng]) => ({
         latitude: lat,
         longitude: lng,
@@ -337,7 +354,8 @@ export default function TrackScreen() {
     // disconnected → live, this effect re-runs and attaches listeners
     // to the freshly-connected socket instance. Without it, screens
     // mounted before the socket connects never bind their listeners.
-  }, [effectiveOrderId, socketStatus]);
+    // effectiveOrderId removed from deps — filtering now via ref.
+  }, [socketStatus, setRiderInStore, setDeliveryConfirmation, setWeighIn]);
 
   /**
    * "Heading back" loader trigger. When the rider confirms heading

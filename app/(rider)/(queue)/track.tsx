@@ -271,42 +271,37 @@ export default function RiderTrackScreen() {
    *     and everything reconciles automatically.
    */
   const runTransition = useCallback(
-    async (slug: string, errorMsg: string, optimisticNext: DeliveryStatus) => {
+    (slug: string, errorMsg: string, optimisticNext: DeliveryStatus) => {
       if (!delivery || transitioning) return;
       const previousStatus = delivery.status;
       const deliveryId = delivery._id;
+
+      // Optimistic flip + lock — both happen synchronously so the
+      // CTA disables and the status label updates in the same frame.
       setTransitioning(true);
-      // Optimistic flip — local state moves first.
       setDelivery((prev) =>
         prev ? { ...prev, status: optimisticNext } : prev
       );
+      // Release the transitioning lock immediately after the flip so
+      // consecutive CTAs aren't blocked by AsyncStorage / network.
+      // The rollback map still guards against double-tap: each action
+      // gets its own id, and failure reverts by that id.
+      setTransitioning(false);
 
-      try {
-        const queued = await enqueueAction({
-          endpoint: `/api/rider/deliveries/${deliveryId}/${slug}`,
-          method: "PATCH",
-        });
-        // Stash the rollback target so the failure listener (below,
-        // in the parent useEffect) can revert if this action
-        // eventually terminally fails. Removed when the action
-        // drains successfully — but the queue doesn't currently
-        // notify on success, so we rely on `delivery:update` from
-        // the server to clean up: when local status matches
-        // optimistic, the rollback isn't needed.
+      // Enqueue in the background — don't block the render cycle.
+      enqueueAction({
+        endpoint: `/api/rider/deliveries/${deliveryId}/${slug}`,
+        method: "PATCH",
+      }).then((queued) => {
         rollbacksRef.current.set(queued.id, previousStatus);
-        // Note the errorMsg so the failure listener can produce a
-        // contextual toast.
         rollbackErrors.current.set(queued.id, errorMsg);
-      } catch (err: any) {
-        // Enqueue itself failed (AsyncStorage error, etc.) — extremely
-        // rare. Revert + toast immediately.
+      }).catch((err: any) => {
+        // enqueueAction itself failed (AsyncStorage error) — revert.
         setDelivery((prev) =>
           prev ? { ...prev, status: previousStatus } : prev
         );
         toast.error(errorMsg, { description: err?.message ?? "Try again." });
-      } finally {
-        setTransitioning(false);
-      }
+      });
     },
     [delivery, transitioning]
   );

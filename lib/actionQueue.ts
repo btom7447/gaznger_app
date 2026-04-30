@@ -186,10 +186,11 @@ export async function enqueueAction(input: {
     attempts: 0,
   };
   state.entries.push(action);
-  await persist();
+  // Notify + drain immediately — don't block on AsyncStorage write.
+  // persist() runs in parallel; the in-memory queue is authoritative.
   notify();
-  // Try to drain immediately. If offline, drain() bails fast.
   drain();
+  persist().catch(() => {});
   return action;
 }
 
