@@ -18,10 +18,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
-import {
-  CommonActions,
-  getFocusedRouteNameFromRoute,
-} from "@react-navigation/native";
+import { getFocusedRouteNameFromRoute } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { Theme, useTheme } from "@/constants/theme";
@@ -286,12 +283,9 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
 
             // Decide whether to reset the target tab's nested stack
             // back to its index. We do this when the target tab's
-            // own focused child is a terminal screen (Complete /
-            // Receipt) — the user is conceptually "done" with that
-            // flow and should re-enter at the start, not the
-            // wrap-up. Inspect the route's saved state directly
-            // (Expo Router persists each tab's substate even when
-            // the tab isn't focused).
+            // focused child is a terminal screen (Complete / Receipt)
+            // — the user is conceptually "done" with that flow and
+            // should re-enter at the start, not the wrap-up.
             const subState = (route as any).state as
               | {
                   index?: number;
@@ -304,28 +298,25 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
             const targetIsOnTerminal =
               !!targetChild && !!terminals?.has(targetChild);
 
-            // Both branches (re-press while focused, switching in
-            // from another tab) handle terminal-child reset the same
-            // way: dispatch a `reset` directly to the inner stack's
-            // navigator so the next time it's shown, it's parked on
-            // its index. Then issue a navigate so the focused-tab
-            // index updates and the screen actually transitions.
             if (targetIsOnTerminal) {
-              navigation.dispatch({
-                ...CommonActions.reset({
-                  index: 0,
-                  routes: [{ name: "index" }],
-                }),
-                target: route.key,
-              });
+              // Use router.replace targeting the group's index path.
+              // Expo Router's path semantics handle the stack reset
+              // more reliably than navigation.dispatch(CommonActions.reset)
+              // — earlier attempts via dispatch worked for some
+              // navigators but not the (track) Stack inside Tabs.
+              const target =
+                route.name === "(track)"
+                  ? "/(customer)/(track)"
+                  : route.name === "(order)"
+                  ? "/(customer)/(order)"
+                  : null;
+              if (target) {
+                router.replace(target as never);
+                return;
+              }
             }
 
-            if (isFocused) {
-              // Already on this tab — the reset above handles the
-              // inner stack. Nothing else to do.
-              return;
-            }
-
+            if (isFocused) return;
             navigation.navigate(route.name);
           };
 

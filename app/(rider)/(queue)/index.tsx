@@ -17,7 +17,7 @@ import { toast } from "sonner-native";
 import { useTheme } from "@/constants/theme";
 import { useSessionStore } from "@/store/useSessionStore";
 import { api } from "@/lib/api";
-import { getSocket } from "@/lib/socket";
+import { getSocket, useSocketStatus } from "@/lib/socket";
 import { useNotificationStore } from "@/store/useNotificationStore";
 import NotificationButton from "@/components/ui/global/NotificationButton";
 import ProfileButton from "@/components/ui/global/ProfileButton";
@@ -87,6 +87,10 @@ export default function RiderQueue() {
   const [togglingAvail, setTogglingAvail] = useState(false);
   const [offerLoading, setOfferLoading] = useState<"accept" | "reject" | null>(null);
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Re-bind trigger for the socket subscription effect — without
+  // this, the dispatch offer listener never attaches if the rider
+  // app mounts before the socket has connected (common case).
+  const socketStatus = useSocketStatus();
 
   const load = useCallback(async () => {
     try {
@@ -156,7 +160,7 @@ export default function RiderQueue() {
       socket.off("order:update", onOrderUpdate);
       socket.off("notification:new", onNotification);
     };
-  }, [incrementBadge]);
+  }, [incrementBadge, socketStatus]);
 
   // ── Location polling + socket emit ────────────────────────────────────────
   useEffect(() => {

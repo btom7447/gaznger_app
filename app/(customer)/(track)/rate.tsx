@@ -7,6 +7,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
@@ -26,6 +27,7 @@ const NOTE_MAX = 140;
 export default function RateScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   const draft = useOrderStore((s) => s.order);
@@ -255,19 +257,45 @@ export default function RateScreen() {
         </View>
       </View>
 
-      <FloatingCTA
-        label={
-          tip > 0
-            ? `Send rating · ${formatCurrency(tip)} tip`
-            : "Send rating"
-        }
-        disabled={stars === 0}
-        loading={submitting}
-        onPress={handleSubmit}
-        accessibilityHint={
-          stars === 0 ? "Pick at least one star to send." : undefined
-        }
-      />
+      {/* Sticky footer — primary "Send rating" CTA on the bottom,
+          secondary "Tip rider" button above it. The tip is its own
+          decision; folding it into the main CTA's label was confusing
+          (the user thought tipping was the only way to send). */}
+      <View
+        style={[
+          styles.footerStack,
+          { paddingBottom: 16 + insets.bottom },
+        ]}
+        pointerEvents="box-none"
+      >
+        {tip > 0 ? (
+          <Pressable
+            onPress={() => setTip(0)}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${formatCurrency(tip)} tip`}
+            style={({ pressed }) => [
+              styles.tipChipFooter,
+              pressed && { opacity: 0.9 },
+            ]}
+          >
+            <Ionicons name="cash-outline" size={16} color={theme.primary} />
+            <Text style={styles.tipChipFooterText}>
+              Tipping {riderName.split(/\s+/)[0]} {formatCurrency(tip)}
+            </Text>
+            <Ionicons name="close" size={14} color={theme.fgMuted} />
+          </Pressable>
+        ) : null}
+        <FloatingCTA
+          label="Send rating"
+          disabled={stars === 0}
+          loading={submitting}
+          onPress={handleSubmit}
+          floating={false}
+          accessibilityHint={
+            stars === 0 ? "Pick at least one star to send." : undefined
+          }
+        />
+      </View>
     </ScreenContainer>
   );
 }
@@ -389,5 +417,30 @@ const makeStyles = (theme: Theme) =>
       minHeight: 64,
       textAlignVertical: "top",
       padding: 0,
+    },
+    footerStack: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      gap: 8,
+      paddingHorizontal: theme.space.s4,
+    },
+    tipChipFooter: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      alignSelf: "center",
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: theme.radius.pill,
+      backgroundColor: theme.primaryTint,
+      borderWidth: 1,
+      borderColor: theme.palette.green200,
+    },
+    tipChipFooterText: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: theme.fg,
     },
   });

@@ -18,7 +18,7 @@ import * as Location from "expo-location";
 import { toast } from "sonner-native";
 import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
-import { getSocket, subscribeReconnect } from "@/lib/socket";
+import { getSocket, subscribeReconnect, useSocketStatus } from "@/lib/socket";
 import SocketStrip from "@/components/ui/global/SocketStrip";
 import {
   enqueueAction,
@@ -102,6 +102,12 @@ export default function RiderTrackScreen() {
   const [dropReason, setDropReason] = useState("");
   const [dropping, setDropping] = useState(false);
 
+  // Re-bind trigger for the socket subscriptions below — see same
+  // pattern in customer Track. Without this dep, the effect runs
+  // once with a null socket on first mount and never re-binds when
+  // the socket eventually connects.
+  const socketStatus = useSocketStatus();
+
   // Tab bar clearance: pill (42px) + buffer
   const tabBarClearance = Math.max(insets.bottom, 16) + 58;
 
@@ -141,7 +147,7 @@ export default function RiderTrackScreen() {
     };
     socket.on("delivery:update", onDeliveryUpdate);
     return () => { socket.off("delivery:update", onDeliveryUpdate); };
-  }, []);
+  }, [socketStatus]);
 
   // Socket: order-level updates (customer confirms → delivered, or cancelled)
   useEffect(() => {
@@ -156,7 +162,7 @@ export default function RiderTrackScreen() {
     };
     socket.on("order:update", onOrderUpdate);
     return () => { socket.off("order:update", onOrderUpdate); };
-  }, []);
+  }, [socketStatus]);
 
   // Phase 3: socket-first — the customer's /confirm-delivery emits
   // order:update with status=delivered, and the listener above
@@ -441,8 +447,12 @@ export default function RiderTrackScreen() {
   const stationLoc = (rawStationLoc?.lat && rawStationLoc?.lng) ? rawStationLoc : null;
   const deliveryLat = delivery.order.deliveryAddress.latitude;
   const deliveryLng = delivery.order.deliveryAddress.longitude;
+  // Reject 0/0 the same way the station check does — Address model
+  // defaults both fields to 0, so a strict null check passes for
+  // unpopulated addresses and renders a marker in the middle of the
+  // ocean. Truthy check filters the default sentinel.
   const deliveryLoc =
-    deliveryLat != null && deliveryLng != null
+    deliveryLat && deliveryLng
       ? { lat: deliveryLat, lng: deliveryLng }
       : null;
 

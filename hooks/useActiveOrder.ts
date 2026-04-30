@@ -117,14 +117,21 @@ export function useActiveOrder() {
     if (!socket) return;
 
     const onOrderUpdate = (data: {
-      orderId?: string;
+      orderId?: string | { toString(): string };
       status?: string;
     }) => {
       if (!data.status) return;
+      // Server emits `orderId` as a Mongo ObjectId; coerce to string
+      // before comparing with cached._id which is always a string.
+      // Without this, the comparison was always false, the terminal
+      // branch never fired, and the tab-bar tracking dot lingered
+      // forever after order completion (the J2 bug).
+      const incomingId =
+        data.orderId == null ? undefined : String(data.orderId);
       const cached = latestRef.current;
       // Status flipped to terminal — clear cache.
       if (!isActiveOrder(data.status)) {
-        if (cached && data.orderId && cached._id === data.orderId) {
+        if (cached && incomingId && cached._id === incomingId) {
           latestRef.current = null;
           setActiveOrder(null);
           setHasActiveOrder(false);
@@ -132,7 +139,7 @@ export function useActiveOrder() {
         return;
       }
       // Status active. If we already track this order, patch status.
-      if (cached && data.orderId && cached._id === data.orderId) {
+      if (cached && incomingId && cached._id === incomingId) {
         const next = { ...cached, status: data.status };
         latestRef.current = next;
         setActiveOrder(next);
@@ -141,7 +148,7 @@ export function useActiveOrder() {
       }
       // Active order we don't yet know about — fetch fresh to populate
       // the full shape (money fields, station, etc.).
-      if (data.orderId) {
+      if (incomingId) {
         check();
       }
     };

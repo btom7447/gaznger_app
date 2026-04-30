@@ -15,7 +15,7 @@ import { toast } from "sonner-native";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
 import { useActiveOrder } from "@/hooks/useActiveOrder";
-import { getSocket } from "@/lib/socket";
+import { getSocket, useSocketStatus } from "@/lib/socket";
 import { api } from "@/lib/api";
 import {
   FloatingCTA,
@@ -64,6 +64,7 @@ export default function ArrivalScreen() {
   // exactly once when `dispensing` arrives. We seed from `arrived`
   // (the screen's entry condition) and listen for order:update.
   const [serverStatus, setServerStatus] = useState<string>("arrived");
+  const socketStatus = useSocketStatus();
 
   useEffect(() => {
     const socket = getSocket();
@@ -76,7 +77,9 @@ export default function ArrivalScreen() {
     return () => {
       socket.off("order:update", handler);
     };
-  }, [effectiveOrderId]);
+    // socketStatus dep — re-binds the listener when the socket flips
+    // to live, so this screen doesn't miss its first attach.
+  }, [effectiveOrderId, socketStatus]);
 
   useEffect(() => {
     if (serverStatus !== "dispensing") return;

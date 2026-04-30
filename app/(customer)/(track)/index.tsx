@@ -8,7 +8,7 @@ import { useRouter } from "expo-router";
 import { Theme, useTheme } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
 import { useActiveOrder } from "@/hooks/useActiveOrder";
-import { getSocket, subscribeReconnect } from "@/lib/socket";
+import { getSocket, subscribeReconnect, useSocketStatus } from "@/lib/socket";
 import { api } from "@/lib/api";
 import {
   LiveBadge,
@@ -63,6 +63,11 @@ interface ServerOrder {
     shortName?: string;
     location?: { lat: number; lng: number };
   } | null;
+  /** Populated delivery address — read for the destination map pin. */
+  deliveryAddress?: {
+    latitude?: number;
+    longitude?: number;
+  } | null;
 }
 
 // Polyline is pushed via the `route:update` socket event in Phase 3.
@@ -85,6 +90,14 @@ export default function TrackScreen() {
     (s) => s.setDeliveryConfirmation
   );
   const setWeighIn = useOrderStore((s) => s.setWeighIn);
+
+  // Socket status — used as a re-bind trigger for the socket
+  // subscription effect below. Critical: getSocket() returns null
+  // until the socket connects, so without this dep the effect runs
+  // once with a null socket on first mount, bails, and never re-runs.
+  // That was the root cause of "events aren't arriving" — every
+  // screen with a socket listener missed its first attach.
+  const socketStatus = useSocketStatus();
 
   /**
    * Server-side active-order check. The local `draft` may be empty
@@ -133,16 +146,31 @@ export default function TrackScreen() {
   const [routePolyline, setRoutePolyline] = useState<
     { latitude: number; longitude: number }[]
   >([]);
+  // Server-provided delivery coords (populated by refreshOrderState
+  // from the order doc's deliveryAddress). Falls back to the local
+  // draft's deliveryCoords when reaching Track from a hot order
+  // flow. Without this, customers reaching Track via the tab after
+  // an app restart see a default Lagos pin instead of their actual
+  // delivery address.
+  const [serverDeliveryCoord, setServerDeliveryCoord] = useState<
+    { latitude: number; longitude: number } | null
+  >(null);
   const mapRef = useRef<MapView>(null);
   const sheetRef = useRef<BottomSheet>(null);
 
-  const destinationCoord = useMemo(
-    () => ({
-      latitude: draft.deliveryCoords?.lat ?? 6.5244,
-      longitude: draft.deliveryCoords?.lng ?? 3.3792,
-    }),
-    [draft.deliveryCoords]
-  );
+  const destinationCoord = useMemo(() => {
+    if (serverDeliveryCoord) return serverDeliveryCoord;
+    if (draft.deliveryCoords?.lat && draft.deliveryCoords?.lng) {
+      return {
+        latitude: draft.deliveryCoords.lat,
+        longitude: draft.deliveryCoords.lng,
+      };
+    }
+    // Last-resort fallback (Lagos) — only hit when the user reached
+    // Track without a hot draft AND the server fetch hasn't returned
+    // yet. The map will re-center as soon as the data lands.
+    return { latitude: 6.5244, longitude: 3.3792 };
+  }, [serverDeliveryCoord, draft.deliveryCoords]);
 
   /* ───────────────── Initial fetch + reconnect catch-up ─────────────────
    * Pull the order doc on mount so we have the rider profile + actual
@@ -196,6 +224,18 @@ export default function TrackScreen() {
             longitude: order.station.location.lng,
           },
           brand: brand || "FU",
+        });
+      }
+      // Populate the delivery destination from the server when
+      // available — covers the "user reached Track via tab without
+      // a hot draft" case.
+      if (
+        order.deliveryAddress?.latitude &&
+        order.deliveryAddress?.longitude
+      ) {
+        setServerDeliveryCoord({
+          latitude: order.deliveryAddress.latitude,
+          longitude: order.deliveryAddress.longitude,
         });
       }
     } catch {
@@ -293,7 +333,11 @@ export default function TrackScreen() {
       socket.off("rider:location", onLocation);
       socket.off("route:update", onRouteUpdate);
     };
-  }, [effectiveOrderId]);
+    // socketStatus is a re-bind trigger — when the socket flips from
+    // disconnected → live, this effect re-runs and attaches listeners
+    // to the freshly-connected socket instance. Without it, screens
+    // mounted before the socket connects never bind their listeners.
+  }, [effectiveOrderId, socketStatus]);
 
   /**
    * "Heading back" loader trigger. When the rider confirms heading
