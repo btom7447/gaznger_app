@@ -18,7 +18,8 @@ import * as Location from "expo-location";
 import { toast } from "sonner-native";
 import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
-import { getSocket } from "@/lib/socket";
+import { getSocket, subscribeReconnect } from "@/lib/socket";
+import SocketStrip from "@/components/ui/global/SocketStrip";
 import MapSkeleton from "@/components/ui/skeletons/MapSkeleton";
 import Avatar from "@/components/ui/global/Avatar";
 import BackButton from "@/components/ui/global/BackButton";
@@ -113,6 +114,12 @@ export default function RiderTrackScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Reconnect catch-up — when the socket comes back live after a
+  // drop, re-pull the active delivery so any state changes that
+  // happened while offline (customer confirmed delivered, admin
+  // cancelled, etc.) land instantly.
+  useEffect(() => subscribeReconnect(load), [load]);
 
   // Socket: delivery status updates sent directly to rider (pickup, complete)
   useEffect(() => {
@@ -436,6 +443,22 @@ export default function RiderTrackScreen() {
           <NotificationButton onPress={() => router.push("/(screens)/notification" as any)} />
           <ProfileButton onPress={() => router.push("/(rider)/(queue)/profile" as any)} size={36} />
         </View>
+      </View>
+
+      {/* Connection state strip — sits between the floating header
+          and the bottom panel so it's visible without obscuring map
+          interactions. Self-hides when status === "live". */}
+      <View
+        style={{
+          position: "absolute",
+          top: insets.top + 56,
+          left: 0,
+          right: 0,
+          alignItems: "center",
+        }}
+        pointerEvents="box-none"
+      >
+        <SocketStrip />
       </View>
 
       {/* BOTTOM PANEL */}

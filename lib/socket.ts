@@ -9,6 +9,25 @@ let socket: Socket | null = null;
 export type SocketStatus = "live" | "reconnecting" | "offline";
 
 /**
+ * Reconnect listeners — fired exactly once each time the socket
+ * goes live AFTER a previous disconnect (not on the first connect).
+ *
+ * Phase 2 use case: hooks like `useOrderState` register a callback
+ * that does a single `GET /api/orders/:id` to catch up on any
+ * `order:update` events that fired while the socket was down.
+ */
+type ReconnectListener = () => void;
+const reconnectListeners = new Set<ReconnectListener>();
+let hasConnectedBefore = false;
+
+export function subscribeReconnect(listener: ReconnectListener): () => void {
+  reconnectListeners.add(listener);
+  return () => {
+    reconnectListeners.delete(listener);
+  };
+}
+
+/**
  * Lightweight pub/sub for socket status — survives module reload, lives outside
  * React. The LiveBadge subscribes via `useSocketStatus()`.
  */
@@ -93,6 +112,22 @@ export function connectSocket(token?: string | null): Socket | null {
     console.log("[Socket] connected:", socket?.id);
     clearOfflineTimer();
     setStatus("live");
+
+    // Fire reconnect listeners on every connect AFTER the first.
+    // The first connect is just initial bootstrap — there's nothing
+    // to "catch up on" because the screen subscriber is itself
+    // about to fetch initial state. On subsequent connects (i.e. a
+    // reconnect after a drop), listeners catch up missed events.
+    if (hasConnectedBefore) {
+      reconnectListeners.forEach((l) => {
+        try {
+          l();
+        } catch {
+          // listener errors must not break socket flow
+        }
+      });
+    }
+    hasConnectedBefore = true;
   });
 
   socket.on("reconnect_attempt", () => {
@@ -122,6 +157,8 @@ export function disconnectSocket(): void {
   }
   clearOfflineTimer();
   setStatus("offline");
+  hasConnectedBefore = false;
+  reconnectListeners.clear();
 }
 
 /** Get the current socket instance (null if not connected). */

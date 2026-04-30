@@ -8,13 +8,14 @@ import { useRouter } from "expo-router";
 import { Theme, useTheme } from "@/constants/theme";
 import { useOrderStore } from "@/store/useOrderStore";
 import { useActiveOrder } from "@/hooks/useActiveOrder";
-import { getSocket } from "@/lib/socket";
+import { getSocket, subscribeReconnect } from "@/lib/socket";
 import { api } from "@/lib/api";
 import {
   LiveBadge,
   MapMarkerRider,
   OfflineStrip,
 } from "@/components/ui/primitives";
+import SocketStrip from "@/components/ui/global/SocketStrip";
 import {
   getStatusLabel,
   getTrackPhase,
@@ -137,68 +138,80 @@ export default function TrackScreen() {
     [draft.deliveryCoords]
   );
 
-  /* ───────────────── Initial fetch ─────────────────
-   * Pull the order doc once so we have the rider profile + actual
-   * server status before any socket events arrive. Without this the
-   * sheet would sit on its default `assigning` state until the first
-   * push lands.
+  /* ───────────────── Initial fetch + reconnect catch-up ─────────────────
+   * Pull the order doc on mount so we have the rider profile + actual
+   * server status before any socket events arrive. ALSO re-fetch on
+   * every socket reconnect — events emitted while we were offline
+   * are gone forever, so a single GET catches us up.
+   *
+   * The fetch is idempotent on the local state machine: it only
+   * `setServerStatus` if the value changed, so re-fetching after
+   * each reconnect doesn't cause cascading re-renders.
    */
-  useEffect(() => {
+  const refreshOrderState = useCallback(async () => {
     if (!effectiveOrderId) return;
-    let cancelled = false;
-    api
-      .get<ServerOrder>(`/api/orders/${effectiveOrderId}`, { timeoutMs: 10_000 })
-      .then((order) => {
-        if (cancelled) return;
-        if (order.status) setServerStatus(order.status);
-        if (typeof order.eta === "number") setEta(order.eta);
-        if (order.riderId) {
-          const r = order.riderId;
-          const display = r.displayName ?? "Your rider";
-          const [first, ...rest] = display.split(/\s+/);
-          const riderInfo: RiderInfo = {
-            firstName: first ?? "Rider",
-            lastName: rest.join(" "),
-            plate: order.riderProfile?.plate,
-            rating: order.riderProfile?.rating,
-            phone: r.phone,
-            profileImage: r.profileImage,
-            initials: display
-              .split(/\s+/)
-              .map((p) => p.charAt(0))
-              .join("")
-              .slice(0, 2)
-              .toUpperCase(),
-          };
-          setRider(riderInfo);
-          setRiderInStore(riderInfo);
-        }
-        // Capture station coords + 2-letter brand monogram for the
-        // map's pickup pin. We pull from `shortName` when available
-        // ("NNPC Berger" → "NN") since the design uses brand letters,
-        // not full names.
-        if (order.station?.location) {
-          const source = order.station.shortName ?? order.station.name ?? "";
-          const brand = source
-            .replace(/[^A-Za-z0-9]/g, "")
+    try {
+      const order = await api.get<ServerOrder>(
+        `/api/orders/${effectiveOrderId}`,
+        { timeoutMs: 10_000 }
+      );
+      if (order.status) setServerStatus(order.status);
+      if (typeof order.eta === "number") setEta(order.eta);
+      if (order.riderId) {
+        const r = order.riderId;
+        const display = r.displayName ?? "Your rider";
+        const [first, ...rest] = display.split(/\s+/);
+        const riderInfo: RiderInfo = {
+          firstName: first ?? "Rider",
+          lastName: rest.join(" "),
+          plate: order.riderProfile?.plate,
+          rating: order.riderProfile?.rating,
+          phone: r.phone,
+          profileImage: r.profileImage,
+          initials: display
+            .split(/\s+/)
+            .map((p) => p.charAt(0))
+            .join("")
             .slice(0, 2)
-            .toUpperCase();
-          setStation({
-            coord: {
-              latitude: order.station.location.lat,
-              longitude: order.station.location.lng,
-            },
-            brand: brand || "FU",
-          });
-        }
-      })
-      .catch(() => {
-        // Non-fatal — socket events will fill us in.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [effectiveOrderId]);
+            .toUpperCase(),
+        };
+        setRider(riderInfo);
+        setRiderInStore(riderInfo);
+      }
+      if (order.station?.location) {
+        const source = order.station.shortName ?? order.station.name ?? "";
+        const brand = source
+          .replace(/[^A-Za-z0-9]/g, "")
+          .slice(0, 2)
+          .toUpperCase();
+        setStation({
+          coord: {
+            latitude: order.station.location.lat,
+            longitude: order.station.location.lng,
+          },
+          brand: brand || "FU",
+        });
+      }
+    } catch {
+      // Non-fatal — socket events will fill us in.
+    }
+  }, [effectiveOrderId, setRiderInStore]);
+
+  // Initial fetch on mount + on any orderId change.
+  useEffect(() => {
+    refreshOrderState();
+  }, [refreshOrderState]);
+
+  // Reconnect catch-up — every time the socket comes back live after
+  // a drop, re-fetch in case order:update events fired while we were
+  // disconnected. The server's per-delivery room model relies on this:
+  // once both sides drop and rejoin, neither has the events that
+  // fired in between. The single GET papers over that gap.
+  useEffect(() => {
+    return subscribeReconnect(() => {
+      refreshOrderState();
+    });
+  }, [refreshOrderState]);
 
   /* ───────────────── Socket subscriptions ───────────────── */
   useEffect(() => {
@@ -614,14 +627,16 @@ export default function TrackScreen() {
         </Marker>
       </MapView>
 
-      {/* Offline / reconnecting strip — slides in across the top when
-          NetInfo reports offline > ~1s. Renders BELOW the safe-area inset
-          so it doesn't collide with the status bar. */}
+      {/* Connection strips — NetInfo first (no internet), then
+          SocketStrip (internet but socket unhealthy). They surface
+          different failure modes; usually only one fires at a time
+          but both are valid signals to the user. */}
       <View
         style={[styles.offlineWrap, { top: insets.top + 8 }]}
         pointerEvents="box-none"
       >
         <OfflineStrip />
+        <SocketStrip />
       </View>
 
       {/* Top overlay — back, live badge, recenter. The back button
