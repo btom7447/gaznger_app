@@ -79,6 +79,65 @@ export function subscribeActionQueue(listener: QueueListener): () => void {
   };
 }
 
+/**
+ * Terminal-failure subscribers fire when an action exhausts its
+ * retry budget (MAX_ATTEMPTS) and the queue halts at that entry.
+ * Callers use this to surface a recovery UI ("sync failed, retry?")
+ * — the action is still in the queue at the head; calling
+ * `retryHeadOfQueue()` reschedules it.
+ */
+type FailureListener = (action: QueuedAction) => void;
+const failureListeners = new Set<FailureListener>();
+
+export function subscribeActionFailure(
+  listener: FailureListener
+): () => void {
+  failureListeners.add(listener);
+  return () => {
+    failureListeners.delete(listener);
+  };
+}
+
+function notifyFailure(action: QueuedAction): void {
+  failureListeners.forEach((l) => {
+    try {
+      l(action);
+    } catch {
+      // listener errors must not break queue flow
+    }
+  });
+}
+
+/**
+ * Manually retry the head of the queue. Resets attempts and kicks
+ * a drain. Called from the recovery UI when the user taps "Retry."
+ * No-op if the queue is empty.
+ */
+export async function retryHeadOfQueue(): Promise<void> {
+  await hydrate();
+  const head = state.entries[0];
+  if (!head) return;
+  head.attempts = 0;
+  await persist();
+  notify();
+  drain();
+}
+
+/**
+ * Drop the head of the queue (give up). Called from the recovery UI
+ * when the user decides the queued action is stale and shouldn't
+ * be replayed. Returns the dropped action so the caller can react
+ * (e.g. revert local optimistic state).
+ */
+export async function dropHeadOfQueue(): Promise<QueuedAction | null> {
+  await hydrate();
+  const head = state.entries.shift();
+  if (!head) return null;
+  await persist();
+  notify();
+  return head;
+}
+
 async function persist() {
   try {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state.entries));
@@ -182,12 +241,12 @@ export async function drain(): Promise<void> {
     }
 
     // Failure path. If we've blown past MAX_ATTEMPTS, halt the queue
-    // and surface to the user (callers should subscribe to render a
-    // "sync failed" UI).
+    // and surface to the user. Persist the failed-but-still-queued
+    // entry so it survives an app kill; the recovery UI calls
+    // `retryHeadOfQueue()` or `dropHeadOfQueue()` to resolve.
     if (action.attempts >= MAX_ATTEMPTS) {
-      // Stop draining; leave the entry at the head of the queue so
-      // the user can see + manually retry. Future improvement:
-      // expose a `retry(actionId)` API.
+      await persist();
+      notifyFailure(action);
       break;
     }
     // Schedule the next retry with backoff. Use the action's attempt
@@ -235,4 +294,19 @@ export function initActionQueue(): void {
  */
 export function getQueueLength(): number {
   return state.entries.length;
+}
+
+/** Read the current entries (frozen snapshot, not the live array). */
+export function getQueueEntries(): QueuedAction[] {
+  return state.entries.slice();
+}
+
+/**
+ * Returns true when the head entry has exhausted its retry budget
+ * and the queue is halted waiting on the recovery UI. Useful for
+ * the "sync failed" badge.
+ */
+export function isQueueHalted(): boolean {
+  const head = state.entries[0];
+  return !!head && head.attempts >= MAX_ATTEMPTS;
 }

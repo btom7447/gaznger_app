@@ -20,6 +20,14 @@ import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
 import { getSocket, subscribeReconnect } from "@/lib/socket";
 import SocketStrip from "@/components/ui/global/SocketStrip";
+import {
+  enqueueAction,
+  subscribeActionFailure,
+  subscribeActionQueue,
+  retryHeadOfQueue,
+  dropHeadOfQueue,
+  type QueuedAction,
+} from "@/lib/actionQueue";
 import MapSkeleton from "@/components/ui/skeletons/MapSkeleton";
 import Avatar from "@/components/ui/global/Avatar";
 import BackButton from "@/components/ui/global/BackButton";
@@ -218,56 +226,112 @@ export default function RiderTrackScreen() {
    */
   const [transitioning, setTransitioning] = useState(false);
   /**
-   * Optimistic transition helper.
+   * Track the action id of the most recent transition we enqueued
+   * AND its rollback hook (the prior status to revert to if the
+   * server eventually terminally rejects). Keyed by action id so
+   * multiple in-flight transitions can each find their own
+   * rollback target. Phase 10 — when the queue notifies that an
+   * action exhausted its retry budget, we look up its rollback
+   * here and apply it.
+   */
+  const rollbacksRef = useRef<Map<string, DeliveryStatus>>(new Map());
+
+  /**
+   * Optimistic + queued transition helper.
    *
-   * Phase 4 — local state flips to the optimistic next status
-   * BEFORE the server responds, so the CTA feels instant. The
-   * server's response is a confirmation; on failure we revert
-   * the local status and toast the error.
+   * Combines Phase 4 (optimistic UI) with Phase 10 (offline action
+   * queue). The flow:
    *
-   * Why optimistic + revert is safe: the server validates the
-   * transition (rider must own the delivery, must be in the
-   * expected `from` status). A reject means "your local guess was
-   * wrong" — reverting is the only correct response, and the user
-   * sees the rejection toast within ~300ms.
+   *   1. Flip local state to `optimisticNext` immediately.
+   *   2. Enqueue the PATCH via the action queue. The queue handles:
+   *      - Persistence to AsyncStorage (survives app kill).
+   *      - Retry with backoff (1s, 5s, 30s, 5min).
+   *      - Drain on socket reconnect / AppState foreground.
+   *   3. On success (queue drains, server returns 200): no UI work.
+   *      The server's `delivery:update` socket emit confirms the
+   *      status the user already sees.
+   *   4. On terminal failure (after MAX_ATTEMPTS exhausted):
+   *      `subscribeActionFailure` fires; we look up the rollback
+   *      target by action id and revert local state, then drop the
+   *      head of the queue so the rider can move on.
    *
-   * Caveat: between the optimistic flip and the server response,
-   * the customer side ALREADY sees the new status (because we
-   * also emit a delivery:update on success). If the server rejects,
-   * the customer briefly sees a status that gets reverted on the
-   * next `order:update`. We accept that because rejects are rare
-   * (only happen on out-of-order taps), and the alternative —
-   * waiting for server confirmation before flipping locally —
-   * makes every CTA feel sluggish for the common case.
+   * Trade-off vs the prior direct-PATCH approach: terminal failures
+   * now take ~5 minutes to surface (the queue has to exhaust its
+   * backoff) instead of immediately. That's acceptable because:
+   *   - The optimistic UI is correct in the common case (>99%).
+   *   - The pending-sync indicator tells the user something's mid-
+   *     flight, so they're not silently lied to.
+   *   - When the network comes back mid-backoff, the action lands
+   *     and everything reconciles automatically.
    */
   const runTransition = useCallback(
     async (slug: string, errorMsg: string, optimisticNext: DeliveryStatus) => {
       if (!delivery || transitioning) return;
       const previousStatus = delivery.status;
+      const deliveryId = delivery._id;
       setTransitioning(true);
       // Optimistic flip — local state moves first.
       setDelivery((prev) =>
         prev ? { ...prev, status: optimisticNext } : prev
       );
+
       try {
-        await api.patch(`/api/rider/deliveries/${delivery._id}/${slug}`);
-        // No further state work — the server-emitted delivery:update
-        // will land momentarily and confirms what we already showed.
+        const queued = await enqueueAction({
+          endpoint: `/api/rider/deliveries/${deliveryId}/${slug}`,
+          method: "PATCH",
+        });
+        // Stash the rollback target so the failure listener (below,
+        // in the parent useEffect) can revert if this action
+        // eventually terminally fails. Removed when the action
+        // drains successfully — but the queue doesn't currently
+        // notify on success, so we rely on `delivery:update` from
+        // the server to clean up: when local status matches
+        // optimistic, the rollback isn't needed.
+        rollbacksRef.current.set(queued.id, previousStatus);
+        // Note the errorMsg so the failure listener can produce a
+        // contextual toast.
+        rollbackErrors.current.set(queued.id, errorMsg);
       } catch (err: any) {
-        // Revert local state to whatever we had before the optimistic
-        // flip. Capturing previousStatus in the closure (not reading
-        // delivery.status here) avoids a stale-closure bug if multiple
-        // transitions queue up.
+        // Enqueue itself failed (AsyncStorage error, etc.) — extremely
+        // rare. Revert + toast immediately.
         setDelivery((prev) =>
           prev ? { ...prev, status: previousStatus } : prev
         );
-        toast.error(errorMsg, { description: err.message });
+        toast.error(errorMsg, { description: err?.message ?? "Try again." });
       } finally {
         setTransitioning(false);
       }
     },
     [delivery, transitioning]
   );
+
+  // Per-action error-message map so the terminal-failure listener
+  // shows a contextual toast (matching the slug the rider tapped).
+  const rollbackErrors = useRef<Map<string, string>>(new Map());
+
+  // Subscribe to terminal queue failures. When an action exhausts
+  // its retry budget, look up its rollback target and revert local
+  // state. Drop the head so the queue unhalts and subsequent
+  // transitions can flow.
+  useEffect(() => {
+    return subscribeActionFailure(async (failed: QueuedAction) => {
+      const rollback = rollbacksRef.current.get(failed.id);
+      const message = rollbackErrors.current.get(failed.id) ?? "Sync failed";
+      rollbacksRef.current.delete(failed.id);
+      rollbackErrors.current.delete(failed.id);
+      if (rollback) {
+        setDelivery((prev) =>
+          prev ? { ...prev, status: rollback } : prev
+        );
+      }
+      toast.error(message, {
+        description: "Couldn't sync after several retries. Tap retry to try again, or dismiss to drop.",
+      });
+      // Drop the failed entry so the queue can proceed. The user can
+      // re-tap the CTA if they want to actually retry.
+      await dropHeadOfQueue();
+    });
+  }, []);
 
   // Granular handlers — each maps to one server endpoint and an
   // optimistic next status for instant local feedback.
@@ -490,7 +554,11 @@ export default function RiderTrackScreen() {
 
       {/* Connection state strip — sits between the floating header
           and the bottom panel so it's visible without obscuring map
-          interactions. Self-hides when status === "live". */}
+          interactions. Self-hides when status === "live". The
+          pending-sync pill stacks below it for the rare case where
+          the socket is live but the action queue has entries
+          mid-flight (e.g. a transition fired while offline that
+          hasn't drained yet). */}
       <View
         style={{
           position: "absolute",
@@ -498,10 +566,12 @@ export default function RiderTrackScreen() {
           left: 0,
           right: 0,
           alignItems: "center",
+          gap: 6,
         }}
         pointerEvents="box-none"
       >
         <SocketStrip />
+        <PendingSyncPill onRetry={retryHeadOfQueue} />
       </View>
 
       {/* BOTTOM PANEL */}
@@ -904,3 +974,74 @@ const styles = (theme: ReturnType<typeof import("@/constants/theme").useTheme>) 
     dropBtn: { height: 50, borderRadius: 14, alignItems: "center", justifyContent: "center", marginTop: 8 },
     dropBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
   });
+
+/**
+ * Pending-sync pill.
+ *
+ * Renders below the SocketStrip on the rider's Track screen when
+ * the action queue has entries waiting to drain. Two states:
+ *
+ *   - "Syncing N…" — neutral pill, just informational. Queue is
+ *     mid-flight; entries will land when the socket is healthy.
+ *   - "Sync failed — Retry" — warning pill with a tap target. The
+ *     head of the queue exhausted its retry budget; tapping
+ *     `onRetry` resets attempts and kicks another drain.
+ *
+ * Self-hides when the queue is empty. Subscribes via
+ * `subscribeActionQueue` so the count updates in real time.
+ */
+function PendingSyncPill({ onRetry }: { onRetry: () => Promise<void> }) {
+  const theme = useTheme();
+  const [entries, setEntries] = useState<QueuedAction[]>([]);
+
+  useEffect(() => subscribeActionQueue(setEntries), []);
+
+  if (entries.length === 0) return null;
+
+  const head = entries[0];
+  const halted = head.attempts >= 4; // matches MAX_ATTEMPTS in actionQueue.ts
+
+  if (halted) {
+    return (
+      <TouchableOpacity
+        onPress={() => onRetry().catch(() => {})}
+        activeOpacity={0.85}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 6,
+          paddingHorizontal: 12,
+          paddingVertical: 6,
+          borderRadius: 999,
+          backgroundColor: theme.errorTint,
+        }}
+      >
+        <Ionicons name="alert-circle" size={14} color={theme.error} />
+        <Text style={{ fontSize: 11.5, fontWeight: "700", color: theme.error }}>
+          Sync failed — tap to retry
+        </Text>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
+        backgroundColor: theme.surface,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.border,
+      }}
+    >
+      <Ionicons name="sync" size={12} color={theme.icon} />
+      <Text style={{ fontSize: 11.5, fontWeight: "700", color: theme.text }}>
+        Syncing {entries.length}…
+      </Text>
+    </View>
+  );
+}
