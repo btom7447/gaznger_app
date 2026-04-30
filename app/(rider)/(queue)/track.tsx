@@ -217,18 +217,50 @@ export default function RiderTrackScreen() {
    * and lands within ~100ms.
    */
   const [transitioning, setTransitioning] = useState(false);
+  /**
+   * Optimistic transition helper.
+   *
+   * Phase 4 — local state flips to the optimistic next status
+   * BEFORE the server responds, so the CTA feels instant. The
+   * server's response is a confirmation; on failure we revert
+   * the local status and toast the error.
+   *
+   * Why optimistic + revert is safe: the server validates the
+   * transition (rider must own the delivery, must be in the
+   * expected `from` status). A reject means "your local guess was
+   * wrong" — reverting is the only correct response, and the user
+   * sees the rejection toast within ~300ms.
+   *
+   * Caveat: between the optimistic flip and the server response,
+   * the customer side ALREADY sees the new status (because we
+   * also emit a delivery:update on success). If the server rejects,
+   * the customer briefly sees a status that gets reverted on the
+   * next `order:update`. We accept that because rejects are rare
+   * (only happen on out-of-order taps), and the alternative —
+   * waiting for server confirmation before flipping locally —
+   * makes every CTA feel sluggish for the common case.
+   */
   const runTransition = useCallback(
-    async (slug: string, errorMsg: string) => {
+    async (slug: string, errorMsg: string, optimisticNext: DeliveryStatus) => {
       if (!delivery || transitioning) return;
+      const previousStatus = delivery.status;
       setTransitioning(true);
+      // Optimistic flip — local state moves first.
+      setDelivery((prev) =>
+        prev ? { ...prev, status: optimisticNext } : prev
+      );
       try {
-        // Phase 3 — drop the post-transition `load()` GET. The
-        // server emits `delivery:update` to the rider's user room
-        // on every successful transition; the listener on this
-        // screen patches local state immediately. One less round-
-        // trip per CTA tap.
         await api.patch(`/api/rider/deliveries/${delivery._id}/${slug}`);
+        // No further state work — the server-emitted delivery:update
+        // will land momentarily and confirms what we already showed.
       } catch (err: any) {
+        // Revert local state to whatever we had before the optimistic
+        // flip. Capturing previousStatus in the closure (not reading
+        // delivery.status here) avoids a stale-closure bug if multiple
+        // transitions queue up.
+        setDelivery((prev) =>
+          prev ? { ...prev, status: previousStatus } : prev
+        );
         toast.error(errorMsg, { description: err.message });
       } finally {
         setTransitioning(false);
@@ -237,29 +269,30 @@ export default function RiderTrackScreen() {
     [delivery, transitioning]
   );
 
-  // Granular handlers — each maps to one server endpoint.
+  // Granular handlers — each maps to one server endpoint and an
+  // optimistic next status for instant local feedback.
   const handleAtPlant = useCallback(
-    () => runTransition("at-plant", "Couldn't mark at plant"),
+    () => runTransition("at-plant", "Couldn't mark at plant", "at_plant"),
     [runTransition]
   );
   const handleRefilling = useCallback(
-    () => runTransition("refilling", "Couldn't start refilling"),
+    () => runTransition("refilling", "Couldn't start refilling", "refilling"),
     [runTransition]
   );
   const handleHeadingBack = useCallback(
-    () => runTransition("heading-back", "Couldn't mark heading back"),
+    () => runTransition("heading-back", "Couldn't mark heading back", "returning"),
     [runTransition]
   );
   const handleArrived = useCallback(
-    () => runTransition("arrived", "Couldn't mark arrived"),
+    () => runTransition("arrived", "Couldn't mark arrived", "arrived"),
     [runTransition]
   );
   const handleDispensing = useCallback(
-    () => runTransition("dispensing", "Couldn't start dispensing"),
+    () => runTransition("dispensing", "Couldn't start dispensing", "dispensing"),
     [runTransition]
   );
   const handleFinalise = useCallback(
-    () => runTransition("finalise", "Couldn't finalise delivery"),
+    () => runTransition("finalise", "Couldn't finalise delivery", "awaiting_confirmation"),
     [runTransition]
   );
 
