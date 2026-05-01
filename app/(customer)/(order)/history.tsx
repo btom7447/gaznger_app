@@ -433,7 +433,6 @@ function OrderCard({
           name="chevron-forward"
           size={14}
           color={theme.fgMuted}
-          style={{ marginTop: 4 }}
         />
       </View>
     </Pressable>
@@ -482,7 +481,7 @@ const cardStyles = (theme: Theme) =>
   StyleSheet.create({
     card: {
       flexDirection: "row",
-      alignItems: "flex-start",
+      alignItems: "center",
       gap: 12,
       padding: 14,
       backgroundColor: theme.surface,
@@ -500,16 +499,18 @@ const cardStyles = (theme: Theme) =>
       justifyContent: "center",
       flexShrink: 0,
     },
-    body: { flex: 1, minWidth: 0, gap: 4 },
+    body: { flex: 1, minWidth: 0, gap: 3 },
     headRow: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 8,
+      gap: 6,
+      flexWrap: "nowrap",
     },
     refTag: {
       fontSize: 11.5,
       fontWeight: "800",
       color: theme.fgMuted,
+      flexShrink: 1,
       ...theme.type.money,
     },
     summary: {
@@ -523,6 +524,9 @@ const cardStyles = (theme: Theme) =>
     },
     right: {
       alignItems: "flex-end",
+      justifyContent: "center",
+      gap: 2,
+      flexShrink: 0,
     },
     amount: {
       fontSize: 14,
