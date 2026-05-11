@@ -109,7 +109,8 @@ mobile/gaznger/
 │       └── terms.tsx
 │
 ├── components/ui/
-│   ├── auth/           # AuthToggle, LoginForm, SignupForm, OTPField, FormField
+│   ├── auth/           # AuthScreenContainer, OnboardIllo, GaznergerMark, RoleSelectCard,
+│   │                   #   VerificationTimeline, PendingTimeline, EdgeStateScreen, etc.
 │   ├── global/         # BackButton, NotificationButton, CustomTabBar, ScreenBackground
 │   ├── home/           # FuelGrid, HomeHeader, PointsBanner, ActiveOrderBanner,
 │   │                   #   FuelPriceTicker, PromoBanner, RecentOrders, RedeemModal
@@ -154,20 +155,34 @@ mobile/gaznger/
 
 ### Auth Flow
 
+Phone + SMS-OTP + 4-digit PIN + biometric. Detailed plan in
+`docs/handoff/_plan/AUTH_V1_PLAN.md`. Server contracts in
+`docs/handoff/_server-asks/auth-*.md`.
+
 ```
-app/index.tsx
-  ├── not logged in     → /(auth)/authentication
-  │                          ├── login tab   → role-based home on success
-  │                          └── signup tab  → /(auth)/role-select
-  │                                               → /(auth)/otp  → /(auth)/onboarding
-  │                                                                       (customer only)
-  └── logged in
-        ├── customer    → /(customer)/(home)
-        ├── vendor      → not onboarded → /(vendor)/onboarding
-        │                 onboarded     → /(vendor)/(dashboard)
-        ├── rider       → not onboarded → /(rider)/onboarding
-        │                 onboarded     → /(rider)/(queue)
-        └── admin       → /(customer)/(home)  (no dedicated admin screens yet)
+app/index.tsx (splash + bootstrap router)
+  ├── first launch                    → /(auth)/onboarding → /welcome
+  ├── returning, no session           → /(auth)/welcome
+  ├── returning + suspended           → /(auth)/states/suspended
+  ├── returning + hasPin + biometric  → /(auth)/unlock/biometric (falls back to PIN)
+  ├── returning + hasPin              → /(auth)/unlock/pin
+  ├── returning, customer/admin       → /(customer)/(home)
+  ├── returning, rider verified       → /(rider)/(queue)
+  ├── returning, rider pending        → /(auth)/verification/pending?role=rider
+  ├── returning, vendor verified      → /(vendor)/(dashboard)
+  └── returning, vendor pending       → /(auth)/verification/pending?role=vendor
+
+Signup tail: phone → otp(signup) → role → profile-{role} → pin-create
+            → security → permissions (POST /auth/signup) → welcome-done
+
+Login: phone → check-phone
+            ├── knownDevice           → /unlock/pin (POST /auth/login)
+            └── unknown device         → /otp(login) → /unlock/pin
+                                          (POST /auth/login w/ verificationToken)
+
+Recovery: /unlock/pin → Forgot PIN? → /recovery/phone
+            → /otp(recovery) → /recovery/new-pin
+            (POST /auth/forgot-pin/{start,verify,reset})
 ```
 
 ### Customer Tabs

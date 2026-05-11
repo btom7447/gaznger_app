@@ -160,7 +160,15 @@ export default function DeliveryScreen() {
       raw && raw.latitude != null && raw.longitude != null
         ? { lat: raw.latitude, lng: raw.longitude }
         : undefined;
-    setSelectedAddress({ id: selected.id, label: selected.label, coords });
+    setSelectedAddress({
+      id: selected.id,
+      label: selected.label,
+      coords,
+      // The address `icon` (e.g. home-outline / briefcase-outline) drives
+      // the delivery-pin thumbnail on the Stations map view so the user
+      // recognises which saved address they're delivering to.
+      icon: raw?.icon,
+    });
     setNote(note.trim());
     setWhen(whenChoice, scheduledAt);
     // LPG-Swap detours through `schedule` next so the user can decide
@@ -195,6 +203,7 @@ export default function DeliveryScreen() {
     <ScreenContainer
       edges={["top", "bottom"]}
       contentStyle={styles.scroll}
+      avoidKeyboard
       header={<ScreenHeader title="Where & when" />}
       footer={
         <FloatingCTA

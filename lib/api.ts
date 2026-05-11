@@ -1,6 +1,118 @@
+import { router } from "expo-router";
+import * as Application from "expo-application";
+import { toast } from "sonner-native";
 import { useSessionStore } from "@/store/useSessionStore";
 
 const BASE_URL = process.env.EXPO_PUBLIC_BASE_URL ?? "http://localhost:5000";
+
+/**
+ * Compare two semver-ish version strings (e.g. "2.5.1" vs "2.4.0"). Returns
+ * negative if a < b, zero if equal, positive if a > b. Treats missing segments
+ * as zero. Non-numeric segments fall back to a string compare so a build label
+ * like "2.5.1-beta.2" doesn't crash the comparison — it just sorts after
+ * "2.5.1" for the missing/numeric parts.
+ */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(".");
+  const pb = b.split(".");
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = parseInt(pa[i] ?? "0", 10);
+    const nb = parseInt(pb[i] ?? "0", 10);
+    if (Number.isNaN(na) || Number.isNaN(nb)) {
+      const cmp = (pa[i] ?? "").localeCompare(pb[i] ?? "");
+      if (cmp !== 0) return cmp;
+      continue;
+    }
+    if (na !== nb) return na - nb;
+  }
+  return 0;
+}
+
+/**
+ * Edge-state route gate — fires from any request, deduped so a burst
+ * of failing requests doesn't stack a chain of route.replace calls.
+ * Reset implicitly when the router lands somewhere else and a new
+ * request succeeds (a 200 doesn't go through this path).
+ */
+let edgeStateRouted = false;
+function routeEdgeState(path: string) {
+  if (edgeStateRouted) return;
+  edgeStateRouted = true;
+  router.replace(path as never);
+  // Reset after a brief window so a recovered server can route again
+  // if the user manually retries.
+  setTimeout(() => {
+    edgeStateRouted = false;
+  }, 1500);
+}
+
+/**
+ * Session-expired dedupe. Multiple in-flight authenticated requests
+ * (e.g. /auth/me + /api/wallet/me + /api/orders firing on screen
+ * mount) all hit 401 in parallel. Without this lock each one fires
+ * its own toast + router.replace and the user sees 3 stacked
+ * "Session expired" toasts. The lock fires the toast + redirect ONCE
+ * for the burst, then resets.
+ */
+let sessionExpiredFired = false;
+// Track app boot time so fireSessionExpired can be tolerant during
+// the cold-start window. Stale tokens in SecureStore from a prior
+// app session frequently 401 on first authenticated calls; if we
+// kicked the user to welcome on those we'd punt them through full
+// re-OTP for what's actually a single failed token refresh.
+const apiBootedAt = Date.now();
+const COLD_START_TOLERANCE_MS = 15_000;
+
+function fireSessionExpired() {
+  if (sessionExpiredFired) return;
+  sessionExpiredFired = true;
+  const phone = useSessionStore.getState().user?.phone;
+  const sinceBoot = Date.now() - apiBootedAt;
+  // During the cold-start window route to PIN unlock instead of
+  // welcome/phone. PIN unlock can re-mint via /auth/login with the
+  // cached PIN — no full OTP round-trip needed.
+  if (sinceBoot < COLD_START_TOLERANCE_MS) {
+    router.replace("/(auth)/unlock/pin" as never);
+    setTimeout(() => {
+      sessionExpiredFired = false;
+    }, 5000);
+    return;
+  }
+  toast.error("Session expired", {
+    description: "Please sign in again.",
+  });
+  if (phone) {
+    router.replace({
+      pathname: "/(auth)/phone" as never,
+      params: { mode: "login" },
+    });
+  } else {
+    router.replace("/(auth)/welcome" as never);
+  }
+  setTimeout(() => {
+    sessionExpiredFired = false;
+  }, 5000);
+}
+
+/**
+ * Inspect every response (success OR failure) for system-level signals
+ * that need a global route-out. Currently:
+ *   - X-Min-Version header beyond `nativeApplicationVersion` → /states/force-update
+ *
+ * Per-status routing (503 maintenance, 426 force-update, 401 session-
+ * expired) is handled inside the request flow because they short-
+ * circuit the normal response path.
+ */
+function checkMinVersionHeader(res: Response) {
+  const min = res.headers.get("x-min-version");
+  if (!min) return;
+  const current = Application.nativeApplicationVersion;
+  if (!current) return;
+  if (compareVersions(current, min) < 0) {
+    routeEdgeState(`/(auth)/states/force-update?minVersion=${encodeURIComponent(min)}`);
+  }
+}
 
 // DEBUG: rip out once we've confirmed the right URL is bundled.
 // eslint-disable-next-line no-console
@@ -129,13 +241,78 @@ async function request<T = unknown>(
     }
   }
 
-  // Attempt token refresh on 401
+  // Always check for a min-version signal, even on 200s — server can
+  // soft-warn over time before flipping to a hard 426.
+  checkMinVersionHeader(res);
+
+  // 426 Upgrade Required → hard force-update.
+  if (res.status === 426) {
+    const errData = await res.json().catch(() => ({})) as {
+      minVersion?: string;
+      message?: string;
+    };
+    routeEdgeState(
+      `/(auth)/states/force-update${
+        errData.minVersion ? `?minVersion=${encodeURIComponent(errData.minVersion)}` : ""
+      }`
+    );
+    throw new Error(errData.message ?? "Update required.");
+  }
+
+  // 503 with code: "MAINTENANCE" → route to maintenance screen. Other
+  // 503s fall through to the generic error handler below (transient
+  // network blip the caller can retry).
+  if (res.status === 503) {
+    const errData = await res.json().catch(() => ({})) as {
+      code?: string;
+      message?: string;
+      expectedBackAt?: string;
+    };
+    if (errData.code === "MAINTENANCE") {
+      routeEdgeState(
+        `/(auth)/states/maintenance${
+          errData.expectedBackAt
+            ? `?expectedBackAt=${encodeURIComponent(errData.expectedBackAt)}`
+            : ""
+        }`
+      );
+      throw new Error(errData.message ?? "Service temporarily unavailable.");
+    }
+  }
+
+  // Attempt token refresh on 401. If refresh fails, surface a session-
+  // expired toast then route to the welcome screen with the phone
+  // pre-filled (when known) so the re-login is one tap. The single-
+  // flight refreshTokens() prevents N parallel refresh calls; the
+  // sessionExpiredFired guard prevents N parallel toasts after the
+  // refresh fails.
   if (res.status === 401 && retry) {
     const refreshed = await refreshTokens();
     if (refreshed) {
       return request<T>(path, options, false);
     }
+    fireSessionExpired();
     throw new Error("Session expired. Please log in again.");
+  }
+
+  // 403 with accountStatus: suspended → suspended screen. Catches the
+  // case where /auth/me or any authenticated call surfaces the flip
+  // mid-session.
+  if (res.status === 403) {
+    const errData = await res.json().catch(() => ({})) as {
+      accountStatus?: string;
+      reason?: string;
+      message?: string;
+    };
+    if (errData.accountStatus === "suspended") {
+      routeEdgeState(
+        `/(auth)/states/suspended${
+          errData.reason ? `?reason=${encodeURIComponent(errData.reason)}` : ""
+        }`
+      );
+      throw new Error(errData.message ?? "Account suspended.");
+    }
+    // Other 403s fall through.
   }
 
   if (!res.ok) {

@@ -1,85 +1,194 @@
-import React, { useEffect } from "react";
-import { View, Image, StyleSheet, ActivityIndicator } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Image, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useTheme } from "@/constants/theme";
 import { useAppFonts } from "@/constants/useFonts";
 import { useSessionStore } from "@/store/useSessionStore";
+import {
+  getBiometricEnabled,
+  getHasOnboarded,
+  setBiometricEnabled,
+} from "@/lib/auth";
 
-
-export default function SplashScreen() {
+/**
+ * Splash + bootstrap router. Replaces the legacy 2s-timer +
+ * email-auth redirect with the v4 design's branched routing:
+ *
+ *   First launch (no `gaznger.has-onboarded`)        → /(auth)/onboarding
+ *   Returning, no session                            → /(auth)/welcome
+ *   Returning, suspended account                     → /(auth)/states/suspended
+ *   Returning, session + hasPin + biometric enabled  → /(auth)/unlock/biometric
+ *   Returning, session + hasPin                      → /(auth)/unlock/pin
+ *   Returning, session + role-specific dashboard
+ *     - customer/admin                               → /(customer)/(home)
+ *     - rider, verified                              → /(rider)/(queue)
+ *     - rider, pending                               → /(auth)/verification/pending?role=rider
+ *     - vendor, verified                             → /(vendor)/(dashboard)
+ *     - vendor, pending                              → /(auth)/verification/pending?role=vendor
+ *
+ * Loading flag flips after 2s if fonts/hydration aren't done — gives
+ * users a "Connecting…" hint instead of a silent splash on slow boots.
+ */
+export default function SplashBootstrap() {
   const router = useRouter();
   const theme = useTheme();
   const fontsLoaded = useAppFonts();
+  const { isLoggedIn, hasHydrated, user } = useSessionStore();
+  const [showLoading, setShowLoading] = useState(false);
 
-  const { isLoggedIn, hasHydrated, user, logout } = useSessionStore();
+  useEffect(() => {
+    const t = setTimeout(() => setShowLoading(true), 2000);
+    return () => clearTimeout(t);
+  }, []);
 
-  /**
-   * DEV ONLY — set true to wipe stored session and restart from login
-   */
-  const DEV_FORCE_LOGOUT = false;
+  // Bootstrap router fires exactly ONCE per app mount. Without this
+  // guard, the effect re-runs whenever `isLoggedIn` or `user` flips
+  // (e.g. after PIN unlock calls login()) — and the bootstrap path
+  // races the unlock screen's own router.replace, which surfaces as
+  // a "screen rendered twice" flicker. The session subscriber in
+  // app/_layout.tsx handles the post-mount routing for logout flow;
+  // bootstrap routing only needs to kick in on cold start.
+  const hasBootedRef = useRef(false);
 
   useEffect(() => {
     if (!fontsLoaded || !hasHydrated) return;
+    if (hasBootedRef.current) return;
+    hasBootedRef.current = true;
 
-    const timer = setTimeout(() => {
-      if (DEV_FORCE_LOGOUT) {
-        logout();
-        router.replace("/(auth)/authentication");
+    let cancelled = false;
+    (async () => {
+      const [hasOnboarded, biometricEnabled] = await Promise.all([
+        getHasOnboarded(),
+        getBiometricEnabled(),
+      ]);
+      if (cancelled) return;
+
+      // First launch — onboard before anything else.
+      if (!hasOnboarded) {
+        console.log("[bootstrap] → /onboarding");
+        router.replace("/(auth)/onboarding" as never);
         return;
       }
 
-      if (!isLoggedIn) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        router.replace("/(auth)/role-select" as any);
+      // Returning user, no session.
+      if (!isLoggedIn || !user) {
+        // Clean up an orphan biometric flag — if it's still on but
+        // there's no session to unlock to, the next cold start would
+        // mount the biometric screen and fall straight back here.
+        if (biometricEnabled) {
+          await setBiometricEnabled(false);
+          console.log("[bootstrap] cleared orphan biometric flag");
+        }
+        console.log("[bootstrap] → /welcome (no session)");
+        router.replace("/(auth)/welcome" as never);
         return;
       }
 
-      const role = user?.role ?? "customer";
-      const isOnboarded = user?.isOnboarded ?? false;
+      // Suspended overrides everything.
+      if (user.accountStatus === "suspended") {
+        console.log("[bootstrap] → /suspended");
+        router.replace("/(auth)/states/suspended" as never);
+        return;
+      }
 
+      // Session exists. If a PIN is configured, gate access on unlock.
+      if (user.hasPin) {
+        if (biometricEnabled) {
+          console.log("[bootstrap] → /unlock/biometric");
+          router.replace("/(auth)/unlock/biometric" as never);
+        } else {
+          console.log("[bootstrap] → /unlock/pin");
+          router.replace("/(auth)/unlock/pin" as never);
+        }
+        return;
+      }
+
+      // Session without PIN — legacy users (signed up before PIN was a
+      // requirement) skip unlock and head straight to their dashboard.
+      // Phase 5 may add a forced-PIN-setup flow for these users; for
+      // now they pass through.
+      const role = user.role;
+      if (role === "rider") {
+        if (user.verificationStatus === "approved") {
+          router.replace("/(rider)/(queue)" as never);
+        } else {
+          router.replace(
+            "/(auth)/verification/pending?role=rider" as never
+          );
+        }
+        return;
+      }
       if (role === "vendor") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        router.replace((isOnboarded ? "/(vendor)/(dashboard)" : "/(vendor)/onboarding") as any);
-      } else if (role === "rider") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        router.replace((isOnboarded ? "/(rider)/(queue)" : "/(rider)/onboarding") as any);
-      } else {
-        // customer and admin both go to customer home for now
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        router.replace("/(customer)/(home)" as any);
+        if (user.verificationStatus === "approved") {
+          router.replace("/(vendor)/(dashboard)" as never);
+        } else {
+          router.replace(
+            "/(auth)/verification/pending?role=vendor" as never
+          );
+        }
+        return;
       }
-    }, 2000);
+      // customer + admin — same destination.
+      router.replace("/(customer)/(home)" as never);
+    })();
 
-    return () => clearTimeout(timer);
-  }, [fontsLoaded, hasHydrated, isLoggedIn]);
-
-  if (!fontsLoaded || !hasHydrated) {
-    return (
-      <View style={[styles.container, { backgroundColor: theme.background }]}>
-        <ActivityIndicator size="large" color={theme.tint} />
-      </View>
-    );
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, [fontsLoaded, hasHydrated, isLoggedIn, user, router]);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <Image
-        source={require("../assets/images/splash/splash-screen.png")}
-        style={styles.image}
-        resizeMode="contain"
-      />
+    <View style={[styles.root, { backgroundColor: theme.bg }]}>
+      <View style={styles.brand}>
+        <Image
+          source={require("@/assets/images/gaznger-logo.png")}
+          style={styles.logo}
+          resizeMode="contain"
+          accessibilityLabel="Gaznger"
+        />
+        <Text style={[styles.tagline, { color: theme.fgMuted }]}>
+          Fuel without the queue.
+        </Text>
+      </View>
+      {showLoading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="small" color={theme.primary} />
+          <Text style={[styles.loadingText, { color: theme.fgMuted }]}>
+            Connecting…
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    justifyContent: "center",
     alignItems: "center",
+    justifyContent: "center",
   },
-  image: {
+  brand: {
+    alignItems: "center",
+    gap: 14,
+  },
+  logo: {
     width: 200,
-    height: 200,
+    height: 100,
+  },
+  tagline: {
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+  },
+  loadingWrap: {
+    position: "absolute",
+    bottom: 80,
+    alignItems: "center",
+    gap: 10,
+  },
+  loadingText: {
+    fontSize: 11,
+    fontWeight: "600",
   },
 });

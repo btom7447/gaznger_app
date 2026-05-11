@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  Easing,
   View,
   Text,
   StyleSheet,
@@ -10,7 +12,7 @@ import {
   Platform,
   TextInput,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import MapView, { Circle, Marker, Polyline } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -30,6 +32,11 @@ import {
 } from "@/lib/actionQueue";
 import MapSkeleton from "@/components/ui/skeletons/MapSkeleton";
 import Avatar from "@/components/ui/global/Avatar";
+import {
+  DestinationMapPin,
+  RiderMapPin,
+  StationMapPin,
+} from "@/components/ui/customer/track/MapPins";
 import BackButton from "@/components/ui/global/BackButton";
 import NotificationButton from "@/components/ui/global/NotificationButton";
 import ProfileButton from "@/components/ui/global/ProfileButton";
@@ -96,6 +103,51 @@ export default function RiderTrackScreen() {
 
   const [delivery, setDelivery] = useState<ActiveDelivery | null>(null);
   const [loading, setLoading] = useState(true);
+  // Rider's own coords — driven by the location-polling effect below.
+  // Same source as the GPS we ship to the server, so the marker on the
+  // rider's screen reflects exactly the position the customer sees on
+  // theirs (no two-source drift).
+  const [riderCoord, setRiderCoord] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  // Polyline geometry for the rider's currently-driving leg. Populated
+  // by both an initial GET /route fetch (for fast first paint) and
+  // subsequent route:update socket pushes from the server. Empty until
+  // we have real road geometry — no straight-line drawing as a stand-in.
+  const [routePolyline, setRoutePolyline] = useState<
+    { latitude: number; longitude: number }[]
+  >([]);
+  // Route distance + duration mirrored from the server response. Used
+  // in the rider's bottom panel ETA chip; null until first compute.
+  const [routeMeta, setRouteMeta] = useState<{
+    distanceMeters?: number;
+    durationSeconds?: number;
+  } | null>(null);
+  // Per-step maneuvers from Google Directions for the active leg.
+  // Drives the "Turn right onto Aba Road — 280 m" banner. The server
+  // pre-strips HTML so we can render `instruction` directly.
+  const [routeSteps, setRouteSteps] = useState<
+    {
+      instruction: string;
+      distanceM: number;
+      durationS: number;
+      maneuver?: string;
+      startLat: number;
+      startLng: number;
+      endLat: number;
+      endLng: number;
+    }[]
+  >([]);
+  // Camera-follow flag. true → animateCamera on every rider GPS tick
+  // so the rider's pin stays centred. Flips to false when the user
+  // pans the map manually; the recenter button restores it.
+  const [followRider, setFollowRider] = useState(true);
+  // Continuous pulse around the rider's GPS pin — same machinery as
+  // the destination halo on the Stations map. Map-native Circle so
+  // the bitmap stays sharp at every zoom level.
+  const riderPulseRef = useRef(new Animated.Value(0));
+  const [riderPulseProgress, setRiderPulseProgress] = useState(0);
   const [pickupLoading, setPickupLoading] = useState(false);
   const [deliverLoading, setDeliverLoading] = useState(false);
   const [showDropModal, setShowDropModal] = useState(false);
@@ -128,6 +180,47 @@ export default function RiderTrackScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Rider GPS halo — Circle radius/opacity tick driver. Same shape as
+  // the destination halo on the Stations map; we just listen to the
+  // animated value and mirror it into state so a non-Animated `Circle`
+  // re-renders on each frame.
+  useEffect(() => {
+    const v = riderPulseRef.current;
+    const id = v.addListener(({ value }) => setRiderPulseProgress(value));
+    const loop = Animated.loop(
+      Animated.timing(v, {
+        toValue: 1,
+        duration: 1800,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      })
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      v.removeListener(id);
+    };
+  }, []);
+
+  // Camera follow — recentre on every rider GPS tick when followRider
+  // is true. animateCamera is smooth (300 ms ease) so the rider sees
+  // the map glide along with them. The Track screen owns the follow
+  // toggle: panning the map drops follow (onPanDrag handler below);
+  // the recenter FAB restores it.
+  useEffect(() => {
+    if (!followRider || !riderCoord || !mapRef.current) return;
+    mapRef.current.animateCamera(
+      {
+        center: riderCoord,
+        // 16-ish reads as "navigation zoom" on Google Maps. Higher
+        // and the map feels claustrophobic; lower and the next
+        // maneuver isn't visible.
+        zoom: 16,
+      },
+      { duration: 600 }
+    );
+  }, [followRider, riderCoord?.latitude, riderCoord?.longitude]);
 
   // Reconnect catch-up — when the socket comes back live after a
   // drop, re-pull the active delivery so any state changes that
@@ -164,6 +257,123 @@ export default function RiderTrackScreen() {
     return () => { socket.off("order:update", onOrderUpdate); };
   }, [socketStatus]);
 
+  /**
+   * Map the active delivery status to the leg the rider is driving.
+   * Returns null when there's no leg to draw — pre-acceptance, no
+   * coords, or terminal states. Mirrors the server's
+   * `routeTargetForStatus` helper so the rider's screen requests the
+   * same geometry the customer sees.
+   */
+  const routeTarget: "station" | "destination" | null = useMemo(() => {
+    if (!delivery || !riderCoord) return null;
+    const s = delivery.status;
+    if (s === "accepted" || s === "at_plant" || s === "refilling") return "station";
+    if (
+      s === "picked_up" ||
+      s === "returning" ||
+      s === "arrived" ||
+      s === "dispensing"
+    )
+      return "destination";
+    return null;
+  }, [delivery, riderCoord]);
+
+  /**
+   * Listen for route:update broadcasts from the server. The rider's
+   * own GPS pings drive the recompute upstream, so on the happy path
+   * the rider receives their own pushed routes back from the delivery
+   * room. Same payload shape as the customer screen so we can keep
+   * the handler symmetric.
+   */
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket || !delivery) return;
+    const onRouteUpdate = (data: {
+      orderId?: string;
+      polyline?: [number, number][];
+      target?: "station" | "destination";
+      distanceM?: number;
+      durationS?: number;
+      steps?: typeof routeSteps;
+    }) => {
+      if (!data.polyline) return;
+      // Drop pushes for stale deliveries (e.g. just-completed order
+      // whose room socket hasn't been kicked yet).
+      if (data.orderId && data.orderId !== String(delivery.order._id)) return;
+      // We deliberately do NOT filter by target. Server is the source
+      // of truth for which leg is active — if it pushed
+      // target=destination, the leg flipped server-side and we should
+      // mirror immediately, even if our local `delivery.status` hasn't
+      // caught up yet (the PATCH response → load() chain takes 100s of
+      // ms; the client's routeTarget would still read "station" and
+      // drop the destination push, leaving the rider with a stale
+      // station polyline until the next GPS ping recomputes).
+      const points = data.polyline.map(([lat, lng]) => ({
+        latitude: lat,
+        longitude: lng,
+      }));
+      setRoutePolyline(points);
+      setRouteMeta({
+        distanceMeters: data.distanceM,
+        durationSeconds: data.durationS,
+      });
+      if (data.steps) setRouteSteps(data.steps);
+    };
+    socket.on("route:update", onRouteUpdate);
+    return () => {
+      socket.off("route:update", onRouteUpdate);
+    };
+  }, [delivery, socketStatus]);
+
+  /**
+   * Initial route fetch on each phase change. Without this the rider
+   * sees no polyline until their first GPS ping has triggered a
+   * server-side recompute (~6s). We hit GET /route with the rider's
+   * current coords + active target so the first paint is immediate.
+   */
+  useEffect(() => {
+    if (!delivery || !riderCoord || !routeTarget) {
+      setRoutePolyline([]);
+      setRouteMeta(null);
+      setRouteSteps([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.get<{
+          polyline: [number, number][];
+          distanceMeters?: number;
+          durationSeconds?: number;
+          steps?: typeof routeSteps;
+        }>(
+          `/api/orders/${delivery.order._id}/route?riderLat=${riderCoord.latitude}&riderLng=${riderCoord.longitude}&target=${routeTarget}`,
+          { timeoutMs: 10_000 }
+        );
+        if (cancelled) return;
+        const points = (data.polyline ?? []).map(([lat, lng]) => ({
+          latitude: lat,
+          longitude: lng,
+        }));
+        setRoutePolyline(points);
+        setRouteMeta({
+          distanceMeters: data.distanceMeters,
+          durationSeconds: data.durationSeconds,
+        });
+        setRouteSteps(data.steps ?? []);
+      } catch {
+        // Socket push will fill this in on the next GPS ping.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // We don't depend on riderCoord changes — the route:update socket
+    // already owns the per-ping refresh path. Re-running this on every
+    // GPS update would double our Directions calls.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [delivery?.order?._id, routeTarget]);
+
   // Phase 3: socket-first — the customer's /confirm-delivery emits
   // order:update with status=delivered, and the listener above
   // clears the local delivery on the rider side. We keep a longer
@@ -190,6 +400,11 @@ export default function RiderTrackScreen() {
         try {
           const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
           const { latitude: lat, longitude: lng } = loc.coords;
+          // Mirror the GPS we just shipped into local state so the
+          // rider's own marker on the map redraws in step with the
+          // socket emit. Without this the rider sees a stale dot
+          // until the next round-trip lands a `rider:location` echo.
+          setRiderCoord({ latitude: lat, longitude: lng });
           await api.patch("/api/rider/location", { lat, lng });
           getSocket()?.emit("rider:location", { lat, lng });
         } catch {}
@@ -408,6 +623,54 @@ export default function RiderTrackScreen() {
 
   const s = styles(theme);
 
+  /**
+   * Active maneuver — the step the rider is currently driving.
+   *
+   * Picks the step whose end-point is closest to the rider, scanning
+   * in order so we don't snap back to a previous step on GPS jitter.
+   * Returns null when steps are empty (pre-fetch / straight-line
+   * fallback) so the banner self-hides.
+   *
+   * MUST live before the loading/empty early-returns below — React
+   * requires every hook to run on every render. Putting `useMemo`
+   * after `if (loading) return …` crashes with "Rendered more hooks
+   * than during the previous render" the first time delivery arrives.
+   */
+  const activeStep = useMemo(() => {
+    if (!riderCoord || routeSteps.length === 0) return null;
+    const dist = (
+      a: { lat: number; lng: number },
+      b: { lat: number; lng: number }
+    ) => {
+      const R = 6_371_000;
+      const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+      const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+      const lat1 = (a.lat * Math.PI) / 180;
+      const lat2 = (b.lat * Math.PI) / 180;
+      const x =
+        Math.sin(dLat / 2) ** 2 +
+        Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+      return 2 * R * Math.asin(Math.sqrt(x));
+    };
+    const me = { lat: riderCoord.latitude, lng: riderCoord.longitude };
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < routeSteps.length; i++) {
+      const step = routeSteps[i];
+      const d = dist(me, { lat: step.endLat, lng: step.endLng });
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    const cur = routeSteps[bestIdx];
+    const distToEnd = dist(me, { lat: cur.endLat, lng: cur.endLng });
+    return {
+      ...cur,
+      distanceRemainingM: Math.max(0, Math.round(distToEnd)),
+    };
+  }, [riderCoord, routeSteps]);
+
   // ── Empty / Loading states ──────────────────────────────────────────────────
   if (loading) return <View style={{ flex: 1 }}><MapSkeleton /></View>;
 
@@ -498,6 +761,37 @@ export default function RiderTrackScreen() {
     ? { latitude: deliveryLoc.lat, longitude: deliveryLoc.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 }
     : undefined;
 
+  // Rider halo — concentric pulse centered on the rider's GPS pin.
+  // Two overlapping rings (offset by half a cycle) so the pulse
+  // reads as continuous instead of flashing on/off. The Circle is
+  // map-anchored at the SAME lat/lng as the pin's anchor, so the
+  // halo always sits dead-centre on the motorbike glyph.
+  const riderPulseRadiusM = 25 + 75 * riderPulseProgress;
+  const riderPulseOpacity = 0.5 * (1 - riderPulseProgress);
+  // Second ring, half-cycle out of phase so the user always sees
+  // either an outgoing or fading ring at every frame.
+  const offsetProgress = (riderPulseProgress + 0.5) % 1;
+  const riderPulseRadiusM2 = 25 + 75 * offsetProgress;
+  const riderPulseOpacity2 = 0.5 * (1 - offsetProgress);
+
+  /**
+   * Maneuver glyph — maps Google's `maneuver` codes to Ionicons names.
+   * Falls back to a generic forward arrow when no maneuver is set
+   * (most "continue straight" steps don't include one).
+   */
+  const maneuverIcon = (() => {
+    const m = activeStep?.maneuver ?? "";
+    if (m.includes("turn-sharp-left")) return "arrow-back" as const;
+    if (m.includes("turn-left")) return "arrow-back-outline" as const;
+    if (m.includes("turn-sharp-right")) return "arrow-forward" as const;
+    if (m.includes("turn-right")) return "arrow-forward-outline" as const;
+    if (m.includes("uturn")) return "return-up-back" as const;
+    if (m.includes("roundabout")) return "sync" as const;
+    if (m.includes("merge") || m.includes("ramp")) return "git-merge" as const;
+    if (m.includes("fork")) return "git-branch" as const;
+    return "arrow-up" as const;
+  })();
+
   const customerInitials = (delivery.order.user.displayName ?? "C")
     .split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
 
@@ -510,42 +804,86 @@ export default function RiderTrackScreen() {
         style={StyleSheet.absoluteFillObject}
         provider="google"
         initialRegion={initialRegion}
-        showsUserLocation
+        // showsUserLocation off — we render our own marker so the
+        // rider's screen matches the customer view exactly. The
+        // native blue dot was visually close to the destination pin
+        // colour and made the rider's own position easy to lose.
         showsMyLocationButton={false}
         showsPointsOfInterest={false}
         toolbarEnabled={false}
+        // Drop the follow lock the moment the rider pans — they
+        // probably want to scout ahead. Recenter FAB restores the
+        // follow camera. Listening on onPanDrag (Android-only on
+        // current react-native-maps) covers the most common case;
+        // iOS riders fall back to tapping the FAB to re-engage.
+        onPanDrag={() => {
+          if (followRider) setFollowRider(false);
+        }}
       >
-        {/* Station pin — always visible */}
-        {stationLoc && (
-          <Marker
-            coordinate={{ latitude: stationLoc.lat, longitude: stationLoc.lng }}
-            anchor={{ x: 0.5, y: 1 }}
-            tracksViewChanges={false}
-          >
-            <View style={s.pinWrapper}>
-              <View style={[s.pinBubble, { backgroundColor: "#fff", borderColor: theme.primary, borderWidth: 1.5 }]}>
-                <MaterialIcons name="local-gas-station" size={15} color={theme.primary} />
-              </View>
-              <View style={[s.pinTail, { borderTopColor: theme.primary }]} />
-            </View>
-          </Marker>
-        )}
+        {/* Active leg polyline. Same source as the customer's
+            screen (server pushes route:update to the shared
+            delivery room), so the two views stay in lockstep
+            without a separate rider Directions call. */}
+        {routePolyline.length > 1 ? (
+          <Polyline
+            coordinates={routePolyline}
+            strokeColor={theme.primary}
+            strokeWidth={4}
+          />
+        ) : null}
 
-        {/* Delivery address pin — location-sharp icon */}
-        {deliveryLoc && (
-          <Marker
+        {/* Rider GPS halo — two concentric pulses 0.5 cycles apart so
+            the user always sees a ring expanding around the pin. Both
+            Circles use the same `center` as the rider Marker so they
+            sit dead-centre on the motorbike glyph regardless of zoom. */}
+        {riderCoord ? (
+          <>
+            <Circle
+              center={riderCoord}
+              radius={riderPulseRadiusM}
+              strokeColor="transparent"
+              strokeWidth={0}
+              fillColor={`${theme.primary}${Math.round(riderPulseOpacity * 255)
+                .toString(16)
+                .padStart(2, "0")}`}
+              zIndex={996}
+            />
+            <Circle
+              center={riderCoord}
+              radius={riderPulseRadiusM2}
+              strokeColor="transparent"
+              strokeWidth={0}
+              fillColor={`${theme.primary}${Math.round(riderPulseOpacity2 * 255)
+                .toString(16)
+                .padStart(2, "0")}`}
+              zIndex={995}
+            />
+          </>
+        ) : null}
+
+        {/* Three semantic pins. Each rendered conditionally so a
+            missing coord (e.g. station populates after delivery
+            object lands) doesn't crash the Marker tree. */}
+        {stationLoc ? (
+          <StationMapPin
+            coordinate={{ latitude: stationLoc.lat, longitude: stationLoc.lng }}
+          />
+        ) : null}
+        {deliveryLoc ? (
+          <DestinationMapPin
             coordinate={{ latitude: deliveryLoc.lat, longitude: deliveryLoc.lng }}
-            anchor={{ x: 0.5, y: 1 }}
-            tracksViewChanges={false}
-          >
-            <View style={s.pinWrapper}>
-              <View style={[s.pinBubble, { backgroundColor: "#fff", borderColor: "#1A6B1A", borderWidth: 1.5 }]}>
-                <Ionicons name="location-sharp" size={17} color="#1A6B1A" />
-              </View>
-              <View style={[s.pinTail, { borderTopColor: "#1A6B1A" }]} />
-            </View>
-          </Marker>
-        )}
+          />
+        ) : null}
+        {riderCoord ? (
+          // Key on the rounded coord (3dp ≈ 110m grid) so the marker
+          // remounts when the rider crosses a tile — Android caches
+          // markers aggressively and a static `Marker` won't redraw
+          // when only the coordinate prop changes.
+          <RiderMapPin
+            key={`rider-${riderCoord.latitude.toFixed(3)}-${riderCoord.longitude.toFixed(3)}`}
+            coordinate={riderCoord}
+          />
+        ) : null}
       </MapView>
 
       {/* FLOATING HEADER */}
@@ -556,6 +894,50 @@ export default function RiderTrackScreen() {
           <ProfileButton onPress={() => router.push("/(rider)/(queue)/profile" as any)} size={36} />
         </View>
       </View>
+
+      {/* Maneuver banner — surfaces the next turn from the active
+          step. Self-hides when there's no step (pre-route, or
+          straight-line fallback). MVP nav: text + glyph only, no
+          voice. Distance is rounded down to 10m for the "in 280m"
+          line so it doesn't jitter every few meters. */}
+      {activeStep ? (
+        <View style={[s.maneuverBanner, { top: insets.top + 64 }]}>
+          <View style={s.maneuverIconTile}>
+            <Ionicons name={maneuverIcon} size={22} color="#fff" />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={s.maneuverDistance}>
+              In {Math.max(10, Math.round(activeStep.distanceRemainingM / 10) * 10)} m
+            </Text>
+            <Text style={s.maneuverInstruction} numberOfLines={2}>
+              {activeStep.instruction}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {/* Recenter FAB — appears only when follow is OFF (the rider
+          panned). One tap restores follow + animates the camera back
+          to their current GPS. */}
+      {!followRider && riderCoord ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Recenter map on my location"
+          onPress={() => {
+            setFollowRider(true);
+            mapRef.current?.animateCamera(
+              { center: riderCoord, zoom: 16 },
+              { duration: 400 }
+            );
+          }}
+          style={[
+            s.recenterFab,
+            { bottom: tabBarClearance + 280 },
+          ]}
+        >
+          <Ionicons name="locate" size={20} color={theme.primary} />
+        </TouchableOpacity>
+      ) : null}
 
       {/* Connection state strip — sits between the floating header
           and the bottom panel so it's visible without obscuring map
@@ -582,12 +964,26 @@ export default function RiderTrackScreen() {
       {/* BOTTOM PANEL */}
       <View style={[s.bottomPanel, { backgroundColor: theme.background, paddingBottom: tabBarClearance }]}>
 
-        {/* Status row */}
+        {/* Status row — status badge, route ETA chip (when routed), station chip */}
         <View style={s.statusRow}>
           <View style={[s.statusBadge, { backgroundColor: statusColor + "20" }]}>
             <View style={[s.statusDot, { backgroundColor: statusColor }]} />
             <Text style={[s.statusText, { color: statusColor }]}>{statusLabel}</Text>
           </View>
+          {/* Route ETA chip — Google-Directions duration for the leg
+              the rider is currently on. Shown only after the route
+              compute lands (rider has GPS + status maps to a leg).
+              Drops the chip rather than showing "—" so the row
+              doesn't look like a broken value. */}
+          {routeMeta?.durationSeconds != null && routeMeta.durationSeconds > 0 ? (
+            <View style={[s.stationChip, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
+              <Ionicons name="time-outline" size={11} color={theme.icon} />
+              <Text style={[s.stationChipText, { color: theme.icon }]} numberOfLines={1}>
+                {Math.max(1, Math.round(routeMeta.durationSeconds / 60))} min
+                {routeTarget === "station" ? " to station" : " to customer"}
+              </Text>
+            </View>
+          ) : null}
           <View style={[s.stationChip, { backgroundColor: theme.surface, borderColor: theme.ash }]}>
             <MaterialIcons name="local-gas-station" size={11} color={theme.icon} />
             <Text style={[s.stationChipText, { color: theme.icon }]} numberOfLines={1}>
@@ -894,6 +1290,61 @@ const styles = (theme: ReturnType<typeof import("@/constants/theme").useTheme>) 
       paddingHorizontal: 16, paddingBottom: 12,
     },
     headerRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+
+    /** Maneuver banner — sits below the floating header, runs
+     *  edge-to-edge with a 16px inset so it dominates the top of
+     *  the map. Primary-tinted background so the rider sees it
+     *  even at a glance. */
+    maneuverBanner: {
+      position: "absolute",
+      left: 16,
+      right: 16,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingVertical: 10,
+      paddingLeft: 10,
+      paddingRight: 14,
+      borderRadius: 14,
+      backgroundColor: theme.primary,
+      ...theme.elevation.card,
+    },
+    maneuverIconTile: {
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      backgroundColor: "rgba(255,255,255,0.18)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    maneuverDistance: {
+      fontSize: 11,
+      fontWeight: "800",
+      color: "rgba(255,255,255,0.85)",
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+    },
+    maneuverInstruction: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: "#fff",
+      marginTop: 1,
+    },
+
+    /** Recenter FAB — fixed-size circular button. Sits above the
+     *  bottom panel so it's reachable without obscuring the rider
+     *  controls. */
+    recenterFab: {
+      position: "absolute",
+      right: 16,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: "#fff",
+      alignItems: "center",
+      justifyContent: "center",
+      ...theme.elevation.card,
+    },
 
     emptyCard: {
       position: "absolute", bottom: 0, left: 0, right: 0,

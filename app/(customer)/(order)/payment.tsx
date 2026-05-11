@@ -10,6 +10,7 @@ import { useWalletStore } from "@/store/useWalletStore";
 import { api } from "@/lib/api";
 import { setPaystackPublicKey } from "@/lib/paystackKey";
 import { newIdempotencyKey } from "@/lib/idempotency";
+import { requireStepUpAuth } from "@/components/ui/auth";
 import {
   FloatingCTA,
   MoneySurface,
@@ -30,19 +31,20 @@ const DELIVERY_BASE_FEE = 500;
 const DELIVERY_PER_KM = 100;
 
 /**
- * Flat platform service fee shown on the order summary. The server
- * doesn't compute this as a separate line yet — the order's
- * `totalPrice` already includes it implicitly (it's part of how the
- * station prices a delivery). Surfaced on the summary so the user
- * sees an explicit breakdown matching the v3 design.
+ * Platform service fee — 2% of the fuel subtotal (audit C.4). Server
+ * computes the same off `fuelCost = quantity * pricePerUnit` via
+ * `SERVICE_FEE_BPS` env (default 200 bps = 2%); the mobile mirrors
+ * the formula so the summary matches what the user is charged.
  *
- * To keep the displayed total honest with what's actually charged,
- * we *re-allocate* SERVICE_FEE out of the fuel subtotal rather than
- * adding it on top. When the server starts computing service fee as
- * a real distinct line, drop the re-allocation and let it ride
- * through the response.
+ * If admin tunes the server's bps differently, the displayed line
+ * here may briefly disagree with the order receipt for a single
+ * order — accept that vs. round-tripping a cold pricing call before
+ * every Pay tap.
  */
-const SERVICE_FEE = 400;
+const SERVICE_FEE_BPS = 200;
+function computeServiceFee(fuelSubtotalNaira: number): number {
+  return Math.round((fuelSubtotalNaira * SERVICE_FEE_BPS) / 10_000);
+}
 
 function computeDeliveryFee(distMeters?: number): number {
   if (!distMeters || distMeters <= 0) return DELIVERY_BASE_FEE;
@@ -95,20 +97,21 @@ export default function PaymentScreen() {
     () => computeDeliveryFee(station?.distMeters),
     [station?.distMeters]
   );
-  // `subtotal` here is the *fuel-only* line shown to the user. We
-  // re-allocate SERVICE_FEE out of the locked total so the math on
-  // the summary card reconciles cleanly: subtotal + serviceFee +
-  // deliveryFee = lockedTotalNaira (server's charged amount). When
-  // the server starts returning a real serviceFee we'll drop the
-  // re-allocation in favour of `(server.serviceFee ?? 0)`.
-  const fuelSubtotal = Math.max(
-    0,
-    lockedTotalNaira - deliveryFee - SERVICE_FEE
-  );
+  // `lockedTotalNaira` from station-lock is exactly `qty × perUnit`
+  // — the fuel subtotal, not the grand total. Service fee + delivery
+  // fee stack on top. Server's order POST recomputes the same way:
+  //   fuelCost   = qty × pricePerUnit
+  //   serviceFee = fuelCost × 2%   (SERVICE_FEE_BPS env)
+  //   total      = fuelCost + deliveryFee + serviceFee
+  const fuelSubtotal = lockedTotalNaira;
+  const serviceFee = computeServiceFee(fuelSubtotal);
 
   const [pointsToSpend, setPointsToSpend] = useState(0);
   const pointsDiscount = pointsToSpend * POINTS_TO_NAIRA;
-  const finalTotal = Math.max(0, lockedTotalNaira - pointsDiscount);
+  // Grand total = fuel + delivery + service - points discount.
+  // Mirrors the server's order POST math (audit C.4).
+  const grandTotal = fuelSubtotal + deliveryFee + serviceFee;
+  const finalTotal = Math.max(0, grandTotal - pointsDiscount);
 
   const lastCard = user?.lastPaystackAuth;
   const hasSavedCard = Boolean(lastCard?.last4);
@@ -148,12 +151,17 @@ export default function PaymentScreen() {
       balance: walletAvailable,
       insufficient: walletAvailable < finalTotal,
     });
-    list.push({
-      id: "transfer",
-      kind: "transfer",
-      label: "Bank transfer",
-      sublabel: "Pay to a one-time account",
-    });
+    // Bank transfer is dev-only until Paystack bank_transfer is
+    // wired (audit B.4). In production the option is hidden so
+    // users can't pick it and end up at the "coming soon" alert.
+    if (__DEV__) {
+      list.push({
+        id: "transfer",
+        kind: "transfer",
+        label: "Bank transfer",
+        sublabel: "Pay to a one-time account · DEV ONLY",
+      });
+    }
     return list;
   }, [hasSavedCard, lastCard?.last4, lastCard?.brand, finalTotal, walletAvailable]);
 
@@ -423,24 +431,38 @@ export default function PaymentScreen() {
    */
   const payWithTransfer = useCallback(
     async (orderId: string) => {
-      Alert.alert(
-        "Bank transfer · stubbed",
-        "We'll send you the account details after Paystack is wired. Continuing as if paid so you can test the rest of the flow.",
-        [
-          {
-            text: "Continue",
-            onPress: async () => {
-              await redeemPointsIfAny(orderId);
-              goReceipt();
-              setSubmitting(false);
+      // Audit B.4: gate the dev "as-if-paid" shortcut behind __DEV__.
+      // Production builds must NEVER auto-mark a transfer order as
+      // paid — that would let users place orders for free. Until
+      // Paystack bank_transfer is wired, the prod path tells the
+      // user the option is coming soon and clears the in-flight
+      // submission so they can pick another method.
+      if (__DEV__) {
+        Alert.alert(
+          "Bank transfer · stubbed (dev)",
+          "We'll send you the account details after Paystack is wired. Continuing as if paid so you can test the rest of the flow.",
+          [
+            {
+              text: "Continue",
+              onPress: async () => {
+                await redeemPointsIfAny(orderId);
+                goReceipt();
+                setSubmitting(false);
+              },
             },
-          },
-          {
-            text: "Cancel",
-            style: "cancel",
-            onPress: () => setSubmitting(false),
-          },
-        ]
+            {
+              text: "Cancel",
+              style: "cancel",
+              onPress: () => setSubmitting(false),
+            },
+          ]
+        );
+        return;
+      }
+      Alert.alert(
+        "Bank transfer coming soon",
+        "Pick another method (card or wallet) to place this order.",
+        [{ text: "OK", onPress: () => setSubmitting(false) }]
       );
     },
     [redeemPointsIfAny, goReceipt]
@@ -449,6 +471,19 @@ export default function PaymentScreen() {
   const handlePay = useCallback(async () => {
     if (!selected || insufficient || submitting) return;
     setSubmitting(true);
+
+    // Step-up auth before charging — biometric (preferred) or PIN
+    // fallback. Skipped on the bank-transfer stub since that path
+    // doesn't actually move money yet (audit B.4 + B.10).
+    if (selected.id !== "transfer") {
+      const authed = await requireStepUpAuth({
+        reason: "Confirm payment",
+      });
+      if (!authed) {
+        setSubmitting(false);
+        return;
+      }
+    }
 
     // Step 1: place the order so we have a real orderId for downstream flows.
     const orderId = await placeOrder();
@@ -500,7 +535,7 @@ export default function PaymentScreen() {
       }`,
       amount: fuelSubtotal,
     },
-    { label: "Service fee", amount: SERVICE_FEE },
+    { label: "Service fee", amount: serviceFee },
     { label: "Delivery fee", amount: deliveryFee },
   ];
   if (pointsDiscount > 0) {

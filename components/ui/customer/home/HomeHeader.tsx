@@ -48,7 +48,10 @@ export default function HomeHeader({
     >
       <View style={styles.greetingCol}>
         <Text style={styles.hi}>Hi,</Text>
-        <Text style={styles.name} numberOfLines={1}>
+        {/* No numberOfLines cap (audit G.7) — at iOS Larger Text the
+            greeting at h1 + 1 line truncates "Benjamin." to "Benj…".
+            Allow up to 2 lines so the name stays readable. */}
+        <Text style={styles.name} numberOfLines={2}>
           {greeting ? `${greeting}.` : "there."}
         </Text>
       </View>
@@ -69,7 +72,8 @@ export default function HomeHeader({
           hitSlop={6}
         >
           <View style={styles.pointsCoin}>
-            <Ionicons name="star" size={13} color={theme.palette.neutral900} />
+            {/* Star is reserved for ratings; Points uses sparkles. */}
+            <Ionicons name="sparkles" size={13} color={theme.palette.neutral900} />
           </View>
           {pointsLoading ? (
             <Skeleton width={32} height={12} borderRadius={4} />

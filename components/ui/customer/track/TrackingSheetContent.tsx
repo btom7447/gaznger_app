@@ -90,8 +90,9 @@ interface TrackingSheetContentProps {
   unitPriceNaira?: number;
   /**
    * Payment method label shown in the Details accordion ("Wallet",
-   * "Card", "Cash on delivery", etc.). Omitted in the accordion when
-   * not provided.
+   * "Card", "Bank transfer"). Cash on delivery is NEVER an option
+   * in Gaznger — orders are always paid up front. Omitted from the
+   * accordion when not provided.
    */
   paymentLabel?: string;
   /**

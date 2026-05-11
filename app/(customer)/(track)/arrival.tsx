@@ -66,20 +66,48 @@ export default function ArrivalScreen() {
   const [serverStatus, setServerStatus] = useState<string>("arrived");
   const socketStatus = useSocketStatus();
 
+  // Ref so the poll closure always reads the latest orderId without
+  // restarting the interval on every effectiveOrderId change.
+  const effectiveOrderIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    effectiveOrderIdRef.current = effectiveOrderId;
+  }, [effectiveOrderId]);
+
+  // Bind unconditionally (no !effectiveOrderId bail) so the listener
+  // attaches even when the id isn't in the closure yet. Filter via ref.
   useEffect(() => {
     const socket = getSocket();
-    if (!socket || !effectiveOrderId) return;
+    if (!socket) return;
     const handler = (data: { orderId?: string; status?: string }) => {
-      if (data.orderId && data.orderId !== effectiveOrderId) return;
+      const oid = effectiveOrderIdRef.current;
+      if (oid && data.orderId && data.orderId !== oid) return;
       if (data.status) setServerStatus(data.status);
     };
     socket.on("order:update", handler);
     return () => {
       socket.off("order:update", handler);
     };
-    // socketStatus dep — re-binds the listener when the socket flips
-    // to live, so this screen doesn't miss its first attach.
-  }, [effectiveOrderId, socketStatus]);
+  }, [socketStatus]);
+
+  // 4s poll — socket fallback. Stops automatically once the order
+  // reaches a terminal status (interval dep on serverStatus so it
+  // tears down when the status goes terminal and effectiveOrderId
+  // would disappear after resetOrder fires in index.tsx).
+  useEffect(() => {
+    if (!effectiveOrderId) return;
+    const TERMINAL = ["delivered", "rated", "closed"];
+    if (TERMINAL.includes(serverStatus) || serverStatus.startsWith("cancelled")) return;
+    const id = setInterval(async () => {
+      try {
+        const order = await api.get<{ status: string }>(
+          `/api/orders/${effectiveOrderId}`,
+          { timeoutMs: 8_000 }
+        );
+        if (order.status) setServerStatus(order.status);
+      } catch {}
+    }, 4000);
+    return () => clearInterval(id);
+  }, [effectiveOrderId, serverStatus]);
 
   useEffect(() => {
     if (serverStatus !== "dispensing") return;
@@ -98,7 +126,6 @@ export default function ArrivalScreen() {
   }, [serverStatus, total, dispenseAnim]);
 
   const progress = total > 0 ? filled / total : 0;
-  const remainingSec = Math.max(0, Math.round((1 - progress) * 3));
 
   const riderFirstName = draft.rider?.firstName ?? "Your rider";
   const riderFullName = useMemo(() => {
@@ -159,14 +186,20 @@ export default function ArrivalScreen() {
   const totalNaira =
     activeOrder?.totalPrice ??
     fuelCostNaira + deliveryFeeNaira;
-  const paymentLabel =
-    activeOrder?.paymentStatus === "paid"
-      ? "Wallet"
-      : activeOrder?.paymentStatus === "unpaid"
-      ? "Pay on delivery"
-      : draft.paymentMethodId
-      ? "Wallet"
-      : "Pay on delivery";
+  // Cash-on-delivery is not supported (audit D.1 + design rule).
+  // The order is paid-up-front via wallet/card/transfer before the
+  // rider rolls out — by the time the customer reaches Arrival, the
+  // payment is settled. We surface the method label derived from
+  // the locked draft, or a generic "Paid" fallback. NEVER "Pay on
+  // delivery".
+  const paymentLabel = (() => {
+    const m = draft.paymentMethodId;
+    if (!m) return "Paid";
+    if (m === "wallet") return "Wallet";
+    if (m === "card-saved" || m === "card-new") return "Card";
+    if (m === "transfer") return "Bank transfer";
+    return "Paid";
+  })();
 
   return (
     <View style={[styles.root, { backgroundColor: theme.bg }]}>
@@ -203,6 +236,7 @@ export default function ArrivalScreen() {
             onPress={() => router.replace("/(customer)/(home)" as never)}
             accessibilityRole="button"
             accessibilityLabel="Cancel dispensing"
+            hitSlop={8}
             style={({ pressed }) => [
               styles.roundBtn,
               pressed && { opacity: 0.85 },
@@ -234,15 +268,21 @@ export default function ArrivalScreen() {
         <View style={styles.dispenseCard}>
           <DispenseRing progress={progress} />
           <View style={styles.dispenseBody}>
+            {/* No fake litre counter (audit G.4). The previous
+                "{filled} L of {total} L" line implied calibrated
+                in-flow measurement, which we don't have — the
+                dispense ring is purely a UX progress indicator
+                synced to a synthetic timer. Show the indeterminate
+                headline instead. */}
             <Text style={styles.dispenseTitle}>
-              {filled.toFixed(1)} L of {total} L
+              {serverStatus !== "dispensing"
+                ? "Almost there"
+                : "Filling your tank"}
             </Text>
             <Text style={styles.dispenseSub}>
               {serverStatus !== "dispensing"
                 ? "Waiting for rider to start"
-                : remainingSec < 1
-                ? "Almost done"
-                : `~${remainingSec}s remaining`}
+                : `${total} L · ${riderFirstName} is at the pump`}
             </Text>
           </View>
         </View>
@@ -255,22 +295,48 @@ export default function ArrivalScreen() {
           </View>
           <View style={styles.riderInfo}>
             <Text style={styles.riderName}>{riderFullName}</Text>
-            <Text style={styles.riderMeta}>
-              {[
-                draft.rider?.plate,
+            {/* Meta row uses a real star Ionicon for the rating
+                (audit G.10) — VoiceOver was reading the unicode "★"
+                literal as "black star". The label here also spells
+                the rating out for screen readers. */}
+            <View
+              style={styles.riderMetaRow}
+              accessible
+              accessibilityLabel={[
+                draft.rider?.plate ?? "",
                 draft.rider?.rating != null
-                  ? `★ ${draft.rider.rating.toFixed(1)}`
-                  : null,
+                  ? `rating ${draft.rider.rating.toFixed(1)} stars`
+                  : "",
                 "here now",
               ]
                 .filter(Boolean)
-                .join(" · ")}
-            </Text>
+                .join(", ")}
+            >
+              {draft.rider?.plate ? (
+                <Text style={styles.riderMeta}>{draft.rider.plate}</Text>
+              ) : null}
+              {draft.rider?.rating != null ? (
+                <>
+                  <Text style={styles.riderMeta}> · </Text>
+                  <Ionicons
+                    name="star"
+                    size={12}
+                    color={theme.palette.gold700}
+                  />
+                  <Text style={styles.riderMeta}>
+                    {" "}
+                    {draft.rider.rating.toFixed(1)}
+                  </Text>
+                </>
+              ) : null}
+              <Text style={styles.riderMeta}> · here now</Text>
+            </View>
           </View>
           <Pressable
             onPress={handleCall}
             accessibilityRole="button"
             accessibilityLabel={`Call ${riderFirstName}`}
+            hitSlop={8}
             style={({ pressed }) => [
               styles.callBtn,
               pressed && { opacity: 0.85 },
@@ -448,6 +514,11 @@ const makeStyles = (theme: Theme) =>
     riderMeta: {
       ...theme.type.caption,
       color: theme.fgMuted,
+    },
+    riderMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
     },
     callBtn: {
       width: 40,

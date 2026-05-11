@@ -1,5 +1,7 @@
 import React from "react";
 import {
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   ScrollViewProps,
   StyleSheet,
@@ -34,10 +36,19 @@ interface ScreenContainerProps {
   /**
    * Fixed footer slot — renders BELOW the scroll area, pinned to the bottom.
    * Use this for sticky CTAs so they stay visible while content scrolls.
-   * Doesn't move with the keyboard automatically; if you need that, wrap in
-   * KeyboardAvoidingView at the screen level.
+   * Pair with `avoidKeyboard` to keep the footer visible when the keyboard
+   * is up.
    */
   footer?: React.ReactNode;
+  /**
+   * When true, wraps the body+footer in KeyboardAvoidingView so the
+   * fixed footer (e.g. a FloatingCTA) stays above the keyboard
+   * instead of being obscured. Audit D.4 — required by any screen
+   * with a text input above a sticky CTA (delivery note, wallet
+   * top-up, etc.). Default false to avoid breaking layouts that
+   * weren't built for it.
+   */
+  avoidKeyboard?: boolean;
   children: React.ReactNode;
 }
 
@@ -55,6 +66,7 @@ export default function ScreenContainer({
   contentStyle,
   header,
   footer,
+  avoidKeyboard = false,
   children,
 }: ScreenContainerProps) {
   const theme = useTheme();
@@ -75,6 +87,17 @@ export default function ScreenContainer({
     </ScrollView>
   );
 
+  // Body + footer live inside the KAV when avoidKeyboard is on, so a
+  // pinned FloatingCTA gets pushed above the keyboard. Header sits
+  // outside — it's already padded by the safe-area inset and never
+  // wants to move when the keyboard appears.
+  const bodyAndFooter = (
+    <>
+      {body}
+      {footer ? <View>{footer}</View> : null}
+    </>
+  );
+
   return (
     <SafeAreaView
       edges={edges}
@@ -82,8 +105,16 @@ export default function ScreenContainer({
     >
       <StatusBar style={statusBarStyle} />
       {header ? <View>{header}</View> : null}
-      {body}
-      {footer ? <View>{footer}</View> : null}
+      {avoidKeyboard ? (
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
+          {bodyAndFooter}
+        </KeyboardAvoidingView>
+      ) : (
+        bodyAndFooter
+      )}
     </SafeAreaView>
   );
 }

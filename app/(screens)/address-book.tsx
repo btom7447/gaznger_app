@@ -18,9 +18,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Swipeable } from "react-native-gesture-handler";
-import MapView, { Marker, Region } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
-import * as Location from "expo-location";
 import { toast } from "sonner-native";
 import { useTheme } from "@/constants/theme";
 import { ADDRESS_ICONS } from "@/constants/addressIcons";
@@ -30,11 +28,15 @@ import BackButton from "@/components/ui/global/BackButton";
 import AddressListSkeleton from "@/components/ui/skeletons/AddressListSkeleton";
 import { useUserLocation } from "@/hooks/useUserLocation";
 import {
+  AddressSheet,
+  type AddressResult,
+  type AddressSheetRef,
   FloatingCTA,
   KebabMenu,
   ScreenContainer,
   ScreenHeader,
 } from "@/components/ui/primitives";
+import { NIGERIA_STATES } from "@/constants/nigeriaStates";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const MODAL_HEIGHT = SCREEN_HEIGHT * 0.9;
@@ -58,13 +60,6 @@ interface Address {
   icon?: string;
 }
 
-const DEFAULT_REGION: Region = {
-  latitude: 6.5244,
-  longitude: 3.3792,
-  latitudeDelta: 0.05,
-  longitudeDelta: 0.05,
-};
-
 export default function AddressBookScreen() {
   const theme = useTheme();
   const updateUser = useSessionStore((s) => s.updateUser);
@@ -77,6 +72,27 @@ export default function AddressBookScreen() {
 
   /* Modal */
   const [showModal, setShowModal] = useState(false);
+  const addressSheetRef = useRef<AddressSheetRef>(null);
+
+  /**
+   * Map AddressSheet result → the legacy {street, city, state, lat, lng}
+   * fields this modal already saves. The shared AddressResult.address
+   * is the formatted street line; AddressResult.lga becomes our `city`
+   * field (server.City was historically misnamed — it's really LGA-or-
+   * city). State stays the canonical code, but server expects the
+   * display label so we resolve via the constant.
+   */
+  const handleSheetConfirm = (result: AddressResult) => {
+    setStreet(result.address);
+    setCity(result.lga);
+    const stateLabel =
+      NIGERIA_STATES.find((st) => st.code === result.state)?.label ??
+      result.stateLabel ??
+      "";
+    setAddressState(stateLabel);
+    setPinLat(result.latitude);
+    setPinLng(result.longitude);
+  };
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [slide, setSlide] = useState(0);
@@ -90,11 +106,7 @@ export default function AddressBookScreen() {
   const [icon, setIcon] = useState("home-outline");
   const [pinLat, setPinLat] = useState<number | null>(null);
   const [pinLng, setPinLng] = useState<number | null>(null);
-  const [geocoding, setGeocoding] = useState(false);
   const [isDefaultToggle, setIsDefaultToggle] = useState(false);
-
-  const [mapReady, setMapReady] = useState(false);
-  const mapRef = useRef<MapView>(null);
 
   /* ── Data ── */
   const fetchAddresses = useCallback(async () => {
@@ -121,7 +133,7 @@ export default function AddressBookScreen() {
   const resetForm = () => {
     setLabel(""); setStreet(""); setCity(""); setAddressState("");
     setIcon("home-outline"); setPinLat(null); setPinLng(null);
-    setGeocoding(false); setIsDefaultToggle(false); setEditingId(null);
+    setIsDefaultToggle(false); setEditingId(null);
   };
 
   const closeModal = () => {
@@ -147,45 +159,12 @@ export default function AddressBookScreen() {
     setPinLat(addr.latitude ?? userLocation?.lat ?? null);
     setPinLng(addr.longitude ?? userLocation?.lng ?? null);
     setIsDefaultToggle(addr.isDefault ?? false);
-    setGeocoding(false);
     setShowModal(true);
   };
 
   const goToSlide = (n: number) => {
     slideRef.current?.scrollTo({ x: n * SCREEN_WIDTH, animated: true });
     setSlide(n);
-  };
-
-  /* ── Reverse geocode ── */
-  const reverseGeocode = async (lat: number, lng: number) => {
-    setGeocoding(true);
-    try {
-      const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
-      if (results[0]) {
-        const r = results[0];
-        setStreet([r.streetNumber, r.street].filter(Boolean).join(" ") || r.name || "");
-        setCity(r.city || r.subregion || "");
-        setAddressState(r.region || "");
-      }
-    } catch {
-      // silent — user can type manually
-    } finally {
-      setGeocoding(false);
-    }
-  };
-
-  const handleMapPress = (e: any) => {
-    const { latitude, longitude } = e.nativeEvent.coordinate;
-    setPinLat(latitude);
-    setPinLng(longitude);
-    reverseGeocode(latitude, longitude);
-  };
-
-  const handleDragEnd = (e: any) => {
-    const { latitude, longitude } = e.nativeEvent.coordinate;
-    setPinLat(latitude);
-    setPinLng(longitude);
-    reverseGeocode(latitude, longitude);
   };
 
   /* ── Save / Delete / Default ── */
@@ -246,13 +225,6 @@ export default function AddressBookScreen() {
       toast.error("Failed", { description: err.message });
     }
   };
-
-  /* ── Map region ── */
-  const mapRegion: Region = pinLat && pinLng
-    ? { latitude: pinLat, longitude: pinLng, latitudeDelta: 0.008, longitudeDelta: 0.008 }
-    : userLocation
-    ? { latitude: userLocation.lat, longitude: userLocation.lng, latitudeDelta: 0.05, longitudeDelta: 0.05 }
-    : DEFAULT_REGION;
 
   /* ── Address list card (v3) ──
    * Two ways to act on a row, per UX direction (we ship both):
@@ -368,98 +340,94 @@ export default function AddressBookScreen() {
               showsHorizontalScrollIndicator={false}
               style={{ flex: 1 }}
             >
-              {/* ════ Slide 1: Location ════ */}
+              {/* ════ Slide 1: Location — replaced with shared AddressSheet ════ */}
               <View style={{ width: SCREEN_WIDTH, height: SLIDE_HEIGHT, flexDirection: "column" }}>
-                {/* Section title */}
                 <View style={s.slideHead}>
                   <Text style={[s.slideTitle, { color: theme.text }]}>Location</Text>
                 </View>
 
-                {/* Map — flex: 1, fills all space between title and fields */}
-                <View style={[s.mapContainer, { flex: 1, marginHorizontal: 20, marginBottom: 12 }]}>
-                  <MapView
-                    ref={mapRef}
-                    style={StyleSheet.absoluteFillObject}
-                    provider="google"
-                    initialRegion={mapRegion}
-                    onMapReady={() => setMapReady(true)}
-                    onPress={handleMapPress}
-                    showsPointsOfInterest={false}
-                    showsBuildings={false}
-                    toolbarEnabled={false}
+                {/* Tap-to-set address row. Opens the shared AddressSheet which
+                    handles search + map drop pin + state dropdown. On confirm
+                    we receive {address, state, lga, lat, lng} and store them
+                    locally; saveAddress sends the same field shape as before
+                    so the server contract stays unchanged. */}
+                <View style={{ flex: 1, paddingHorizontal: 20, justifyContent: "flex-start", paddingTop: 8 }}>
+                  <Pressable
+                    onPress={() =>
+                      addressSheetRef.current?.open({
+                        address: street,
+                        state: addressState,
+                        lga: city,
+                        latitude: pinLat ?? undefined,
+                        longitude: pinLng ?? undefined,
+                      })
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      street ? `Edit address: ${street}` : "Set delivery address"
+                    }
+                    style={({ pressed }) => [
+                      s.addressBtn,
+                      { borderColor: theme.ash, backgroundColor: theme.surface },
+                      pressed && { opacity: 0.92 },
+                    ]}
                   >
-                    {pinLat !== null && pinLng !== null && (
-                      <Marker
-                        coordinate={{ latitude: pinLat, longitude: pinLng }}
-                        anchor={{ x: 0.5, y: 1 }}
-                        draggable
-                        onDragEnd={handleDragEnd}
-                      >
-                        <View style={s.pin}>
-                          <View style={[s.pinBubble, { backgroundColor: theme.primary }]}>
-                            <Ionicons name={icon as any} size={16} color="#fff" />
-                          </View>
-                          <View style={[s.pinTail, { borderTopColor: theme.primary }]} />
-                        </View>
-                      </Marker>
-                    )}
-                  </MapView>
-
-                  {/* Loading overlay until map tiles load */}
-                  {!mapReady && (
-                    <View style={[StyleSheet.absoluteFillObject, { backgroundColor: theme.surface, justifyContent: "center", alignItems: "center", borderRadius: 16 }]}>
-                      <ActivityIndicator size="large" color={theme.primary} />
-                    </View>
-                  )}
-
-                  {/* Tooltip — shown only before any pin is dropped */}
-                    <View style={[s.mapTooltip, { backgroundColor: theme.background + "EE" }]}>
-                      <Ionicons name="finger-print-outline" size={13} color={theme.icon} />
-                      <Text style={[s.coordText, { color: theme.icon }]}>Tap map or drag the pin</Text>
-                    </View>
-
-                  {/* Coords at bottom — shown once pin exists */}
-                  {pinLat !== null && pinLng !== null && (
-                    <View style={[s.mapOverlay, { backgroundColor: theme.background + "EE" }]}>
-                      {geocoding
-                        ? <ActivityIndicator size="small" color={theme.primary} />
-                        : <Text style={[s.coordText, { color: theme.text }]}>
-                            {pinLat.toFixed(5)}, {pinLng.toFixed(5)}
+                    <Ionicons
+                      name="location"
+                      size={20}
+                      color={street ? theme.primary : theme.icon}
+                    />
+                    <View style={{ flex: 1 }}>
+                      {street ? (
+                        <>
+                          <Text
+                            style={[s.addressBtnPrimary, { color: theme.text }]}
+                            numberOfLines={1}
+                          >
+                            {street}
                           </Text>
-                      }
+                          <Text
+                            style={[s.addressBtnSecondary, { color: theme.icon }]}
+                            numberOfLines={1}
+                          >
+                            {[city, addressState].filter(Boolean).join(" · ") ||
+                              "Tap to refine"}
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={[s.addressBtnPlaceholder, { color: theme.icon }]}>
+                          Search address + drop pin
+                        </Text>
+                      )}
                     </View>
-                  )}
+                    <Ionicons name="chevron-forward" size={18} color={theme.icon} />
+                  </Pressable>
+
+                  {pinLat != null && pinLng != null ? (
+                    <Text style={[s.coordHint, { color: theme.icon }]}>
+                      Pin: {pinLat.toFixed(5)}, {pinLng.toFixed(5)}
+                    </Text>
+                  ) : null}
                 </View>
 
-                {/* Address fields — stacked column, QuantitySelect style */}
-                <View style={s.fieldsCol}>
-                  {([
-                    { key: "street", label: "Street",    value: street,       set: setStreet,       placeholder: "Street address" },
-                    { key: "city",   label: "City",      value: city,         set: setCity,         placeholder: "City"           },
-                    { key: "state",  label: "State",     value: addressState, set: setAddressState, placeholder: "State"          },
-                  ] as const).map((f) => (
-                    <View key={f.key}>
-                      <Text style={[s.fieldLabel, { color: theme.icon }]}>{f.label}</Text>
-                      <View style={[s.inputWrapper, { borderColor: theme.ash, backgroundColor: theme.surface }]}>
-                        <TextInput
-                          value={f.value}
-                          onChangeText={f.set}
-                          placeholder={f.placeholder}
-                          placeholderTextColor={theme.icon}
-                          style={[s.inputText, { color: theme.text }]}
-                          returnKeyType="next"
-                          onSubmitEditing={() => Keyboard.dismiss()}
-                        />
-                      </View>
-                    </View>
-                  ))}
-                </View>
-
-                {/* Sticky Next footer */}
+                {/* Sticky Next footer — disabled until a coordinate is set. */}
                 <View style={[s.footer, { borderTopColor: theme.ash, backgroundColor: theme.background }]}>
                   <TouchableOpacity
-                    style={[s.primaryBtn, { backgroundColor: theme.primary }]}
-                    onPress={() => { Keyboard.dismiss(); goToSlide(1); }}
+                    style={[
+                      s.primaryBtn,
+                      {
+                        backgroundColor:
+                          pinLat != null && pinLng != null
+                            ? theme.primary
+                            : theme.ash,
+                      },
+                    ]}
+                    onPress={() => {
+                      if (pinLat == null || pinLng == null) return;
+                      Keyboard.dismiss();
+                      goToSlide(1);
+                    }}
+                    disabled={pinLat == null || pinLng == null}
                     activeOpacity={0.85}
                   >
                     <Text style={s.primaryBtnText}>Next</Text>
@@ -567,6 +535,20 @@ export default function AddressBookScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Shared AddressSheet — opened from inside the edit modal's
+          "Tap to set address" row. Mounted at root so it portals
+          correctly via BottomSheetModalProvider in app/_layout. */}
+      <AddressSheet
+        ref={addressSheetRef}
+        onConfirm={handleSheetConfirm}
+        copy={{
+          title: "Delivery address",
+          sub: "Search the address, then drag the pin if it isn't quite right.",
+          searchPlaceholder: "Search address or landmark",
+          confirmLabel: "Use this address",
+        }}
+      />
     </ScreenContainer>
   );
 }
@@ -902,10 +884,30 @@ const styles = (theme: ReturnType<typeof useTheme>) =>
     },
     coordText: { fontSize: 11, fontWeight: "400" },
 
-    /* Stacked column fields (slide 1) */
+    /* Stacked column fields (slide 1) — kept for legacy non-sheet paths. */
     fieldsCol: {
       flexDirection: "column", gap: 12,
       paddingHorizontal: 20, marginBottom: 8,
+    },
+
+    /** Tap-to-set address row — opens the AddressSheet on press. */
+    addressBtn: {
+      flexDirection: "row", alignItems: "center", gap: 12,
+      height: 64, paddingHorizontal: 14,
+      borderWidth: 1.5, borderRadius: 14,
+    },
+    addressBtnPrimary: {
+      fontSize: 14, fontWeight: "700",
+    },
+    addressBtnSecondary: {
+      fontSize: 12, marginTop: 2,
+    },
+    addressBtnPlaceholder: {
+      fontSize: 14, fontWeight: "500",
+    },
+    coordHint: {
+      fontSize: 11, marginTop: 8, paddingHorizontal: 4,
+      fontVariant: ["tabular-nums"],
     },
 
     /* Shared input style — matches QuantitySelect exactly */

@@ -189,12 +189,14 @@ export default function WalletTopUp() {
   return (
     <ScreenContainer
       edges={["top", "bottom"]}
+      avoidKeyboard
       header={
         <View style={styles.header}>
           <Pressable
             onPress={() => router.back()}
             accessibilityRole="button"
             accessibilityLabel="Close"
+            hitSlop={8}
             style={({ pressed }) => [
               styles.closeBtn,
               pressed && { opacity: 0.85 },

@@ -150,7 +150,7 @@ export default function RateScreen() {
               onPress={() => setStars((cur) => (cur === n ? 0 : n))}
               accessibilityRole="button"
               accessibilityLabel={`${n} stars`}
-              hitSlop={4}
+              hitSlop={8}
             >
               <Ionicons
                 name={n <= stars ? "star" : "star-outline"}

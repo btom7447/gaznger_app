@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Linking, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import { toast } from "sonner-native";
+import MapView, { Circle, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -12,9 +13,13 @@ import { getSocket, subscribeReconnect, useSocketStatus } from "@/lib/socket";
 import { api } from "@/lib/api";
 import {
   LiveBadge,
-  MapMarkerRider,
   OfflineStrip,
 } from "@/components/ui/primitives";
+import {
+  DestinationMapPin,
+  RiderMapPin,
+  StationMapPin,
+} from "@/components/ui/customer/track/MapPins";
 import SocketStrip from "@/components/ui/global/SocketStrip";
 import {
   getStatusLabel,
@@ -63,10 +68,14 @@ interface ServerOrder {
     shortName?: string;
     location?: { lat: number; lng: number };
   } | null;
-  /** Populated delivery address — read for the destination map pin. */
+  /** Populated delivery address — read for the destination map pin.
+   *  `icon` is the Ionicon glyph the user picked when saving this
+   *  address (home-outline / briefcase-outline / etc.); we surface
+   *  it so the destination pin matches the address-book row. */
   deliveryAddress?: {
     latitude?: number;
     longitude?: number;
+    icon?: string;
   } | null;
 }
 
@@ -90,6 +99,7 @@ export default function TrackScreen() {
     (s) => s.setDeliveryConfirmation
   );
   const setWeighIn = useOrderStore((s) => s.setWeighIn);
+  const resetOrder = useOrderStore((s) => s.resetOrder);
 
   // Socket status — used as a re-bind trigger for the socket
   // subscription effect below. Critical: getSocket() returns null
@@ -146,6 +156,20 @@ export default function TrackScreen() {
   const [routePolyline, setRoutePolyline] = useState<
     { latitude: number; longitude: number }[]
   >([]);
+  // Per-leg distance + duration mirrored from the server. Drives the
+  // route ETA chip (e.g. "8 min to station") so the customer sees a
+  // truthful, route-aware estimate instead of the older minute-based
+  // server `eta` which was a coarse haversine guess.
+  const [routeMeta, setRouteMeta] = useState<{
+    distanceMeters?: number;
+    durationSeconds?: number;
+  } | null>(null);
+  // Continuous halo around the rider's pin — same machinery as the
+  // Stations destination pulse. Map-native Circle so the bitmap stays
+  // sharp at every zoom level (no react-native-maps tracksViewChanges
+  // bitmap blur).
+  const riderPulseRef = useRef(new Animated.Value(0));
+  const [riderPulseProgress, setRiderPulseProgress] = useState(0);
   // Server-provided delivery coords (populated by refreshOrderState
   // from the order doc's deliveryAddress). Falls back to the local
   // draft's deliveryCoords when reaching Track from a hot order
@@ -155,6 +179,13 @@ export default function TrackScreen() {
   const [serverDeliveryCoord, setServerDeliveryCoord] = useState<
     { latitude: number; longitude: number } | null
   >(null);
+  // Destination pin glyph from the populated Address doc. Stored
+  // separately from coords because the server populate may return an
+  // address with an icon but a missing lat/lng (legacy rows), and
+  // vice-versa.
+  const [serverDeliveryIcon, setServerDeliveryIcon] = useState<string | null>(
+    null
+  );
   const mapRef = useRef<MapView>(null);
   const sheetRef = useRef<BottomSheet>(null);
 
@@ -182,11 +213,12 @@ export default function TrackScreen() {
    * `setServerStatus` if the value changed, so re-fetching after
    * each reconnect doesn't cause cascading re-renders.
    */
-  const refreshOrderState = useCallback(async () => {
-    if (!effectiveOrderId) return;
+  const refreshOrderState = useCallback(async (overrideOrderId?: string) => {
+    const oid = overrideOrderId ?? effectiveOrderId;
+    if (!oid) return;
     try {
       const order = await api.get<ServerOrder>(
-        `/api/orders/${effectiveOrderId}`,
+        `/api/orders/${oid}`,
         { timeoutMs: 10_000 }
       );
       if (order.status) setServerStatus(order.status);
@@ -238,6 +270,9 @@ export default function TrackScreen() {
           longitude: order.deliveryAddress.longitude,
         });
       }
+      if (order.deliveryAddress?.icon) {
+        setServerDeliveryIcon(order.deliveryAddress.icon);
+      }
     } catch {
       // Non-fatal — socket events will fill us in.
     }
@@ -247,6 +282,40 @@ export default function TrackScreen() {
   useEffect(() => {
     refreshOrderState();
   }, [refreshOrderState]);
+
+  // Rider GPS halo loop — listens to the Animated.Value and mirrors
+  // each tick into state so the non-Animated `Circle` re-renders.
+  // Same shape used on the Stations destination halo.
+  useEffect(() => {
+    const v = riderPulseRef.current;
+    const id = v.addListener(({ value }) => setRiderPulseProgress(value));
+    const loop = Animated.loop(
+      Animated.timing(v, {
+        toValue: 1,
+        duration: 1800,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      })
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      v.removeListener(id);
+    };
+  }, []);
+
+  // 4-second poll while the order is active — guarantees the screen
+  // catches up even when socket events are missed (navigation drops,
+  // Expo Go bridge suspensions, reconnect race). Stops once the order
+  // reaches a terminal status (delivered/cancelled) or the component
+  // unmounts. Socket events remain the primary path; this is the net.
+  useEffect(() => {
+    if (!effectiveOrderId) return;
+    const TERMINAL = ["delivered", "rated", "closed"];
+    if (TERMINAL.includes(serverStatus) || serverStatus.startsWith("cancelled")) return;
+    const id = setInterval(() => refreshOrderStateRef.current(), 4000);
+    return () => clearInterval(id);
+  }, [effectiveOrderId, serverStatus]);
 
   // Reconnect catch-up — every time the socket comes back live after
   // a drop, re-fetch in case order:update events fired while we were
@@ -266,6 +335,15 @@ export default function TrackScreen() {
   useEffect(() => {
     effectiveOrderIdRef.current = effectiveOrderId;
   }, [effectiveOrderId]);
+
+  // Stable ref to refreshOrderState so socket handlers can call it
+  // without being in the effect dep array (avoids unbind/rebind on
+  // every effectiveOrderId change while keeping the call fresh).
+  const refreshOrderStateRef = useRef(refreshOrderState);
+  useEffect(() => {
+    refreshOrderStateRef.current = refreshOrderState;
+  }, [refreshOrderState]);
+
 
   /* ───────────────── Socket subscriptions ───────────────── */
   useEffect(() => {
@@ -309,6 +387,18 @@ export default function TrackScreen() {
         setRider(data.rider);
         setRiderInStore(data.rider);
       }
+      // Granular status events don't carry RiderInfo — refetch the order
+      // doc to hydrate rider when we know a rider must exist but don't
+      // have one locally yet. Pass orderId from the event payload so the
+      // fetch works even before effectiveOrderId lands in the closure.
+      const riderRequiredStatuses = [
+        "assigned", "at_plant", "refilling", "returning",
+        "arrived", "dispensing", "awaiting_confirmation",
+        "in-transit", "in_transit", "picked_up",
+      ];
+      if (data.status && riderRequiredStatuses.includes(data.status) && !data.rider) {
+        refreshOrderStateRef.current(data.orderId ?? effectiveOrderIdRef.current ?? undefined);
+      }
       // Capture delivery-confirm payload so Delivered/Complete can read
       // server-issued totals + timestamp without a follow-up GET.
       if (data.deliveredAt || data.totalCharged != null || data.pointsEarned != null) {
@@ -331,6 +421,8 @@ export default function TrackScreen() {
       orderId?: string;
       polyline?: [number, number][];
       target?: "station" | "destination";
+      distanceM?: number;
+      durationS?: number;
     }) => {
       if (!data.polyline) return;
       // Filter by orderId via ref — same pattern as onUpdate above.
@@ -341,6 +433,10 @@ export default function TrackScreen() {
         longitude: lng,
       }));
       setRoutePolyline(points);
+      setRouteMeta({
+        distanceMeters: data.distanceM,
+        durationSeconds: data.durationS,
+      });
     };
     socket.on("order:update", onUpdate);
     socket.on("rider:location", onLocation);
@@ -358,34 +454,45 @@ export default function TrackScreen() {
   }, [socketStatus, setRiderInStore, setDeliveryConfirmation, setWeighIn]);
 
   /**
-   * "Heading back" loader trigger. When the rider confirms heading
-   * back (server flips refilling → returning), flash the at-pickup
-   * progress bar for 5 seconds before the body re-routes itself to
-   * the in-transit RiderCard. Watching the prev/next pair instead
-   * of just `serverStatus === "returning"` so the loader only runs
-   * once per transition, not every render.
+   * Refill loader trigger — fires only on * → returning (rider tapped
+   * "Heading back to customer"). The bar plays for 5s while the phase
+   * is still "at-pickup", giving the customer a "filling done, on the
+   * way" moment before the status flips to in-transit.
    */
   useEffect(() => {
     const prev = prevServerStatusRef.current;
     prevServerStatusRef.current = serverStatus;
-    if (
-      (prev === "refilling" || prev === "at_plant") &&
-      serverStatus === "returning"
-    ) {
+
+    if (serverStatus === "returning" && prev !== "returning" && prev !== null) {
       setShowRefillLoader(true);
       const t = setTimeout(() => setShowRefillLoader(false), 5000);
       return () => clearTimeout(t);
     }
-    // Belt-and-braces: if the rider skipped straight past returning
-    // (LPG-Swap shortcut), make sure the loader doesn't get stuck on.
+
+    // Clear if the status jumped past at-pickup without going through
+    // returning (e.g. poll skipped a step) so the bar never stays stuck.
     if (
-      serverStatus !== "refilling" &&
       serverStatus !== "at_plant" &&
+      serverStatus !== "refilling" &&
       serverStatus !== "returning"
     ) {
       setShowRefillLoader(false);
     }
   }, [serverStatus]);
+
+  // When order reaches a terminal status, clear the persisted draft so
+  // `hasActiveOrder` flips to false and the sheet shows the empty state
+  // instead of the stale rider card. Must run AFTER navigation effects
+  // (arrived/dispensing route to Arrival) so we don't wipe the draft
+  // before those screens read it.
+  useEffect(() => {
+    const isTerminal =
+      serverStatus === "delivered" ||
+      serverStatus === "rated" ||
+      serverStatus === "closed" ||
+      serverStatus.startsWith("cancelled");
+    if (isTerminal) resetOrder();
+  }, [serverStatus, resetOrder]);
 
   /**
    * Phase-driven routed polyline. Two distinct legs depending on
@@ -434,8 +541,14 @@ export default function TrackScreen() {
 
     const fetchRoute = async () => {
       try {
+        // SECURITY (audit A.9): customer no longer passes rider coords.
+        // Server resolves the rider's last-known GPS from RiderProfile
+        // server-side. Passing client-supplied coords was a Directions
+        // API spend vector. The route:update socket push still arrives
+        // independently of this fetch; this is just the cold-start
+        // pull on phase change.
         const data = await api.get<RouteResponse>(
-          `/api/orders/${effectiveOrderId}/route?riderLat=${riderCoord.latitude}&riderLng=${riderCoord.longitude}&target=${routeTarget}`,
+          `/api/orders/${effectiveOrderId}/route?target=${routeTarget}`,
           { timeoutMs: 10_000 }
         );
         if (cancelled) return;
@@ -444,6 +557,10 @@ export default function TrackScreen() {
           longitude: lng,
         }));
         setRoutePolyline(points);
+        setRouteMeta({
+          distanceMeters: data.distanceMeters,
+          durationSeconds: data.durationSeconds,
+        });
       } catch {
         // Falls back to a straight line in render if no polyline cached.
       }
@@ -477,11 +594,19 @@ export default function TrackScreen() {
       serverStatus === "awaiting_confirmation";
     if (!isHandoffStatus) return;
     if (!effectiveOrderId) return;
-    if (draft.product === "lpg") {
-      router.replace("/(customer)/(track)/handoff" as never);
-    } else {
-      router.replace("/(customer)/(track)/arrival" as never);
-    }
+    // Defer the navigation by ~350ms so a mid-drag bottom-sheet pan
+    // gesture has time to settle before the screen swap (audit G.3).
+    // Without this, the user's drag is cancelled mid-flight, the
+    // sheet snaps to a random position, and the next screen
+    // re-mounts with a confusing layout glitch.
+    const t = setTimeout(() => {
+      if (draft.product === "lpg") {
+        router.replace("/(customer)/(track)/handoff" as never);
+      } else {
+        router.replace("/(customer)/(track)/arrival" as never);
+      }
+    }, 350);
+    return () => clearTimeout(t);
   }, [serverStatus, draft.product, effectiveOrderId, router]);
 
   const status = useMemo(
@@ -494,14 +619,27 @@ export default function TrackScreen() {
   // without drift. Folds legacy + v3 granular statuses transparently
   // — when the rider app upgrades, the customer's at-pickup +
   // arrived phases will start surfacing without changes here.
+  // Display ETA prefers the route-derived duration (real driving time
+  // from Google Directions) over the server's coarse eta field, which
+  // is haversine-based and doesn't account for roads/traffic. Round
+  // up to the nearest minute so we never show "0 min" while there's
+  // still distance left. Falls back to the legacy `eta` when route
+  // data isn't loaded yet.
+  const displayEta = useMemo(() => {
+    if (routeMeta?.durationSeconds != null && routeMeta.durationSeconds > 0) {
+      return Math.max(1, Math.round(routeMeta.durationSeconds / 60));
+    }
+    return eta;
+  }, [routeMeta?.durationSeconds, eta]);
+
   const trackPhase: TrackPhase = useMemo(
     () =>
       getTrackPhase({
         status: serverStatus,
         hasRider: !!rider,
-        etaMinutes: eta,
+        etaMinutes: displayEta,
       }),
-    [serverStatus, rider, eta]
+    [serverStatus, rider, displayEta]
   );
 
   /**
@@ -595,32 +733,73 @@ export default function TrackScreen() {
    * pre-assignment sometimes hasn't persisted the id locally).
    */
   const handleRecenter = useCallback(() => {
-    const center = riderCoord
-      ? {
-          latitude: (riderCoord.latitude + destinationCoord.latitude) / 2,
-          longitude: (riderCoord.longitude + destinationCoord.longitude) / 2,
-        }
-      : destinationCoord;
-    mapRef.current?.animateToRegion(
-      {
-        ...center,
-        latitudeDelta: 0.04,
-        longitudeDelta: 0.04,
-      },
-      320
-    );
-  }, [riderCoord, destinationCoord]);
+    // fitToCoordinates encloses everything visible (rider + station +
+    // destination) so long-distance orders don't land off-screen on
+    // re-center. Same call as the initial-fit effect below; manual
+    // re-center reuses it.
+    const coords: { latitude: number; longitude: number }[] = [];
+    if (riderCoord) coords.push(riderCoord);
+    if (station?.coord) coords.push(station.coord);
+    coords.push(destinationCoord);
+    if (coords.length >= 2) {
+      mapRef.current?.fitToCoordinates(coords, {
+        edgePadding: { top: 120, bottom: 380, left: 60, right: 60 },
+        animated: true,
+      });
+    } else {
+      mapRef.current?.animateToRegion(
+        {
+          ...destinationCoord,
+          latitudeDelta: 0.04,
+          longitudeDelta: 0.04,
+        },
+        320
+      );
+    }
+  }, [riderCoord, destinationCoord, station]);
+
+  /**
+   * Initial fit — fires once when the rider's first GPS lands AND we
+   * have a destination + (optionally) a station. The fixed
+   * `latitudeDelta: 0.04` initialRegion below was ~4 km, which on a
+   * long-distance order put one of the pins off-screen on first
+   * paint. fitToCoordinates encloses everything correctly. Audit D.5.
+   */
+  const initialFitDoneRef = useRef(false);
+  useEffect(() => {
+    if (initialFitDoneRef.current) return;
+    if (!riderCoord) return; // wait for first GPS
+    const coords: { latitude: number; longitude: number }[] = [riderCoord];
+    if (station?.coord) coords.push(station.coord);
+    coords.push(destinationCoord);
+    // Defer one frame — the MapView's bounds aren't laid out until
+    // after first render, and fitToCoordinates is a no-op against a
+    // 0×0 map.
+    const t = setTimeout(() => {
+      mapRef.current?.fitToCoordinates(coords, {
+        edgePadding: { top: 120, bottom: 380, left: 60, right: 60 },
+        animated: true,
+      });
+      initialFitDoneRef.current = true;
+    }, 250);
+    return () => clearTimeout(t);
+  }, [riderCoord, destinationCoord, station]);
 
   const handleCall = useCallback(() => {
     if (rider?.phone) Linking.openURL(`tel:${rider.phone}`);
   }, [rider?.phone]);
 
   const handleChat = useCallback(() => {
-    // TODO: in-app chat. For now route to the rider profile screen
-    // (placeholder — exists post-rider-revamp). Avoids a dead button.
+    // In-app chat is coming in v6.5 (audit B.7). Until then, this CTA
+    // surfaces a toast pointing the user to the call icon next to it.
+    // We KEEP the icon visible because removing it would leave a gap
+    // in the rider card; the design accommodates it and it's worth
+    // signalling that real-time messaging is on the roadmap.
     if (!rider) return;
-    router.push("/(screens)/profile" as never);
-  }, [rider, router]);
+    toast.info("Chat with rider coming soon", {
+      description: "Tap the call icon to reach them now.",
+    });
+  }, [rider]);
 
   /**
    * Stable snap-point array. gorhom/bottom-sheet v5 compares this
@@ -628,10 +807,16 @@ export default function TrackScreen() {
    * resets the sheet's animated state and (on Android) can leave
    * it visually missing despite being mounted.
    */
-  const snapPoints = useMemo<(string | number)[]>(
-    () => ["18%", "45%", "85%"],
-    []
-  );
+  // Peek snap bumped to 22% on phones shorter than ~720dp (audit
+  // G.5). At 18% on a Pixel 4a / iPhone SE the peek strip is < 130px
+  // and the FloatingCTA overlay clipped the sheet's drag handle. 22%
+  // gives the handle clearance without losing the "tiny peek"
+  // affordance on bigger screens.
+  const { height: windowHeight } = useWindowDimensions();
+  const snapPoints = useMemo<(string | number)[]>(() => {
+    const peek = windowHeight < 720 ? "22%" : "18%";
+    return [peek, "45%", "85%"];
+  }, [windowHeight]);
 
   /**
    * "No active order" is no longer a full-screen replacement for the
@@ -662,6 +847,16 @@ export default function TrackScreen() {
   // station, not the destination. Skip rendering until the phase-aware
   // Directions API call returns.
   const polylineCoords = routePolyline.length > 1 ? routePolyline : [];
+
+  // Rider halo geometry — same numbers as the rider screen so the
+  // pulse reads identically on both sides. Two concentric rings 0.5
+  // cycles apart for a continuous "alive" feel; both centred on the
+  // rider's pin coord so they sit dead-centre on the motorbike glyph.
+  const riderPulseRadiusM = 25 + 75 * riderPulseProgress;
+  const riderPulseOpacity = 0.5 * (1 - riderPulseProgress);
+  const offsetProgress = (riderPulseProgress + 0.5) % 1;
+  const riderPulseRadiusM2 = 25 + 75 * offsetProgress;
+  const riderPulseOpacity2 = 0.5 * (1 - offsetProgress);
 
   return (
     <View style={[styles.root, { backgroundColor: theme.bg }]}>
@@ -696,24 +891,63 @@ export default function TrackScreen() {
             strokeWidth={4}
           />
         ) : null}
-        {riderCoord ? <MapMarkerRider coordinate={riderCoord} pulse /> : null}
-        {/* Station pickup pin — small green circle with the station's
-            brand monogram. Renders during assigned + in-transit;
-            fades out on almost-there per design. */}
+        {/* Rider GPS halo — two concentric pulses 0.5 cycles apart so
+            the user always sees a ring expanding around the pin. Both
+            Circles share the rider's coord with the Marker, so the
+            halo sits dead-centre on the motorbike glyph at all zooms. */}
+        {riderCoord ? (
+          <>
+            <Circle
+              center={riderCoord}
+              radius={riderPulseRadiusM}
+              strokeColor="transparent"
+              strokeWidth={0}
+              fillColor={`${theme.primary}${Math.round(riderPulseOpacity * 255)
+                .toString(16)
+                .padStart(2, "0")}`}
+              zIndex={996}
+            />
+            <Circle
+              center={riderCoord}
+              radius={riderPulseRadiusM2}
+              strokeColor="transparent"
+              strokeWidth={0}
+              fillColor={`${theme.primary}${Math.round(riderPulseOpacity2 * 255)
+                .toString(16)
+                .padStart(2, "0")}`}
+              zIndex={995}
+            />
+          </>
+        ) : null}
+
+        {/* Station pin — fades during almost-there + pre-assignment
+            per the design (focus shifts to rider→customer leg). */}
         {station &&
         trackPhase !== "almost-there" &&
         trackPhase !== "pre-assignment" ? (
-          <Marker coordinate={station.coord} tracksViewChanges={false}>
-            <View style={styles.stationPin}>
-              <Text style={styles.stationPinText}>{station.brand}</Text>
-            </View>
-          </Marker>
+          <StationMapPin coordinate={station.coord} />
         ) : null}
-        <Marker coordinate={destinationCoord}>
-          <View style={styles.destPin}>
-            <Ionicons name="location" size={22} color={theme.primary} />
-          </View>
-        </Marker>
+
+        {/* Destination — uses the saved address's icon glyph so the
+            customer recognises which of their addresses it is.
+            Source priority: server-populated Address.icon (covers the
+            "fresh app open, no hot draft" case) → in-flight draft
+            value (covers reaching Track from a hot order flow) →
+            generic location-sharp fallback handled by the pin. */}
+        <DestinationMapPin
+          coordinate={destinationCoord}
+          iconName={serverDeliveryIcon ?? draft.deliveryIcon}
+        />
+
+        {/* Rider — keyed on rounded coords so Android's marker cache
+            picks up position changes (a static `Marker`'s bitmap
+            doesn't update when the coord prop alone shifts). */}
+        {riderCoord ? (
+          <RiderMapPin
+            key={`rider-${riderCoord.latitude.toFixed(3)}-${riderCoord.longitude.toFixed(3)}`}
+            coordinate={riderCoord}
+          />
+        ) : null}
       </MapView>
 
       {/* Connection strips — NetInfo first (no internet), then
@@ -740,6 +974,7 @@ export default function TrackScreen() {
           accessibilityRole="button"
           accessibilityLabel="Back to home"
           accessibilityHint="Leaves the tracking screen. Your order keeps running in the background."
+          hitSlop={8}
           style={({ pressed }) => [
             styles.roundBtn,
             pressed && { opacity: 0.85 },
@@ -758,6 +993,8 @@ export default function TrackScreen() {
           onPress={handleRecenter}
           accessibilityRole="button"
           accessibilityLabel="Re-center map on rider"
+          accessibilityHint="Brings the rider's position back into view"
+          hitSlop={8}
           style={({ pressed }) => [
             styles.roundBtn,
             pressed && { opacity: 0.85 },
@@ -802,7 +1039,7 @@ export default function TrackScreen() {
             status={status}
             trackPhase={trackPhase}
             orderId={effectiveOrderId ?? "—"}
-            etaMinutes={eta}
+            etaMinutes={displayEta}
             qty={draft.qty ?? 0}
             unit={draft.unit ?? "L"}
             fuelLabel={draft.fuelTypeId ?? ""}
@@ -867,39 +1104,6 @@ const makeStyles = (theme: Theme) =>
       paddingHorizontal: 8,
       paddingVertical: 4,
       ...theme.elevation.card,
-    },
-    destPin: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: theme.surface,
-      alignItems: "center",
-      justifyContent: "center",
-      ...theme.elevation.card,
-    },
-    /**
-     * Pickup station pin — small green circle with brand letters.
-     * Matches the design's NN/TE/MO style monogram-on-green pin.
-     * Sized smaller than the destination pin so the pickup reads
-     * as "starting point" while the customer's address gets the
-     * visual weight.
-     */
-    stationPin: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
-      backgroundColor: theme.primary,
-      borderWidth: 2,
-      borderColor: "#fff",
-      alignItems: "center",
-      justifyContent: "center",
-      ...theme.elevation.card,
-    },
-    stationPinText: {
-      fontSize: 10,
-      fontWeight: "800",
-      color: "#fff",
-      ...theme.type.money,
     },
     sheetContent: {
       paddingHorizontal: theme.space.s4,

@@ -178,7 +178,8 @@ export default function DeliveredScreen() {
           the socket payload races the screen mount. */}
       <View style={styles.pointsCard}>
         <View style={styles.pointsCoin}>
-          <Ionicons name="star" size={18} color={theme.palette.neutral900} />
+          {/* Star is reserved for ratings; Points uses sparkles. */}
+          <Ionicons name="sparkles" size={18} color={theme.palette.neutral900} />
         </View>
         <View style={styles.pointsBody}>
           <Text style={styles.pointsTitle}>

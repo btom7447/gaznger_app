@@ -199,7 +199,7 @@ export default function RiderProfileScreen() {
         style: "destructive",
         onPress: () => {
           logout();
-          router.replace("/(auth)/authentication" as any);
+          router.replace("/(auth)/welcome" as any);
         },
       },
     ]);

@@ -53,6 +53,13 @@ export interface OrderDraft {
   cylinderImages: string[];
   deliveryAddressId?: string;
   deliveryLabel?: string;
+  /**
+   * Ionicons glyph name (e.g. "home-outline", "briefcase-outline") that
+   * the user picked when saving the address. Surfaces in the Stations
+   * map view's delivery-pin so the user instantly recognises which
+   * saved address they're delivering to.
+   */
+  deliveryIcon?: string;
   deliveryCoords?: { lat: number; lng: number };
   stationId?: string;
   stationLabel?: string;
@@ -188,6 +195,7 @@ interface OrderState {
     id: string;
     label?: string;
     coords?: { lat: number; lng: number };
+    icon?: string;
   }) => void;
   /** Lock the price at the Stations screen. Computes totalKobo from qty × perUnitKobo. */
   lockStation: (input: Omit<LockedStation, "totalKobo" | "lockedAt">) => void;
@@ -418,13 +426,14 @@ export const useOrderStore = create<OrderState>()(
           },
         })),
 
-      setSelectedAddress: ({ id, label, coords }) =>
+      setSelectedAddress: ({ id, label, coords, icon }) =>
         set((state) => ({
           order: {
             ...state.order,
             deliveryAddressId: id,
             deliveryLabel: label,
             deliveryCoords: coords,
+            deliveryIcon: icon,
           },
         })),
 

@@ -48,8 +48,10 @@ const SLOTS: SlotMeta[] = [
 ];
 
 /**
- * LPG-swap step 3 — two photos. The actual upload pipeline (Cloudinary)
- * stays out of scope for this slice; we capture URIs and persist them.
+ * LPG-swap step 3 — two photos. Captures local URIs, then on Continue
+ * uploads each to Cloudinary via `/api/upload/image` and persists the
+ * resulting `secure_url`s into the order draft. The order POST
+ * downstream sends server-resolvable URLs, not device-only file:// paths.
  *
  * Skip option appears for users with 5+ completed LPG orders — gated by
  * a flag we'll wire when /api/users/me returns lpgOrderCount.

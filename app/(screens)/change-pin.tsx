@@ -19,6 +19,16 @@ import {
   ScreenContainer,
   ScreenHeader,
 } from "@/components/ui/primitives";
+import {
+  getBioCredential,
+  getBiometricEnabled,
+  hasBioCredential,
+} from "@/lib/auth";
+import {
+  biometricLabel,
+  checkBiometricAvailability,
+  type BiometricType,
+} from "@/lib/permissions";
 
 /**
  * Change PIN — v3.
@@ -62,6 +72,40 @@ export default function ChangePinScreen() {
   const [newPin, setNewPin] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const passwordInputRef = useRef<TextInput>(null);
+
+  // Biometric skip — when bio sign-in is enabled AND we're on the
+  // "current PIN" step, surface a one-tap shortcut. On success we
+  // read the cached PIN from the bio credential and advance to the
+  // "new" step with currentPin pre-populated. The SecureStore read
+  // is gated by the OS biometric prompt, so the only way this
+  // resolves is if the user passes biometric.
+  const [bioSkipReady, setBioSkipReady] = useState(false);
+  const [bioType, setBioType] = useState<BiometricType>("none");
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const [enabled, hasCred, avail] = await Promise.all([
+        getBiometricEnabled(),
+        hasBioCredential(),
+        checkBiometricAvailability(),
+      ]);
+      if (!alive) return;
+      setBioSkipReady(enabled && hasCred && avail.available);
+      setBioType(avail.type);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const handleBioSkip = useCallback(async () => {
+    const cred = await getBioCredential(
+      `Use ${biometricLabel(bioType)} to verify your current PIN`
+    );
+    if (!cred) return;
+    setCurrentPin(cred.pin);
+    setStep("new");
+  }, [bioType]);
 
   // Shake animation for wrong PIN / mismatched confirm.
   const shakeAnim = useRef(new Animated.Value(0)).current;
@@ -314,6 +358,31 @@ export default function ChangePinScreen() {
               <Text style={styles.submittingText}>Updating PIN…</Text>
             ) : null}
 
+            {/* Bio shortcut — only on the "verify current PIN" step,
+                only when bio sign-in is enabled. Tapping reads the
+                cached PIN behind a biometric prompt and skips the
+                user past this step. */}
+            {step === "current" && bioSkipReady && !submitting ? (
+              <Pressable
+                onPress={handleBioSkip}
+                accessibilityRole="button"
+                accessibilityLabel={`Use ${biometricLabel(bioType)} instead`}
+                style={({ pressed }) => [
+                  styles.bioSkipBtn,
+                  pressed && { opacity: 0.85 },
+                ]}
+              >
+                <Ionicons
+                  name="finger-print"
+                  size={18}
+                  color={theme.primary}
+                />
+                <Text style={styles.bioSkipText}>
+                  Use {biometricLabel(bioType)} instead
+                </Text>
+              </Pressable>
+            ) : null}
+
             <View style={styles.keypad}>
               {KEYS.map((row, ri) => (
                 <View key={ri} style={styles.keyRow}>
@@ -435,6 +504,30 @@ const makeStyles = (theme: Theme) =>
       textAlign: "center",
       marginTop: -theme.space.s3,
       marginBottom: theme.space.s3,
+    },
+
+    /** Biometric skip CTA on the "current PIN" step. Subtle outlined
+     *  pill so it doesn't compete with the keypad as the primary
+     *  affordance — tapping is the recommended path for bio users
+     *  but typing the PIN still works. */
+    bioSkipBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      alignSelf: "center",
+      paddingHorizontal: theme.space.s4,
+      paddingVertical: theme.space.s2,
+      borderRadius: theme.radius.pill,
+      borderWidth: 1.5,
+      borderColor: theme.primary,
+      backgroundColor: theme.surface,
+      marginBottom: theme.space.s3,
+    },
+    bioSkipText: {
+      ...theme.type.bodySm,
+      fontWeight: "800",
+      color: theme.primary,
     },
 
     /* Keypad */

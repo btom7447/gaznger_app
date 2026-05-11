@@ -1,5 +1,5 @@
-import React, { useEffect } from "react";
-import { Stack, useRouter } from "expo-router";
+import React, { useEffect, useRef } from "react";
+import { Stack, usePathname, useRouter } from "expo-router";
 import { useTheme } from "@/constants/theme";
 import { StatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -9,12 +9,15 @@ import { Toaster } from 'sonner-native';
 import { PaystackProvider } from "react-native-paystack-webview";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useWalletStore } from "@/store/useWalletStore";
+import { usePendingSignupStore } from "@/store/usePendingSignupStore";
 import Constants from "expo-constants";
 import { api } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
 import { initActionQueue } from "@/lib/actionQueue";
 import { getPaystackPublicKey } from "@/lib/paystackKey";
 import DebugOverlay from "@/components/ui/global/DebugOverlay";
+import { useAppLockOnResume } from "@/hooks/useAppLockOnResume";
+import { StepUpAuthHost } from "@/components/ui/auth";
 
 const isExpoGo = Constants.appOwnership === "expo";
 
@@ -54,6 +57,7 @@ async function syncUserSession() {
       savedCylinder: user.savedCylinder,
       preferences: user.preferences,
       hasPin: user.hasPin,
+      verificationStatus: user.verificationStatus,
       addressBook: Array.isArray(user.addressBook) ? user.addressBook : undefined,
     });
   } catch {
@@ -75,16 +79,55 @@ function syncWalletAndSubscribe(): () => void {
 export default function RootLayout() {
   const theme = useTheme();
   const router = useRouter();
+  const pathname = usePathname();
+
+  // App-lock on resume after >5min in background (audit B.9). Hook
+  // attaches its AppState listener once for the app lifetime.
+  useAppLockOnResume();
+
+  // Stash pathname in a ref so the (one-shot) Zustand subscriber
+  // below can read the current route at the moment a logout fires
+  // — it doesn't re-bind on every render. Without this, the
+  // subscriber would aggressively route to welcome even when the
+  // user is actively on an unlock screen and the logout was a
+  // transient refresh-token failure.
+  const pathnameRef = useRef(pathname);
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
 
   // Redirect to auth whenever the session is cleared (e.g. token refresh fails after server restart)
+  const bootedAtRef = useRef(Date.now());
   useEffect(() => {
     let prev = useSessionStore.getState().isLoggedIn;
     let detachWallet: (() => void) | undefined;
     const unsub = useSessionStore.subscribe((state) => {
       if (prev && !state.isLoggedIn && state.hasHydrated) {
-        router.replace("/(auth)/authentication");
+        const path = pathnameRef.current ?? "";
+        const sinceBoot = Date.now() - bootedAtRef.current;
+        // Tolerance window: if a logout fires within the first 10s of
+        // app boot OR while the user is on an unlock screen, it's
+        // almost certainly a transient refresh-token glitch (stale
+        // access token + a refresh that hit reuse-detection because
+        // the previous app session didn't persist its rotation).
+        // Route to PIN unlock so the user can re-mint via /auth/login
+        // with their cached PIN, NOT welcome (which forces a full
+        // re-OTP signup).
+        const onUnlock =
+          path.includes("/(auth)/unlock") || path.includes("/unlock/");
+        const earlyBoot = sinceBoot < 10_000;
+        if (onUnlock || earlyBoot) {
+          router.replace("/(auth)/unlock/pin" as never);
+        } else {
+          router.replace("/(auth)/welcome");
+        }
         detachWallet?.();
         detachWallet = undefined;
+        // Security hygiene — drop any half-finished signup draft so a
+        // fresh user signing in on the same device doesn't accidentally
+        // resume the previous account's verification token, role, or
+        // PIN. Idempotent: a no-op when the draft is already empty.
+        usePendingSignupStore.getState().reset();
       }
       // Register device token, connect socket, sync profile + wallet on login
       if (!prev && state.isLoggedIn && state.hasHydrated) {
@@ -97,7 +140,18 @@ export default function RootLayout() {
       }
       prev = state.isLoggedIn;
     });
-    // Same flow on mount when the user is already logged in (app resume)
+    // Same flow on mount when the user is already logged in (app resume).
+    //
+    // Critical: we DO NOT call syncUserSession() on cold mount when
+    // the user has a PIN configured. Cold mount routes to
+    // /(auth)/unlock/biometric (or /unlock/pin) BEFORE the user has
+    // proven local auth — firing /auth/me at that moment risks a 401
+    // (access token expired overnight) → refreshTokens() failure →
+    // logout() → subscriber routes to welcome AS THE USER IS
+    // AUTHENTICATING via biometric. The fingerprint succeeds, but
+    // they land on welcome anyway. We let unlock complete first; the
+    // unlock screens (PIN flow especially) re-mint the session via
+    // /auth/login, after which sync runs cleanly.
     const session = useSessionStore.getState();
     if (session.isLoggedIn) {
       registerDeviceToken();
@@ -106,8 +160,19 @@ export default function RootLayout() {
       // the socket comes live. Idempotent — calling on every mount
       // is fine.
       initActionQueue();
-      syncUserSession();
-      detachWallet = syncWalletAndSubscribe();
+      if (!session.user?.hasPin) {
+        // No PIN configured — no unlock screen on cold start, so the
+        // network calls below are safe to fire immediately. With a
+        // PIN configured we defer them until the unlock screen
+        // promotes the user via /auth/login (which mints a fresh
+        // access + refresh pair). Without this guard, ANY 401 here
+        // (e.g. expired access token + a stale refresh in
+        // SecureStore) trips refreshTokens() → logout() → the
+        // session subscriber routes to welcome WHILE the user is
+        // mid-fingerprint.
+        syncUserSession();
+        detachWallet = syncWalletAndSubscribe();
+      }
     }
     return () => {
       unsub();
@@ -138,6 +203,7 @@ export default function RootLayout() {
                 <Stack.Screen name="(screens)" />
                 <Stack.Screen name="(legal)/privacy" />
                 <Stack.Screen name="(legal)/terms" />
+                <Stack.Screen name="(legal)/oss" />
               </Stack>
               {/* Phase 6 debug overlay — invisible long-press hit-area
                   in the top-left corner. Mounted at root so it overlays
@@ -145,6 +211,11 @@ export default function RootLayout() {
                   cost is one Pressable + one ring buffer; the modal
                   only renders when the user deliberately opens it. */}
               <DebugOverlay />
+              {/* Step-up auth host — listens to a Zustand store for
+                  any `requireStepUpAuth({ reason })` call and shows a
+                  PIN-entry sheet. Biometric is tried first inside the
+                  helper; the sheet is only the fallback. */}
+              <StepUpAuthHost />
             </BottomSheetModalProvider>
           </PaystackProvider>
         </SafeAreaProvider>

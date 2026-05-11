@@ -27,7 +27,7 @@ import {
  * active sign-in) and lets the user revoke individual rows OR every
  * row except the current one. Wiring:
  *
- *   GET    /auth/sessions?current=<refreshToken>  → list w/ current flag
+ *   GET    /auth/sessions  (X-Current-Refresh-Token header)  → list w/ current flag
  *   DELETE /auth/sessions/:id                     → revoke one
  *   DELETE /auth/sessions { currentRefreshToken } → revoke all others
  *
@@ -96,11 +96,13 @@ export default function ActiveSessionsScreen() {
 
   const load = useCallback(async () => {
     try {
-      const qs = refreshToken
-        ? `?current=${encodeURIComponent(refreshToken)}`
-        : "";
+      // Pass the refresh token in a header (audit F.2) so it doesn't
+      // land in proxy/access logs the way `?current=` did.
       const res = await api.get<{ sessions: SessionItem[] }>(
-        `/auth/sessions${qs}`
+        `/auth/sessions`,
+        refreshToken
+          ? { headers: { "X-Current-Refresh-Token": refreshToken } }
+          : {}
       );
       setSessions(res.sessions ?? []);
     } catch (err: any) {

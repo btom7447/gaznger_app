@@ -170,10 +170,7 @@ export default function WalletHome() {
             {children}
           </View>
         )}
-        contentContainerStyle={[
-          styles.listContent,
-          isEmpty && { paddingHorizontal: 0 },
-        ]}
+        contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
             refreshing={isLoading}
@@ -243,7 +240,8 @@ function getKindStyle(
       };
     case "points_redeem":
       return {
-        icon: "star",
+        // Star is reserved for ratings; Points uses sparkles.
+        icon: "sparkles",
         bg: dark ? muted : theme.palette.gold50,
         fg: dark ? "#fff" : theme.palette.gold700,
       };
@@ -425,18 +423,18 @@ const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     listContent: {
       paddingHorizontal: theme.space.s4,
-      paddingBottom: theme.space.s5,
+      paddingTop: theme.space.s3,
+      paddingBottom: theme.space.s6,
     },
 
     /* Hero */
     hero: {
       backgroundColor: theme.primary,
-      borderRadius: 20,
-      paddingHorizontal: 22,
-      paddingTop: 22,
-      paddingBottom: 22,
-      marginTop: theme.space.s1,
-      marginBottom: theme.space.s4,
+      borderRadius: theme.radius.xl - 4,
+      paddingHorizontal: theme.space.s5,
+      paddingTop: theme.space.s5,
+      paddingBottom: theme.space.s5,
+      marginBottom: theme.space.s4 + 2,
       overflow: "hidden",
       // soft cast shadow on light mode; subtle on dark
       shadowColor: theme.palette.green700,
@@ -517,12 +515,14 @@ const makeStyles = (theme: Theme) =>
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "baseline",
-      paddingBottom: theme.space.s2,
+      paddingTop: theme.space.s2,
+      paddingBottom: theme.space.s3,
     },
     sectionTitle: {
-      fontSize: 14,
+      fontSize: 15,
       fontWeight: "800",
       color: theme.fg,
+      letterSpacing: -0.2,
     },
 
     /* Empty + loading cards */
@@ -534,7 +534,6 @@ const makeStyles = (theme: Theme) =>
       paddingVertical: 40,
       paddingHorizontal: 20,
       alignItems: "center",
-      marginHorizontal: theme.space.s4,
     },
     emptyIconWrap: {
       width: 64,

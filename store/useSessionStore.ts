@@ -80,6 +80,13 @@ export interface SessionUser {
   hasPin?: boolean;
 
   /**
+   * Rider/vendor verification status. Set on signup and updated by
+   * the server when verification clears (push event + /auth/me).
+   * Customers don't carry this field.
+   */
+  verificationStatus?: "pending" | "approved" | "rejected";
+
+  /**
    * Saved address ids. Mirrored from the server's User.addressBook so
    * the Profile row badge can show the count without an extra fetch.
    */

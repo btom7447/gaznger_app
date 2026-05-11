@@ -8,6 +8,11 @@ import { useSessionStore } from "@/store/useSessionStore";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
 import { useWalletStore } from "@/store/useWalletStore";
 import { api } from "@/lib/api";
+import {
+  clearBioCredential,
+  markBioCredentialPresent,
+  setBiometricEnabled,
+} from "@/lib/auth";
 import { pickAndUploadProfileImage } from "@/lib/uploadProfileImage";
 import {
   Row,
@@ -106,8 +111,18 @@ export default function ProfileScreen() {
         .post("/auth/logout", refreshToken ? { refreshToken } : {})
         .catch(() => {});
     } finally {
+      // Wipe the bio sign-in credential + flag together with the
+      // session. Explicit signout means "no auto sign-in until I
+      // come back through phone+OTP" — keeping a credential alive
+      // would let the next person on this device tap the bio
+      // button and walk straight in.
+      await Promise.all([
+        clearBioCredential().catch(() => {}),
+        markBioCredentialPresent(false).catch(() => {}),
+        setBiometricEnabled(false).catch(() => {}),
+      ]);
       logout();
-      router.replace("/(auth)/authentication" as never);
+      router.replace("/(auth)/welcome" as never);
     }
   }, [logout, router]);
 

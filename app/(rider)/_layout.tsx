@@ -12,7 +12,7 @@ export default function RiderLayout() {
   useEffect(() => {
     if (!hasHydrated) return;
     if (!isLoggedIn) {
-      router.replace("/(auth)/authentication" as any);
+      router.replace("/(auth)/welcome" as any);
       return;
     }
     if (user?.role !== "rider") {

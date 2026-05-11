@@ -8,12 +8,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import * as Location from "expo-location";
-import MapView, { Marker, Region, PROVIDER_GOOGLE } from "react-native-maps";
 import { toast } from "sonner-native";
 import { useTheme } from "@/constants/theme";
 import { useSessionStore } from "@/store/useSessionStore";
 import { api } from "@/lib/api";
+import {
+  AddressSheet,
+  type AddressResult,
+  type AddressSheetRef,
+} from "@/components/ui/primitives";
+import { NIGERIA_STATES } from "@/constants/nigeriaStates";
 
 type Tab = "info" | "photos" | "payout" | "verify" | "reviews";
 
@@ -167,11 +171,19 @@ export default function StationDetailScreen() {
   const [lng, setLng] = useState("");
   const [savingInfo, setSavingInfo] = useState(false);
 
-  // Map
-  const [mapRegion, setMapRegion] = useState<Region>({
-    latitude: 6.5244, longitude: 3.3792, latitudeDelta: 0.01, longitudeDelta: 0.01,
-  });
-  const [locating, setLocating] = useState(false);
+  // Shared AddressSheet — replaces the legacy inline map+lat/lng inputs.
+  const addressSheetRef = useRef<AddressSheetRef>(null);
+  const handleAddressConfirm = (r: AddressResult) => {
+    setAddress(r.address);
+    const stateLabel =
+      NIGERIA_STATES.find((s) => s.code === r.state)?.label ??
+      r.stateLabel ??
+      r.state;
+    setStateVal(stateLabel);
+    setLga(r.lga);
+    setLat(r.latitude.toFixed(6));
+    setLng(r.longitude.toFixed(6));
+  };
 
   // Photos tab
   const [images, setImages] = useState<string[]>([]);
@@ -207,7 +219,6 @@ export default function StationDetailScreen() {
       const sLng = s.location?.lng ?? 3.3792;
       setLat(String(sLat));
       setLng(String(sLng));
-      setMapRegion({ latitude: sLat, longitude: sLng, latitudeDelta: 0.01, longitudeDelta: 0.01 });
       setImages(s.images ?? []);
       setBankName((s as any).bankAccount?.bankName ?? "");
       setAccountNumber((s as any).bankAccount?.accountNumber ?? "");
@@ -234,23 +245,6 @@ export default function StationDetailScreen() {
 
   useEffect(() => { fetchStation(); }, [fetchStation]);
   useEffect(() => { if (activeTab === "reviews") fetchReviews(); }, [activeTab]);
-
-  const locateMe = async () => {
-    setLocating(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") { toast.info("Location permission denied"); return; }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const { latitude, longitude } = loc.coords;
-      setLat(latitude.toFixed(6));
-      setLng(longitude.toFixed(6));
-      setMapRegion({ latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 });
-    } catch {
-      toast.error("Could not get location");
-    } finally {
-      setLocating(false);
-    }
-  };
 
   const saveInfo = async () => {
     if (!name.trim() || !address.trim()) {
@@ -487,57 +481,64 @@ export default function StationDetailScreen() {
                 placeholderTextColor={theme.icon}
               />
             </Field>
-            <Field label="Street Address">
-              <TextInput
+            {/* Tap-to-edit address row — opens the shared AddressSheet
+                which handles search + map drop pin + state dropdown +
+                LGA reverse-geocode. Replaces the legacy 3-field +
+                inline lat/lng + inline map editor. */}
+            <Field label="Station Address">
+              <TouchableOpacity
+                onPress={() =>
+                  addressSheetRef.current?.open({
+                    address,
+                    state:
+                      NIGERIA_STATES.find(
+                        (st) =>
+                          st.label.toLowerCase() === stateVal.toLowerCase()
+                      )?.code,
+                    lga,
+                    latitude: parseFloat(lat) || undefined,
+                    longitude: parseFloat(lng) || undefined,
+                  })
+                }
+                activeOpacity={0.85}
                 style={[
-                  s.input,
-                  {
-                    color: theme.text,
-                    borderColor: theme.ash,
-                    backgroundColor: theme.surface,
-                  },
+                  s.addressBtn,
+                  { borderColor: theme.ash, backgroundColor: theme.surface },
                 ]}
-                value={address}
-                onChangeText={setAddress}
-                placeholderTextColor={theme.icon}
-              />
+              >
+                <Ionicons
+                  name="location"
+                  size={20}
+                  color={address ? theme.primary : theme.icon}
+                />
+                <View style={{ flex: 1 }}>
+                  {address ? (
+                    <>
+                      <Text
+                        style={[s.addressBtnPrimary, { color: theme.text }]}
+                        numberOfLines={1}
+                      >
+                        {address}
+                      </Text>
+                      <Text
+                        style={[s.addressBtnSecondary, { color: theme.icon }]}
+                        numberOfLines={1}
+                      >
+                        {[lga, stateVal].filter(Boolean).join(" · ") ||
+                          "Tap to refine"}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text
+                      style={[s.addressBtnPlaceholder, { color: theme.icon }]}
+                    >
+                      Search address + drop pin
+                    </Text>
+                  )}
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={theme.icon} />
+              </TouchableOpacity>
             </Field>
-            <View style={s.row}>
-              <View style={{ flex: 1 }}>
-                <Field label="State">
-                  <TextInput
-                    style={[
-                      s.input,
-                      {
-                        color: theme.text,
-                        borderColor: theme.ash,
-                        backgroundColor: theme.surface,
-                      },
-                    ]}
-                    value={stateVal}
-                    onChangeText={setStateVal}
-                    placeholderTextColor={theme.icon}
-                  />
-                </Field>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Field label="LGA">
-                  <TextInput
-                    style={[
-                      s.input,
-                      {
-                        color: theme.text,
-                        borderColor: theme.ash,
-                        backgroundColor: theme.surface,
-                      },
-                    ]}
-                    value={lga}
-                    onChangeText={setLga}
-                    placeholderTextColor={theme.icon}
-                  />
-                </Field>
-              </View>
-            </View>
 
             <Text style={[s.sectionLabel, { color: theme.icon }]}>
               OPERATING HOURS
@@ -581,125 +582,14 @@ export default function StationDetailScreen() {
               </View>
             </View>
 
-            {/* Location */}
-            <Text style={[s.sectionLabel, { color: theme.icon }]}>
-              LOCATION COORDINATES
-            </Text>
-            <View style={s.row}>
-              <View style={{ flex: 1 }}>
-                <Field label="Latitude">
-                  <TextInput
-                    style={[
-                      s.input,
-                      {
-                        color: theme.text,
-                        borderColor: theme.ash,
-                        backgroundColor: theme.surface,
-                      },
-                    ]}
-                    value={lat}
-                    onChangeText={(v) => {
-                      setLat(v);
-                      const parsed = parseFloat(v);
-                      if (!isNaN(parsed))
-                        setMapRegion((r) => ({ ...r, latitude: parsed }));
-                    }}
-                    placeholder="e.g. 6.5244"
-                    placeholderTextColor={theme.icon}
-                    keyboardType="decimal-pad"
-                  />
-                </Field>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Field label="Longitude">
-                  <TextInput
-                    style={[
-                      s.input,
-                      {
-                        color: theme.text,
-                        borderColor: theme.ash,
-                        backgroundColor: theme.surface,
-                      },
-                    ]}
-                    value={lng}
-                    onChangeText={(v) => {
-                      setLng(v);
-                      const parsed = parseFloat(v);
-                      if (!isNaN(parsed))
-                        setMapRegion((r) => ({ ...r, longitude: parsed }));
-                    }}
-                    placeholder="e.g. 3.3792"
-                    placeholderTextColor={theme.icon}
-                    keyboardType="decimal-pad"
-                  />
-                </Field>
-              </View>
-            </View>
-
-            {/* Map picker */}
-            <View style={[s.mapWrap, { borderColor: theme.ash }]}>
-              <MapView
-                provider={PROVIDER_GOOGLE}
-                style={s.map}
-                region={mapRegion}
-                onRegionChangeComplete={(r) => setMapRegion(r)}
-                onPress={(e) => {
-                  const { latitude, longitude } = e.nativeEvent.coordinate;
-                  setLat(latitude.toFixed(6));
-                  setLng(longitude.toFixed(6));
-                  setMapRegion((r) => ({ ...r, latitude, longitude }));
-                }}
-                showsUserLocation
-                showsMyLocationButton={false}
-              >
-                <Marker
-                  coordinate={{ latitude: mapRegion.latitude, longitude: mapRegion.longitude }}
-                  draggable
-                  onDragEnd={(e) => {
-                    const { latitude, longitude } = e.nativeEvent.coordinate;
-                    setLat(latitude.toFixed(6));
-                    setLng(longitude.toFixed(6));
-                    setMapRegion((r) => ({ ...r, latitude, longitude }));
-                  }}
-                >
-                  <View style={{ alignItems: "center" }}>
-                    <View style={[s.pinBubble, { backgroundColor: theme.primary }]}>
-                      <Ionicons name="location" size={16} color="#fff" />
-                    </View>
-                    <View style={[s.pinTail, { borderTopColor: theme.primary }]} />
-                  </View>
-                </Marker>
-              </MapView>
-
-              {/* Tooltip */}
-              <View style={[s.mapTooltip, { backgroundColor: theme.background + "EE" }]} pointerEvents="none">
-                <Ionicons name="finger-print-outline" size={13} color={theme.icon} />
-                <Text style={[s.mapTooltipText, { color: theme.icon }]}>Tap map or drag the pin</Text>
-              </View>
-
-              {/* Coordinates overlay */}
-              <View
-                style={[s.mapOverlay, { backgroundColor: theme.background + "EE" }]}
-                pointerEvents="none"
-              >
-                <Text style={[s.mapOverlayText, { color: theme.text }]}>
-                  {parseFloat(lat || "0").toFixed(5)}, {parseFloat(lng || "0").toFixed(5)}
-                </Text>
-              </View>
-
-              {/* Locate me */}
-              <TouchableOpacity
-                style={[s.locateBtn, { backgroundColor: theme.surface, borderColor: theme.ash }]}
-                onPress={locateMe}
-                disabled={locating}
-                activeOpacity={0.8}
-              >
-                {locating
-                  ? <ActivityIndicator size="small" color={theme.primary} />
-                  : <Ionicons name="locate-outline" size={18} color={theme.primary} />
-                }
-              </TouchableOpacity>
-            </View>
+            {/* Coordinates summary — read-only, populated by the
+                AddressSheet above. The pin/lat/lng + manual map are
+                gone; the sheet owns address capture end-to-end. */}
+            {lat && lng ? (
+              <Text style={[s.coordHint, { color: theme.icon }]}>
+                Pin: {parseFloat(lat).toFixed(5)}, {parseFloat(lng).toFixed(5)}
+              </Text>
+            ) : null}
 
             <TouchableOpacity
               style={[s.saveBtn, { backgroundColor: theme.primary }]}
@@ -1085,6 +975,16 @@ export default function StationDetailScreen() {
           )}
         </ScrollView>
       )}
+      <AddressSheet
+        ref={addressSheetRef}
+        onConfirm={handleAddressConfirm}
+        copy={{
+          title: "Station address",
+          sub: "Search the address, then drag the pin if it isn't quite right.",
+          searchPlaceholder: "Search address or landmark",
+          confirmLabel: "Use this address",
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -1092,6 +992,25 @@ export default function StationDetailScreen() {
 const styles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
     safe: { flex: 1, backgroundColor: theme.background },
+    /** Tap-to-edit address row (info tab) — opens the AddressSheet. */
+    addressBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      height: 64,
+      paddingHorizontal: 14,
+      borderWidth: 1.5,
+      borderRadius: 12,
+    },
+    addressBtnPrimary: { fontSize: 14, fontWeight: "700" },
+    addressBtnSecondary: { fontSize: 12, marginTop: 2 },
+    addressBtnPlaceholder: { fontSize: 14, fontWeight: "500" },
+    coordHint: {
+      fontSize: 11,
+      marginTop: 8,
+      paddingHorizontal: 4,
+      fontVariant: ["tabular-nums"],
+    },
     center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
     header: {

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -13,6 +13,20 @@ import {
   ScreenContainer,
   ScreenHeader,
 } from "@/components/ui/primitives";
+import {
+  clearBioCredential,
+  getBiometricEnabled,
+  markBioCredentialPresent,
+  setBioCredential,
+  setBiometricEnabled,
+} from "@/lib/auth";
+import {
+  authenticateBiometric,
+  checkBiometricAvailability,
+  biometricLabel,
+  type BiometricType,
+} from "@/lib/permissions";
+import { requireStepUpPin } from "@/components/ui/auth";
 
 const APP_VERSION =
   (Constants.expoConfig?.version as string | undefined) ?? "2.0.0";
@@ -79,12 +93,35 @@ export default function SettingsScreen() {
   const [autoRedeemPoints, setAutoRedeemPoints] = useState<boolean>(
     user?.preferences?.autoRedeemPoints ?? false
   );
-  // Biometric unlock toggle is local-only for now (pairs with PIN).
-  // expo-local-authentication isn't installed; we surface the toggle so
-  // the design lands faithfully and gate it on `hasPin` so it can't
-  // accept "on" without a PIN to fall back to. Wiring the actual
-  // biometric runtime is a follow-up: see B14 follow-up note.
+  // Biometric unlock toggle. SecureStore-persisted opt-in (per install,
+  // not per server account — re-installs require a fresh opt-in, the
+  // correct security default). On enable we do an OS prompt to confirm
+  // the user can actually pass biometric on this device; on disable we
+  // just flip the flag. PIN remains the universal fallback so toggling
+  // off doesn't strand anyone.
   const [biometricUnlock, setBiometricUnlock] = useState<boolean>(false);
+  const [bioAvailable, setBioAvailable] = useState<boolean>(false);
+  const [bioType, setBioType] = useState<BiometricType>("none");
+
+  // Hydrate the toggle's initial state + hardware availability on mount.
+  // We hide the row entirely when no biometric hardware is enrolled —
+  // showing a disabled switch is uglier than just omitting the option.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const [enabled, avail] = await Promise.all([
+        getBiometricEnabled(),
+        checkBiometricAvailability(),
+      ]);
+      if (!alive) return;
+      setBiometricUnlock(enabled);
+      setBioAvailable(avail.available);
+      setBioType(avail.type);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const togglePreference = useCallback(
     async (
@@ -118,7 +155,7 @@ export default function SettingsScreen() {
   );
 
   const handleBiometricToggle = useCallback(
-    (next: boolean) => {
+    async (next: boolean) => {
       if (next && !user?.hasPin) {
         toast.info("Set a PIN first", {
           description:
@@ -126,19 +163,88 @@ export default function SettingsScreen() {
         });
         return;
       }
-      // Local-only for now. We persist the intent so the user's choice
-      // survives a relaunch even though the runtime isn't wired yet.
-      setBiometricUnlock(next);
-      toast.info(
-        next ? "Biometric unlock will turn on" : "Biometric unlock disabled",
-        {
-          description: next
-            ? "We're shipping the biometric runtime in the next release."
-            : "You'll always be able to unlock with your PIN.",
+      if (next && !bioAvailable) {
+        toast.error("No biometric available", {
+          description:
+            "Set up Face ID or fingerprint on your device, then come back.",
+        });
+        return;
+      }
+
+      if (next) {
+        // ENABLE flow:
+        //   1. Capture PIN via the step-up sheet (validated against
+        //      /auth/pin/verify, so a wrong PIN can't enable bio).
+        //   2. Confirm device biometric works (otherwise we'd store
+        //      a credential the user can't actually unlock).
+        //   3. Stash {phone, pin} in SecureStore behind biometric.
+        //   4. Flip the bioEnabled flag.
+        if (!user?.phone) {
+          toast.error("Phone number missing — re-sign-in to enable.");
+          return;
         }
-      );
+        const pinResult = await requireStepUpPin({
+          reason:
+            "Enter your PIN to enable biometric sign-in on this device",
+        });
+        if (!pinResult.ok || !pinResult.pin) {
+          // User cancelled or got the PIN wrong; sheet already showed
+          // the error inline. Toast is just to confirm the toggle
+          // didn't flip.
+          toast.info("Biometric sign-in not enabled");
+          return;
+        }
+        const bioOk = await authenticateBiometric(
+          `Confirm ${biometricLabel(bioType)} to enable`
+        );
+        if (!bioOk) {
+          toast.info("Biometric sign-in not enabled", {
+            description: "Cancelled before confirming.",
+          });
+          return;
+        }
+        // Persist credential. Order matters: write the protected
+        // blob first, then mark the sentinel — if the protected
+        // write fails, the sentinel never claims a credential
+        // exists.
+        try {
+          await setBioCredential({ phone: user.phone, pin: pinResult.pin });
+          await markBioCredentialPresent(true);
+          await setBiometricEnabled(true);
+        } catch (err: any) {
+          // Roll back partial state.
+          await clearBioCredential().catch(() => {});
+          await setBiometricEnabled(false).catch(() => {});
+          toast.error("Couldn't enable biometric sign-in", {
+            description: err?.message ?? "Try again in a moment.",
+          });
+          return;
+        }
+        setBiometricUnlock(true);
+        toast.success("Biometric sign-in on", {
+          description: `Use ${biometricLabel(bioType)} on the welcome screen.`,
+        });
+        return;
+      }
+
+      // DISABLE flow — wipe credential + flag together.
+      const previous = biometricUnlock;
+      setBiometricUnlock(false);
+      try {
+        await clearBioCredential();
+        await markBioCredentialPresent(false);
+        await setBiometricEnabled(false);
+        toast.success("Biometric sign-in off", {
+          description: "You'll sign in with phone + PIN.",
+        });
+      } catch (err: any) {
+        setBiometricUnlock(previous);
+        toast.error("Couldn't disable", {
+          description: err?.message ?? "Try again in a moment.",
+        });
+      }
     },
-    [user?.hasPin]
+    [user?.hasPin, user?.phone, bioAvailable, bioType, biometricUnlock]
   );
 
   return (
@@ -305,19 +411,21 @@ export default function SettingsScreen() {
             }
             onPress={() => router.push("/(screens)/change-pin" as never)}
           />
-          <Row
-            icon="finger-print-outline"
-            label="Biometric unlock"
-            sub={
-              user?.hasPin
-                ? "Use Face ID or fingerprint when supported"
-                : "Set a PIN first to enable biometrics"
-            }
-            kind="switch"
-            switchValue={biometricUnlock}
-            onSwitchChange={handleBiometricToggle}
-            disabled={!user?.hasPin}
-          />
+          {bioAvailable ? (
+            <Row
+              icon={bioType === "face" ? "scan-outline" : "finger-print-outline"}
+              label={`${biometricLabel(bioType)} unlock`}
+              sub={
+                user?.hasPin
+                  ? `Use ${biometricLabel(bioType)} on launch instead of your PIN`
+                  : "Set a PIN first to enable biometrics"
+              }
+              kind="switch"
+              switchValue={biometricUnlock}
+              onSwitchChange={handleBiometricToggle}
+              disabled={!user?.hasPin}
+            />
+          ) : null}
           <Row
             icon="time-outline"
             label="Active sessions"
@@ -379,12 +487,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionLabel}>DANGER ZONE</Text>
         <View style={styles.dangerWrap}>
           <Pressable
-            onPress={() => {
-              // TODO: replace with confirm sheet → POST /auth/delete-account
-              toast.info("Account deletion not yet enabled", {
-                description: "Email support@gaznger.com to request deletion.",
-              });
-            }}
+            onPress={() => router.push("/(screens)/delete-account" as never)}
             accessibilityRole="button"
             accessibilityLabel="Delete my account"
             style={({ pressed }) => [
@@ -397,7 +500,7 @@ export default function SettingsScreen() {
           </Pressable>
           <Text style={styles.dangerNote}>
             We hold order records for 7 years (Nigerian tax law). Personal
-            info is wiped immediately.
+            info is wiped immediately; full deletion is finalised after 30 days.
           </Text>
         </View>
       </ScrollView>

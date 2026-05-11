@@ -236,7 +236,7 @@ export default function VendorProfileScreen() {
         style: "destructive",
         onPress: () => {
           logout();
-          router.replace("/(auth)/authentication" as any);
+          router.replace("/(auth)/welcome" as any);
         },
       },
     ]);

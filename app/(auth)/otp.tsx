@@ -1,210 +1,312 @@
-import React, { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  StatusBar,
-  Image,
-  ScrollView,
-  ActivityIndicator,
-} from "react-native";
-import OTPField from "@/components/ui/auth/OTPField";
-import BackButton from "@/components/ui/global/BackButton";
-import { router, useLocalSearchParams } from "expo-router";
-import { maskEmail } from "@/utils/mask";
-import { useTheme } from "@/constants/theme";
-import { api } from "@/lib/api";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { toast } from "sonner-native";
+import { Theme, useTheme } from "@/constants/theme";
+import { AuthScreenContainer, TrustStrip } from "@/components/ui/auth";
+import { Button, OtpInput } from "@/components/ui/primitives";
+import { api } from "@/lib/api";
+import { newIdempotencyKey } from "@/lib/idempotency";
+import { getDeviceLabel, getOrCreateDeviceId } from "@/lib/auth";
+import { usePendingSignupStore } from "@/store/usePendingSignupStore";
 
+type Purpose = "signup" | "login" | "recovery";
+
+interface SendOtpResponse {
+  otpExpiresAt: string;
+  resendAvailableAt: string;
+}
+
+interface VerifyOtpResponse {
+  verificationToken: string;
+  ttl: number;
+}
+
+const RESEND_COOLDOWN_S = 60;
+
+/**
+ * 6-digit OTP entry. Auto-verifies on the 6th digit fill, surfaces an
+ * error inline on a wrong code (server message, verbatim), and counts
+ * down a 60s resend cooldown that activates the resend link.
+ *
+ * The same screen serves all three OTP flows; `purpose` query param
+ * decides which endpoint is hit and where we route on success:
+ *   signup   → /(auth)/signup/role
+ *   login    → /(auth)/unlock/pin (Phase 4 wires the real /auth/login)
+ *   recovery → /(auth)/recovery/new-pin (Phase 4)
+ *
+ * The send-otp call is fired exactly once per mount (StrictMode-safe).
+ * Manual resend uses a fresh Idempotency-Key so the server treats it as
+ * a new request — re-using the original key would return the cached
+ * 200 without sending a second SMS.
+ */
 export default function OtpScreen() {
   const theme = useTheme();
-  const params = useLocalSearchParams<{ email: string; type?: string; role?: string }>();
-  const { email, type, role } = params;
-  const isReset = type === "reset";
+  const router = useRouter();
+  const params = useLocalSearchParams<{ phone?: string; purpose?: Purpose }>();
+  const phone = params.phone ?? "";
+  const purpose: Purpose =
+    params.purpose === "login"
+      ? "login"
+      : params.purpose === "recovery"
+      ? "recovery"
+      : "signup";
+  const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  if (!email) {
-    return (
-      <View style={[styles.container, { backgroundColor: theme.background }]}>
-        <Text style={{ textAlign: "center", marginTop: 50, color: theme.text }}>
-          Missing OTP parameters
-        </Text>
-      </View>
-    );
-  }
-
-  const maskedEmail = maskEmail(email);
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
-  const [status, setStatus] = useState<"default" | "success" | "error">("default");
-  const [loading, setLoading] = useState(false);
+  const [digits, setDigits] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
-  const [timer, setTimer] = useState(60);
+  const [secondsLeft, setSecondsLeft] = useState(RESEND_COOLDOWN_S);
+  const sentOnceRef = useRef(false);
 
-  useEffect(() => {
-    if (timer === 0) return;
-    const interval = setInterval(() => setTimer((prev) => prev - 1), 1000);
-    return () => clearInterval(interval);
-  }, [timer]);
+  const setVerificationToken = usePendingSignupStore(
+    (s) => s.setVerificationToken
+  );
+  const setPhoneVerified = usePendingSignupStore((s) => s.setPhoneVerified);
 
-  const isOtpComplete = otp.every((digit) => digit !== "");
-  const otpString = otp.join("");
-
-  const verifyCode = async () => {
-    if (!isOtpComplete) return;
-    setLoading(true);
-
+  const sendOtp = useCallback(async () => {
+    if (!phone) return;
     try {
-      if (isReset) {
-        // For password reset: pass otp + email directly to create screen
-        // (actual verification happens server-side at reset-password endpoint)
-        setStatus("success");
-        router.push({
-          pathname: "/(auth)/create",
-          params: { email, otp: otpString },
-        });
-      } else {
-        await api.post("/auth/verify-otp", { email, otp: otpString });
-        setStatus("success");
-        if (role === "vendor") {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          router.replace("/(vendor)/onboarding" as any);
-        } else if (role === "rider") {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          router.replace("/(rider)/onboarding" as any);
-        } else {
-          router.replace("/(auth)/onboarding");
-        }
-      }
+      await api.post<SendOtpResponse>(
+        "/auth/send-otp",
+        { phone, purpose },
+        { headers: { "Idempotency-Key": newIdempotencyKey() } }
+      );
+      setSecondsLeft(RESEND_COOLDOWN_S);
     } catch (err: any) {
-      setStatus("error");
-      toast.error("Verification failed", { description: err.message });
-    } finally {
-      setLoading(false);
+      // Server might 409 (signup, already exists) or 404 (recovery).
+      // Surface the message verbatim, no generic strings.
+      toast.error("Couldn't send code", {
+        description: err?.message ?? "Try again in a moment.",
+      });
     }
-  };
+  }, [phone, purpose]);
 
-  const resendOtp = async () => {
-    if (timer > 0 || resending) return;
+  // Initial send — once per mount.
+  useEffect(() => {
+    if (sentOnceRef.current) return;
+    sentOnceRef.current = true;
+    sendOtp();
+  }, [sendOtp]);
 
+  // Countdown.
+  useEffect(() => {
+    if (secondsLeft <= 0) return;
+    const id = setInterval(() => setSecondsLeft((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(id);
+  }, [secondsLeft]);
+
+  const handleResend = useCallback(async () => {
+    if (resending || secondsLeft > 0) return;
     setResending(true);
-    setOtp(["", "", "", "", "", ""]);
-    setStatus("default");
-    setTimer(30);
-
+    setError(null);
+    setDigits("");
     try {
-      await api.post("/auth/resend-otp", { email });
-    } catch (err: any) {
-      toast.error("Could not resend OTP", { description: err.message });
+      await sendOtp();
+      toast.success("Code sent", { description: `New code sent to ${phone}.` });
     } finally {
       setResending(false);
     }
+  }, [resending, secondsLeft, sendOtp, phone]);
+
+  const verify = useCallback(
+    async (code: string) => {
+      if (verifying || code.length !== 6) return;
+      setVerifying(true);
+      setError(null);
+      try {
+        const deviceId = await getOrCreateDeviceId();
+        // Recovery uses a separate endpoint with a shorter token TTL +
+        // an isolated namespace so a recovery token can't satisfy a
+        // signup mutation. See _server-asks/auth-recovery.md.
+        const endpoint =
+          purpose === "recovery"
+            ? "/auth/forgot-pin/verify"
+            : "/auth/verify-otp";
+        const body =
+          purpose === "recovery"
+            ? { phone, otp: code }
+            : { phone, otp: code, purpose };
+        const res = await api.post<VerifyOtpResponse>(endpoint, body, {
+          headers: {
+            "X-Device-Id": deviceId,
+            "X-Device-Label": getDeviceLabel(),
+          },
+        });
+        setVerificationToken(res.verificationToken, res.ttl);
+        setPhoneVerified();
+
+        if (purpose === "signup") {
+          router.replace("/(auth)/signup/role" as never);
+          return;
+        }
+        if (purpose === "recovery") {
+          router.replace("/(auth)/recovery/new-pin" as never);
+          return;
+        }
+        // login — verify-otp returned a `verificationToken` we just
+        // persisted in the pending-signup store. Route to PIN unlock,
+        // which reads that token + the user's PIN and POSTs to
+        // /auth/login to actually mint the session. The token is
+        // single-use and short-TTL so it can't be replayed.
+        router.replace("/(auth)/unlock/pin" as never);
+      } catch (err: any) {
+        setError(err?.message ?? "That code didn't match. Try again.");
+        setDigits("");
+      } finally {
+        setVerifying(false);
+      }
+    },
+    [verifying, phone, purpose, setVerificationToken, setPhoneVerified, router]
+  );
+
+  const handleChange = (next: string) => {
+    setDigits(next);
+    if (error) setError(null);
   };
 
-  return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <StatusBar
-        barStyle={theme.mode === "dark" ? "light-content" : "dark-content"}
-      />
+  const handleEditPhone = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else
+      router.replace({
+        pathname: "/(auth)/phone" as never,
+        params: { mode: purpose === "login" ? "login" : "signup" },
+      });
+  }, [router, purpose]);
 
-      <View style={styles.screenHeader}>
-        <BackButton />
-        <Text style={[styles.title, { color: theme.text }]}>
-          {isReset ? "Reset Password" : "Email Verification"}
-        </Text>
+  const resendActive = secondsLeft <= 0 && !resending;
+  const resendLabel = resendActive
+    ? "Resend code"
+    : `Resend in 0:${String(secondsLeft).padStart(2, "0")}`;
+
+  return (
+    <AuthScreenContainer
+      contentStyle={{ paddingTop: theme.space.s4, gap: theme.space.s4 }}
+      footer={
+        <Button
+          variant="primary"
+          size="lg"
+          full
+          onPress={() => verify(digits)}
+          disabled={digits.length !== 6 || verifying}
+          loading={verifying}
+          accessibilityLabel="Verify code"
+        >
+          {verifying ? "Verifying…" : "Continue"}
+        </Button>
+      }
+    >
+      <View style={styles.headerWrap}>
+        <Text style={styles.title}>Enter the code</Text>
+        <View style={styles.subRow}>
+          <Text style={styles.sub}>Sent to {phone || "your phone"} · </Text>
+          <Pressable
+            onPress={handleEditPhone}
+            accessibilityRole="link"
+            accessibilityLabel="Edit phone number"
+            hitSlop={8}
+          >
+            <Text style={styles.editLink}>Edit</Text>
+          </Pressable>
+        </View>
       </View>
 
-      <ScrollView style={styles.scrollView}>
-        <View style={styles.slideContent}>
-          <View style={styles.imageWrapper}>
-            <Image
-              source={require("@/assets/icons/alert.png")}
-              style={styles.image}
-              resizeMode="contain"
-            />
-          </View>
-          <Text style={[styles.title, { color: theme.text }]}>
-            OTP Verification
-          </Text>
-          <Text style={[styles.description, { color: theme.text }]}>
-            {`Enter code sent to ${maskedEmail}`}
-          </Text>
+      <OtpInput
+        value={digits}
+        onChange={handleChange}
+        onComplete={verify}
+        error={!!error}
+        disabled={verifying}
+      />
+
+      {error ? (
+        <View style={styles.errorRow}>
+          <Ionicons name="warning" size={14} color={theme.error} />
+          <Text style={styles.errorText}>{error}</Text>
         </View>
+      ) : null}
 
-        <View style={styles.otpContainer}>
-          <OTPField otp={otp} setOtp={setOtp} length={6} status={status} />
-        </View>
-
-        <Text style={[styles.description, { color: theme.text }]}>
-          Resend code in
-          <Text style={[styles.termsLink, { color: theme.text }]}>{` ${timer} `}</Text>
-          s
-        </Text>
-
-        <TouchableOpacity
-          onPress={verifyCode}
-          disabled={!isOtpComplete || loading}
-          style={[
-            styles.verifyBtn,
-            {
-              opacity: isOtpComplete && !loading ? 1 : 0.5,
-              backgroundColor: theme.quaternary,
-              flexDirection: "row",
-              justifyContent: "center",
-              alignItems: "center",
-            },
-          ]}
+      <View style={styles.resendRow}>
+        <Text style={styles.resendLeading}>Didn't get it? </Text>
+        <Pressable
+          onPress={resendActive ? handleResend : undefined}
+          disabled={!resendActive}
+          accessibilityRole="button"
+          accessibilityLabel={resendActive ? "Resend code" : `Resend in ${secondsLeft} seconds`}
+          accessibilityState={{ disabled: !resendActive }}
+          hitSlop={8}
         >
-          {loading ? (
-            <ActivityIndicator size="small" color="#FFF" />
-          ) : (
-            <Text style={[styles.verifyText, { color: "#FFF" }]}>
-              {isReset ? "Continue" : "Verify"}
-            </Text>
-          )}
-        </TouchableOpacity>
+          <Text
+            style={[
+              styles.resendLink,
+              resendActive ? styles.resendLinkActive : styles.resendLinkInactive,
+            ]}
+          >
+            {resendLabel}
+          </Text>
+        </Pressable>
+      </View>
 
-        <View style={{ marginTop: 20 }}>
-          {timer === 0 && (
-            <Text style={[styles.resendText, { color: theme.text }]}>
-              Didn't receive the code?{" "}
-              <Text
-                style={[styles.termsLink, { color: theme.primary }]}
-                onPress={resendOtp}
-              >
-                {resending ? "Resending..." : "Click here"}
-              </Text>
-            </Text>
-          )}
-        </View>
-      </ScrollView>
-    </View>
+      <TrustStrip text="We'll never ask for this code outside the app." />
+    </AuthScreenContainer>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  screenHeader: {
-    paddingTop: 80,
-    paddingHorizontal: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 30,
-  },
-  scrollView: { paddingHorizontal: 20 },
-  slideContent: { alignItems: "center" },
-  imageWrapper: { height: 80, marginVertical: 30 },
-  image: { width: "100%", height: "100%", aspectRatio: 1 },
-  title: { fontWeight: "700", fontSize: 25, marginBottom: 12 },
-  description: { fontSize: 16, textAlign: "center", lineHeight: 22 },
-  otpContainer: { marginVertical: 40 },
-  verifyBtn: {
-    paddingVertical: 17,
-    borderRadius: 10,
-    marginVertical: 30,
-    marginTop: 50,
-    alignItems: "center",
-  },
-  verifyText: { fontSize: 20, fontWeight: "600" },
-  resendText: { textAlign: "left", fontSize: 18, lineHeight: 22 },
-  termsLink: {},
-});
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    headerWrap: {
+      gap: theme.space.s2,
+    },
+    title: {
+      fontSize: 26,
+      lineHeight: 30,
+      fontWeight: "800",
+      letterSpacing: -0.6,
+      color: theme.fg,
+    },
+    subRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+    },
+    sub: {
+      ...theme.type.body,
+      color: theme.fgMuted,
+    },
+    editLink: {
+      ...theme.type.body,
+      color: theme.primary,
+      fontWeight: "700",
+    },
+    errorRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    errorText: {
+      ...theme.type.bodySm,
+      color: theme.error,
+      fontWeight: "700",
+    },
+    resendRow: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    resendLeading: {
+      ...theme.type.bodySm,
+      color: theme.fgMuted,
+    },
+    resendLink: {
+      ...theme.type.bodySm,
+      fontWeight: "800",
+    },
+    resendLinkActive: {
+      color: theme.primary,
+    },
+    resendLinkInactive: {
+      color: theme.fg,
+      ...theme.type.money,
+    },
+  });

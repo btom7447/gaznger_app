@@ -199,6 +199,9 @@ export default function HomeScreen() {
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [pointsLoading, setPointsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Live fuel-rate strip — falls back to STATIC_FUEL_RATES on network
+  // failure so the strip never disappears entirely (audit C.5).
+  const [liveRates, setLiveRates] = useState<FuelRate[] | null>(null);
   const fetchSeqRef = useRef(0);
 
   const fetchPoints = useCallback(async () => {
@@ -219,6 +222,11 @@ export default function HomeScreen() {
 
   const fetchOrders = useCallback(async () => {
     const mySeq = ++fetchSeqRef.current;
+    // Min-skeleton lifetime (audit G.11) — when the cached fetch
+    // resolves in <200ms the skeleton would flash on/off and look
+    // like a layout glitch. Floor the loading state to 200ms.
+    const startedAt = Date.now();
+    const MIN_SKELETON_MS = 200;
     setOrdersLoading(true);
     try {
       const data = await api.get<{ data: ServerOrder[] }>(
@@ -254,15 +262,43 @@ export default function HomeScreen() {
     } catch {
       // leave whatever cached state we have
     } finally {
-      if (mySeq === fetchSeqRef.current) setOrdersLoading(false);
+      if (mySeq === fetchSeqRef.current) {
+        const elapsed = Date.now() - startedAt;
+        const remaining = Math.max(0, MIN_SKELETON_MS - elapsed);
+        if (remaining === 0) {
+          setOrdersLoading(false);
+        } else {
+          setTimeout(() => {
+            if (mySeq === fetchSeqRef.current) setOrdersLoading(false);
+          }, remaining);
+        }
+      }
     }
   }, []);
 
-  // Initial mount — kick both fetches in parallel (no Promise.all blocking).
+  // Live fuel-rate strip — best-effort. Server median across active
+  // stations within 25km of the user's address (when available).
+  // Failures leave `liveRates` null and the static fallback renders.
+  const fetchFuelPrices = useCallback(async () => {
+    try {
+      const data = await api.get<{ rates: FuelRate[] }>(
+        "/api/fuel-prices",
+        { timeoutMs: 8000 }
+      );
+      if (Array.isArray(data?.rates) && data.rates.length > 0) {
+        setLiveRates(data.rates);
+      }
+    } catch {
+      // best-effort; STATIC_FUEL_RATES fallback below
+    }
+  }, []);
+
+  // Initial mount — kick all fetches in parallel (no Promise.all blocking).
   useEffect(() => {
     fetchPoints();
     fetchOrders();
-  }, [fetchPoints, fetchOrders]);
+    fetchFuelPrices();
+  }, [fetchPoints, fetchOrders, fetchFuelPrices]);
 
   // On focus (not the initial mount), refresh quietly.
   const isFirstFocus = useRef(true);
@@ -450,11 +486,15 @@ export default function HomeScreen() {
         <FuelGrid items={DEFAULT_FUEL_TILES} onSelect={handleFuelSelect} />
 
         {/*
-         * Static placeholder rates until /api/fuel-prices lands.
-         * NOTE: pricing-rule deviation — single values instead of ranges.
-         * Logged in handoff/_plan/EXECUTION_PLAN.md (deviation #1).
+         * Live rates from /api/fuel-prices (audit C.5) — median per
+         * fuel across active stations near the user. Falls back to
+         * STATIC_FUEL_RATES on network failure so the strip never
+         * disappears entirely.
          */}
-        <FuelPriceRates rates={STATIC_FUEL_RATES} area="Lagos" />
+        <FuelPriceRates
+          rates={liveRates ?? STATIC_FUEL_RATES}
+          area="Lagos"
+        />
 
         {/* Recent — dynamic skeleton sized to row height (64). */}
         <SectionLabel

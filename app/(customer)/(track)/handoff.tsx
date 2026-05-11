@@ -41,20 +41,79 @@ export default function HandoffScreen() {
   const { activeOrder } = useActiveOrder();
   const effectiveOrderId = draft.orderId ?? activeOrder?._id ?? null;
   const isSwap = draft.serviceType === "swap";
+  // Live status — drives the swap checklist below. Falls back to a
+  // sensible "in transit" state when activeOrder hasn't loaded yet.
+  const serverStatus = activeOrder?.status ?? "in-transit";
+  const hasWeighIn = !!draft.weighIn;
 
-  // Demo state — derive from server `order:update` events when wired.
-  const steps: Step[] = isSwap
-    ? [
-        { label: "Empty cylinder collected", state: "done" },
-        { label: "Weighed & verified at station", state: "done" },
-        { label: "Full cylinder en route back", state: "active", meta: "~6 min" },
-        { label: "Delivered & connected (you confirm)", state: "pending" },
-      ]
-    : [
-        // Refill flow has no station weighing.
-        { label: "Heading to your address", state: "done" },
-        { label: "Delivered & connected (you confirm)", state: "active" },
-      ];
+  // Server-driven swap checklist (audit C.3). Maps the granular
+  // delivery statuses the rider app emits to the four customer-
+  // facing milestones. Statuses we expect during a swap:
+  //   accepted / at_plant   → "Empty cylinder collected" active
+  //   refilling             → "Weighed & verified" active
+  //   returning / picked_up → "Full cylinder en route" active
+  //   arrived / dispensing /
+  //     awaiting_confirmation → ready for customer confirm
+  //
+  // `hasWeighIn` is the secondary signal — once the rider has emitted
+  // a weigh-in payload, step 2 is conclusively done regardless of the
+  // current status enum (covers the legacy rider build that doesn't
+  // emit `refilling`).
+  const buildSwapSteps = (): Step[] => {
+    const isAfterStation =
+      ["returning", "picked_up", "in-transit", "in_transit", "arrived",
+       "dispensing", "awaiting_confirmation"].includes(serverStatus);
+    const isAtStation = ["at_plant", "refilling"].includes(serverStatus);
+    const isAtCustomer = ["arrived", "dispensing", "awaiting_confirmation"]
+      .includes(serverStatus);
+    return [
+      {
+        label: "Empty cylinder collected",
+        state: isAtStation || isAfterStation ? "done" : "active",
+      },
+      {
+        label: "Weighed & verified at station",
+        state: hasWeighIn || isAfterStation
+          ? "done"
+          : isAtStation
+          ? "active"
+          : "pending",
+        meta:
+          hasWeighIn && draft.weighIn?.netKg
+            ? `${draft.weighIn.netKg.toFixed(1)} kg net`
+            : undefined,
+      },
+      {
+        label: "Full cylinder en route back",
+        state: isAtCustomer
+          ? "done"
+          : isAfterStation && !isAtCustomer
+          ? "active"
+          : "pending",
+      },
+      {
+        label: "Delivered & connected (you confirm)",
+        state: isAtCustomer ? "active" : "pending",
+      },
+    ];
+  };
+
+  const buildRefillSteps = (): Step[] => {
+    const isAtCustomer = ["arrived", "dispensing", "awaiting_confirmation"]
+      .includes(serverStatus);
+    return [
+      {
+        label: "Heading to your address",
+        state: isAtCustomer ? "done" : "active",
+      },
+      {
+        label: "Delivered & connected (you confirm)",
+        state: isAtCustomer ? "active" : "pending",
+      },
+    ];
+  };
+
+  const steps: Step[] = isSwap ? buildSwapSteps() : buildRefillSteps();
 
   const riderFirstName = draft.rider?.firstName ?? "Your rider";
 
@@ -120,6 +179,7 @@ export default function HandoffScreen() {
             onPress={() => router.replace("/(customer)/(home)" as never)}
             accessibilityRole="button"
             accessibilityLabel="Cancel swap"
+            hitSlop={8}
             style={({ pressed }) => [
               styles.roundBtn,
               pressed && { opacity: 0.85 },
@@ -242,6 +302,7 @@ export default function HandoffScreen() {
             onPress={handleCall}
             accessibilityRole="button"
             accessibilityLabel={`Call ${riderFirstName}`}
+            hitSlop={8}
             style={({ pressed }) => [
               styles.callBtn,
               pressed && { opacity: 0.85 },

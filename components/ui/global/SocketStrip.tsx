@@ -54,6 +54,14 @@ export function SocketStrip() {
   return (
     <Animated.View
       pointerEvents="none"
+      // VoiceOver / TalkBack announce when this strip appears,
+      // matching the OfflineStrip pattern (audit G.8). Connection
+      // state is exactly the kind of transient context a screen-
+      // reader user shouldn't have to discover by re-reading the
+      // screen.
+      accessible
+      accessibilityLiveRegion="polite"
+      accessibilityRole="alert"
       style={[
         styles.wrap,
         { backgroundColor: tone.bg, transform: [{ translateY }] },

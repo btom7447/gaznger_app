@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
@@ -24,6 +24,14 @@ import StationsViewToggle, {
 import StationsMapView from "@/components/ui/customer/order/StationsMapView";
 import { useFlowProgress } from "@/components/ui/customer/order/useFlowProgress";
 import { useUserLocation } from "@/hooks/useUserLocation";
+import {
+  GaznerChooseCard,
+  GaznerChoosePickedBody,
+  fetchAutoPick,
+  type AutoPickResult,
+} from "@/components/ui/customer/order/GaznerChoose";
+import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
+import Toast from "react-native-toast-message";
 
 type SortKey = "nearest" | "cheapest" | "top-rated";
 
@@ -54,6 +62,35 @@ function priceForFuel(station: Station, fuelTypeId: string): number {
   return match?.pricePerUnit ?? 0;
 }
 
+/**
+ * Format an ISO date as "Mon YYYY" — used for "Partner since {date}".
+ * Returns undefined when the input is missing/unparseable so the
+ * detail sheet can fall back to a partner-since-less label.
+ */
+function formatMonthYear(iso?: string | null): string | undefined {
+  if (!iso) return undefined;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toLocaleDateString("en-NG", { month: "short", year: "numeric" });
+}
+
+/**
+ * Convert an ISO timestamp into a relative "X ago" copy. Coarse buckets
+ * (min / hr / day) are enough for the "Last Gaznger dispense" surface;
+ * we don't need second-precision.
+ */
+function formatRelativeAgo(iso?: string): string | undefined {
+  if (!iso) return undefined;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return undefined;
+  const diffMin = Math.max(1, Math.round((Date.now() - t) / 60000));
+  if (diffMin < 60) return `${diffMin} min ago`;
+  const hr = Math.round(diffMin / 60);
+  if (hr < 24) return `${hr} hr ago`;
+  const days = Math.round(hr / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 function adapt(s: Station, fuelTypeId: string, unit: string): StationCardData {
   return {
     id: s._id,
@@ -64,19 +101,39 @@ function adapt(s: Station, fuelTypeId: string, unit: string): StationCardData {
     // Server returns canonical etaMinutes when the caller passes lat/lng.
     // Fall back to the distance-based heuristic for older API builds
     // that haven't shipped the field yet.
+    // Server returns canonical etaMinutes when the caller passes lat/lng
+    // (drive-time heuristic + 10-min expectation buffer). Fallback for
+    // older API builds applies the same buffer locally so the copy
+    // doesn't shift the moment the server rolls out.
     etaMinutes:
-      typeof (s as { etaMinutes?: number }).etaMinutes === "number"
-        ? (s as { etaMinutes?: number }).etaMinutes
+      typeof s.etaMinutes === "number"
+        ? s.etaMinutes
         : typeof s.distance === "number"
-        ? Math.max(5, Math.round(s.distance * 3))
+        ? Math.max(5, Math.round(s.distance * 3)) + 10
         : undefined,
     rating: s.rating,
+    totalRatings: s.totalRatings,
     perUnit: priceForFuel(s, fuelTypeId),
     unit,
-    verified: s.verified || s.isPartner,
+    // Keep the two flags separate. The list row surfaces both as
+    // distinct badges so customers can read "NMDPRA-verified" vs
+    // "Gaznger Partner" at a glance instead of conflating them.
+    verified: s.verified,
+    isPartner: s.isPartner,
+    partnerSince: formatMonthYear(s.partnerSince),
     lat: s.location?.lat,
     lng: s.location?.lng,
     imageUrl: s.image,
+    images: s.images,
+    operatingHours:
+      s.operatingHours?.open && s.operatingHours?.close
+        ? `${s.operatingHours.open} – ${s.operatingHours.close}`
+        : undefined,
+    availableFuels: s.fuels?.map((f) => f.fuelName).filter(Boolean) as string[],
+    serviceTime: s.serviceTime,
+    paymentOptions: s.paymentOptions,
+    lastDispenseAgo: formatRelativeAgo(s.lastDispenseAt),
+    onTimeRate: s.onTimeRate,
   };
 }
 
@@ -101,6 +158,100 @@ export default function StationsScreen() {
   const unit = draft.unit ?? "L";
   const fuelId = draft.fuelTypeId ?? "petrol";
 
+  // "Let Gaznger Choose" — auto-pick state + result sheet ref. The
+  // picked sheet is a BottomSheetModal so it floats over the list and
+  // doesn't push the existing layout around. Single ref reused
+  // across list + map view so a stale snapshot can't briefly render
+  // in the second sheet when viewMode flips (audit G.2).
+  const pickedSheetRef = useRef<BottomSheetModal>(null);
+  const [pickLoading, setPickLoading] = useState(false);
+  const [pickResult, setPickResult] = useState<AutoPickResult | null>(null);
+
+  const handleAutoPick = useCallback(async () => {
+    const coords = draft.deliveryCoords ?? userLocation ?? null;
+    if (!coords) {
+      Toast.show({
+        type: "error",
+        text1: "Set a delivery address first",
+      });
+      return;
+    }
+    setPickLoading(true);
+    try {
+      const result = await fetchAutoPick({
+        lat: coords.lat,
+        lng: coords.lng,
+        radiusKm: 10,
+      });
+      setPickResult(result);
+      pickedSheetRef.current?.present();
+    } catch (err) {
+      const msg =
+        err && typeof err === "object" && "message" in err
+          ? String((err as Error).message)
+          : "Couldn't pick a station";
+      Toast.show({ type: "error", text1: msg });
+    } finally {
+      setPickLoading(false);
+    }
+  }, [draft.deliveryCoords, userLocation]);
+
+  // "Use this station" — auto-select + lock + navigate in one tap.
+  // We don't wait for setSelectedId → re-render → handleContinue,
+  // because the user expects the picked station to commit immediately.
+  // Pull the pricing details off the auto-pick result so we can lock
+  // without a list lookup (the picked station may be the cheapest one
+  // outside the active radius too).
+  const handleUsePicked = useCallback(() => {
+    if (!pickResult) return;
+    const s = pickResult.station;
+    // Resolve the perUnit price for the user's selected fuel from
+    // the picked station's fuels array. Falls back to the cheapest
+    // available price if the fuel match fails so we don't lock 0.
+    const unitPrice = (() => {
+      const matched = priceForFuel(s as Station, fuelId);
+      if (matched > 0) return matched;
+      const prices = (s.fuels ?? [])
+        .map((f) => f.pricePerUnit)
+        .filter((p) => typeof p === "number" && p > 0);
+      return prices.length ? Math.min(...prices) : 0;
+    })();
+    if (unitPrice <= 0) {
+      Toast.show({
+        type: "error",
+        text1: "Couldn't read this station's price",
+      });
+      return;
+    }
+    setSelectedId(s._id);
+    lockStation({
+      id: s._id,
+      name: s.name,
+      shortName: s.name.split(/[, ]/)[0],
+      address: s.address,
+      perUnitKobo: unitPrice * 100,
+      distMeters:
+        typeof s.distance === "number" ? Math.round(s.distance * 1000) : undefined,
+      etaMinutes: s.etaMinutes,
+      partnerVerified: s.verified,
+    });
+    pickedSheetRef.current?.dismiss();
+    router.push("/(customer)/(order)/payment" as never);
+  }, [pickResult, fuelId, lockStation, router]);
+
+  // Radius is derived from the active sort: "nearest" tightens to 5 km
+  // (you don't want a "nearest" sort showing stations 18 km away), every
+  // other sort defaults to 10 km. The user can override with the "Try
+  // wider radius" CTA on the empty state (audit G.1) — bumping to 15 km
+  // gives sparse-area users a path forward without leaving the screen.
+  const [widenedKm, setWidenedKm] = useState<number | null>(null);
+  // Reset the widen override whenever the sort changes — sort change
+  // is the user's signal to re-narrow, not "wider radius forever."
+  useEffect(() => {
+    setWidenedKm(null);
+  }, [sort]);
+  const radiusKm = widenedKm ?? (sort === "nearest" ? 5 : 10);
+
   const fetchStations = useCallback(async () => {
     // Resolve query coords: delivery address first, then user GPS as fallback.
     // Without this fallback, addresses missing lat/lng made the screen show
@@ -113,17 +264,11 @@ export default function StationsScreen() {
     setLoading(true);
     setError(null);
     try {
-      const tryRadius = async (r: number) => {
-        const res = await api.get<{ data: Station[] }>(
-          `/api/stations?lat=${queryCoords.lat}&lng=${queryCoords.lng}&radius=${r}`,
-          { timeoutMs: 12000 }
-        );
-        return res.data ?? [];
-      };
-      // Auto-radius expansion: 5km → 10km → 25km. Stops at the first hit.
-      let raw = await tryRadius(5);
-      if (raw.length === 0) raw = await tryRadius(10);
-      if (raw.length === 0) raw = await tryRadius(25);
+      const res = await api.get<{ data: Station[] }>(
+        `/api/stations?lat=${queryCoords.lat}&lng=${queryCoords.lng}&radius=${radiusKm}`,
+        { timeoutMs: 12000 }
+      );
+      const raw = res.data ?? [];
 
       // Filter by user's criteria:
       //   1. Carries the requested fuel (perUnit > 0)
@@ -150,7 +295,7 @@ export default function StationsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [draft.deliveryCoords, userLocation, fuelId, unit, selectedId]);
+  }, [draft.deliveryCoords, userLocation, fuelId, unit, selectedId, radiusKm]);
 
   useEffect(() => {
     fetchStations();
@@ -217,6 +362,31 @@ export default function StationsScreen() {
     />
   );
 
+  // Picked-result sheet — rendered once, referenced by both
+  // viewMode branches (audit G.2). Sits inside whichever
+  // ScreenContainer is active; gorhom's `BottomSheetModalProvider`
+  // (mounted at root) handles the actual portal so it floats above
+  // map + list views identically.
+  const pickedSheet = (
+    <BottomSheetModal
+      ref={pickedSheetRef}
+      snapPoints={["78%", "92%"]}
+      backgroundStyle={{ backgroundColor: theme.bg }}
+      handleIndicatorStyle={{ backgroundColor: theme.borderStrong }}
+      onDismiss={() => setPickResult(null)}
+    >
+      <BottomSheetView>
+        {pickResult ? (
+          <GaznerChoosePickedBody
+            result={pickResult}
+            onUse={handleUsePicked}
+            onPickAnother={() => pickedSheetRef.current?.dismiss()}
+          />
+        ) : null}
+      </BottomSheetView>
+    </BottomSheetModal>
+  );
+
   // Map view replaces the scrollable body entirely — it owns the full
   // canvas with its own bottom sheet for the station list, and renders
   // its own top-row chrome (back chip + "Delivering to" pill). The
@@ -224,18 +394,36 @@ export default function StationsScreen() {
   // screen header, per the v3 design's map layout.
   if (viewMode === "map") {
     return (
-      <ScreenContainer edges={["top", "bottom"]} footer={ctaFooter}>
+      <ScreenContainer
+        // Bottom-only safe-area: the map renders edge-to-edge up to
+        // the status bar. Top safe-area would put a coloured gap
+        // between the status bar and the map. The map view handles
+        // its own status-bar collision via the topHeader's small
+        // paddingTop so the back chip + address pill sit clear of
+        // the OS chrome without an explicit safe-area pad.
+        edges={["bottom"]}
+        // noScroll keeps the body as a flat <View flex:1> so the map
+        // + bottom sheet get the full screen height they need.
+        noScroll
+        footer={ctaFooter}
+      >
         <StationsMapView
           stations={sorted}
           selectedId={selectedId}
           onSelect={setSelectedId}
           destination={draft.deliveryCoords ?? userLocation ?? null}
           destinationLabel={draft.deliveryLabel}
+          destinationIcon={draft.deliveryIcon}
           sort={sort}
           onSort={setSort}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
+          onAutoPick={handleAutoPick}
+          autoPickLoading={pickLoading}
+          radiusKm={radiusKm}
         />
+
+        {pickedSheet}
       </ScreenContainer>
     );
   }
@@ -256,6 +444,14 @@ export default function StationsScreen() {
     >
       <View style={styles.body}>
         <ProgressDots step={progressStep} total={progressTotal} variant="bars" />
+
+        {/* Let Gaznger choose — partner-weighted auto-pick banner.
+            Sits above the sort chips so it's the first thing a
+            decision-fatigued user sees. Skipped while loading or in
+            an error state since there's nothing meaningful to pick. */}
+        {!loading && !error && sorted.length > 0 ? (
+          <GaznerChooseCard onPress={handleAutoPick} loading={pickLoading} />
+        ) : null}
 
         {/* Sort chips — v3 Chip primitive, neutral kind. The
             "Cheapest" preset is the single most-asked-for sort; we
@@ -296,12 +492,23 @@ export default function StationsScreen() {
         ) : sorted.length === 0 ? (
           <EmptyState
             icon="flame-outline"
-            title="No stations within range"
-            body="We don't deliver from any station near you yet."
-            action={{
-              label: "Try a different fuel",
-              onPress: () => router.back(),
-            }}
+            title={`No stations within ${radiusKm} km`}
+            body={
+              widenedKm
+                ? "We don't deliver from any station near you yet. Try a different fuel?"
+                : "Try a wider search radius — there may be stations a bit further out."
+            }
+            action={
+              widenedKm
+                ? {
+                    label: "Try a different fuel",
+                    onPress: () => router.back(),
+                  }
+                : {
+                    label: "Try wider radius (15 km)",
+                    onPress: () => setWidenedKm(15),
+                  }
+            }
             tileBg={theme.bgMuted}
             tileFg={theme.fgMuted}
           />
@@ -318,6 +525,8 @@ export default function StationsScreen() {
           </View>
         )}
       </View>
+
+      {pickedSheet}
     </ScreenContainer>
   );
 }
