@@ -60,14 +60,7 @@
           }
         }
       ],
-      "expo-font",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/images/notification-icon.png",
-          "color": "#E6F4FE"
-        }
-      ]
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,

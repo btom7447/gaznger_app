@@ -182,59 +182,75 @@ export default function RootLayout() {
     };
   }, []);
 
+  // PaystackProvider on react-native-paystack-webview throws when
+  // mounted with an empty publicKey. Don't render it until we have
+  // either an env-baked fallback OR a server-supplied key. Without
+  // this guard a fresh APK install (no key in EAS env, no /initialize
+  // call yet) crashes the root tree synchronously, which surfaces as
+  // the post-OTP blank-screen / RouteProbe-disappears bug.
+  const paystackKey = getPaystackPublicKey();
+  const paystackReady = paystackKey.length > 0;
+
   return (
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
-          <PaystackProvider publicKey={getPaystackPublicKey()} currency="NGN" debug={__DEV__}>
-            <BottomSheetModalProvider>
-              <StatusBar
-                barStyle={theme.mode === "dark" ? "light-content" : "dark-content"}
-                backgroundColor={theme.background}
-              />
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  contentStyle: { backgroundColor: theme.background },
-                }}
-              >
-                {/* Main navigators.
-                    Every route group reachable from the bootstrap
-                    router MUST be declared here. In dev (Metro) Expo
-                    Router auto-discovers file-based routes; in
-                    production builds the bundler tree-shakes anything
-                    not declared on the Stack, which surfaces as a
-                    blank/white screen on first navigation (because
-                    the screen doesn't exist in the registered Stack
-                    even though the JS file is in the bundle). */}
-                <Stack.Screen name="index" />
-                <Stack.Screen name="modal" />
-                <Stack.Screen name="(auth)" />
-                <Stack.Screen name="(customer)" />
-                <Stack.Screen name="(rider)" />
-                <Stack.Screen name="(vendor)" />
-                <Stack.Screen name="(screens)" />
-                <Stack.Screen name="(legal)" />
-              </Stack>
-              {/* Phase 6 debug overlay — invisible long-press hit-area
-                  in the top-left corner. Mounted at root so it overlays
-                  every screen. Production builds keep it because the
-                  cost is one Pressable + one ring buffer; the modal
-                  only renders when the user deliberately opens it. */}
-              <DebugOverlay />
-              {/* TEMP — diagnose routing issue in prod build. Remove
-                  alongside RouteProbe.tsx once fixed. */}
-              <RouteProbe />
-              {/* Step-up auth host — listens to a Zustand store for
-                  any `requireStepUpAuth({ reason })` call and shows a
-                  PIN-entry sheet. Biometric is tried first inside the
-                  helper; the sheet is only the fallback. */}
-              <StepUpAuthHost />
-            </BottomSheetModalProvider>
-          </PaystackProvider>
+          {paystackReady ? (
+            <PaystackProvider publicKey={paystackKey} currency="NGN" debug={__DEV__}>
+              <RootChildren theme={theme} />
+            </PaystackProvider>
+          ) : (
+            <RootChildren theme={theme} />
+          )}
         </SafeAreaProvider>
         <Toaster richColors position="top-center" toastOptions={{ style: { borderRadius: 14 } }} />
       </GestureHandlerRootView>
     </ErrorBoundary>
+  );
+}
+
+function RootChildren({ theme }: { theme: ReturnType<typeof useTheme> }) {
+  return (
+    <BottomSheetModalProvider>
+      <StatusBar
+        barStyle={theme.mode === "dark" ? "light-content" : "dark-content"}
+        backgroundColor={theme.background}
+      />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: theme.background },
+        }}
+      >
+        {/* Main navigators.
+            Every route group reachable from the bootstrap router
+            MUST be declared here. In dev (Metro) Expo Router
+            auto-discovers file-based routes; in production builds
+            the bundler tree-shakes anything not declared on the
+            Stack, which surfaces as a blank/white screen on first
+            navigation (because the screen doesn't exist in the
+            registered Stack even though the JS file is in the
+            bundle). */}
+        <Stack.Screen name="index" />
+        <Stack.Screen name="modal" />
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(customer)" />
+        <Stack.Screen name="(rider)" />
+        <Stack.Screen name="(vendor)" />
+        <Stack.Screen name="(screens)" />
+        <Stack.Screen name="(legal)" />
+      </Stack>
+      {/* Phase 6 debug overlay — invisible long-press hit-area in
+          the top-left corner. */}
+      <DebugOverlay />
+      {/* TEMP — diagnose routing issue in prod build. Remove
+          alongside RouteProbe.tsx once fixed. */}
+      <RouteProbe />
+      {/* Step-up auth host — listens to a Zustand store for any
+          `requireStepUpAuth({ reason })` call and shows a PIN-entry
+          sheet. Biometric is tried first inside the helper; the
+          sheet is only the fallback. */}
+      <StepUpAuthHost />
+    </BottomSheetModalProvider>
   );
 }
