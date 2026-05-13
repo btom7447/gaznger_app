@@ -29,6 +29,11 @@ export default function TabLayout() {
     return () => sub.remove();
   }, []);
 
+  // Explicit Tabs.Screen declarations are MANDATORY for production
+  // builds. In dev the Metro bundler discovers all sibling route
+  // groups automatically; once tree-shaken for a release build any
+  // group not declared here renders as an empty body. The customer
+  // tabs are (home), (order), (track), and wallet.
   return (
     <Tabs
       tabBar={(props) => <CustomTabBar {...props} />}
@@ -36,6 +41,11 @@ export default function TabLayout() {
         headerShown: false,
         lazy: true,
       }}
-    />
+    >
+      <Tabs.Screen name="(home)" />
+      <Tabs.Screen name="(order)" />
+      <Tabs.Screen name="(track)" />
+      <Tabs.Screen name="wallet" />
+    </Tabs>
   );
 }

@@ -16,6 +16,7 @@ export default function ScreensLayout() {
       <Stack.Screen name="saved-cylinder" options={{ headerShown: false }} />
       <Stack.Screen name="change-pin" options={{ headerShown: false }} />
       <Stack.Screen name="active-sessions" options={{ headerShown: false }} />
+      <Stack.Screen name="delete-account" options={{ headerShown: false }} />
       <Stack.Screen
         name="notifications-customer"
         options={{

@@ -122,11 +122,22 @@ const visibleRoutes = TABS.map((tab) =>
 }
 
 export default function VendorDashboardLayout() {
+  // Explicit screen list — production bundles drop anything not
+  // declared. profile + plant aren't in the visible tab bar but the
+  // header navigates to them, so they must be registered.
   return (
     <Tabs
       tabBar={(props) => <VendorTabBar {...props} />}
       screenOptions={{ headerShown: false, lazy: true }}
-    />
+    >
+      <Tabs.Screen name="index" />
+      <Tabs.Screen name="orders" />
+      <Tabs.Screen name="inventory" />
+      <Tabs.Screen name="earnings" />
+      <Tabs.Screen name="payout" />
+      <Tabs.Screen name="profile" />
+      <Tabs.Screen name="plant" />
+    </Tabs>
   );
 }
 

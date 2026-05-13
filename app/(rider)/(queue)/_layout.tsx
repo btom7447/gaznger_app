@@ -83,11 +83,22 @@ function RiderTabBar({ state, navigation }: BottomTabBarProps) {
 }
 
 export default function RiderQueueLayout() {
+  // Explicit screen list for production bundles. Profile + history are
+  // intentionally hidden from the visible tab bar (the tab bar filters
+  // by TABS) but still need to be registered so they render when
+  // navigated to from the header avatar / queue card.
   return (
     <Tabs
       tabBar={(props) => <RiderTabBar {...props} />}
       screenOptions={{ headerShown: false, lazy: true }}
-    />
+    >
+      <Tabs.Screen name="index" />
+      <Tabs.Screen name="track" />
+      <Tabs.Screen name="earnings" />
+      <Tabs.Screen name="payout" />
+      <Tabs.Screen name="profile" />
+      <Tabs.Screen name="history" />
+    </Tabs>
   );
 }
 

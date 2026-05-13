@@ -29,6 +29,9 @@ export default function RiderLayout() {
     return () => sub.remove();
   }, []);
 
+  // Explicit Stack.Screen declarations needed for production builds —
+  // Metro auto-discovers in dev but a release bundle drops anything
+  // not registered here.
   return (
     <Stack
       screenOptions={{
@@ -36,6 +39,9 @@ export default function RiderLayout() {
         contentStyle: { backgroundColor: theme.background },
         animation: "slide_from_right",
       }}
-    />
+    >
+      <Stack.Screen name="(queue)" />
+      <Stack.Screen name="(screens)" />
+    </Stack>
   );
 }
