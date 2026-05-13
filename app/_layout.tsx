@@ -16,6 +16,7 @@ import { connectSocket } from "@/lib/socket";
 import { initActionQueue } from "@/lib/actionQueue";
 import { getPaystackPublicKey } from "@/lib/paystackKey";
 import DebugOverlay from "@/components/ui/global/DebugOverlay";
+import ErrorBoundary from "@/components/ui/global/ErrorBoundary";
 import { useAppLockOnResume } from "@/hooks/useAppLockOnResume";
 import { StepUpAuthHost } from "@/components/ui/auth";
 
@@ -181,7 +182,7 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <>
+    <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
           <PaystackProvider publicKey={getPaystackPublicKey()} currency="NGN" debug={__DEV__}>
@@ -196,10 +197,21 @@ export default function RootLayout() {
                   contentStyle: { backgroundColor: theme.background },
                 }}
               >
-                {/* Main navigators */}
+                {/* Main navigators.
+                    Every route group reachable from the bootstrap
+                    router MUST be declared here. In dev (Metro) Expo
+                    Router auto-discovers file-based routes; in
+                    production builds the bundler tree-shakes anything
+                    not declared on the Stack, which surfaces as a
+                    blank/white screen on first navigation (because
+                    the screen doesn't exist in the registered Stack
+                    even though the JS file is in the bundle). */}
                 <Stack.Screen name="index" />
                 <Stack.Screen name="modal" />
                 <Stack.Screen name="(auth)" />
+                <Stack.Screen name="(customer)" />
+                <Stack.Screen name="(rider)" />
+                <Stack.Screen name="(vendor)" />
                 <Stack.Screen name="(screens)" />
                 <Stack.Screen name="(legal)/privacy" />
                 <Stack.Screen name="(legal)/terms" />
@@ -221,6 +233,6 @@ export default function RootLayout() {
         </SafeAreaProvider>
         <Toaster richColors position="top-center" toastOptions={{ style: { borderRadius: 14 } }} />
       </GestureHandlerRootView>
-    </>
+    </ErrorBoundary>
   );
 }
