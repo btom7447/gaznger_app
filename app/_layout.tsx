@@ -23,6 +23,39 @@ import { StepUpAuthHost } from "@/components/ui/auth";
 
 const isExpoGo = Constants.appOwnership === "expo";
 
+// Global error hooks — surface ANY uncaught error/rejection to adb so
+// we can see what's killing the JS surface. Without these the surface
+// can tear down silently because the runtime swallows the throw.
+if (typeof ErrorUtils !== "undefined") {
+  const orig = ErrorUtils.getGlobalHandler?.();
+  ErrorUtils.setGlobalHandler((err: Error, isFatal?: boolean) => {
+    console.log(
+      "[GLOBAL ERROR] fatal=" + !!isFatal +
+        " name=" + (err?.name ?? "?") +
+        " message=" + (err?.message ?? "?") +
+        " stack=" + (err?.stack?.split("\n").slice(0, 5).join(" | ") ?? "?")
+    );
+    if (orig) orig(err, isFatal);
+  });
+}
+// @ts-ignore - global
+if (typeof global !== "undefined") {
+  // @ts-ignore
+  const g: any = global;
+  if (g.HermesInternal?.enablePromiseRejectionTracker) {
+    g.HermesInternal.enablePromiseRejectionTracker({
+      allRejections: true,
+      onUnhandled: (id: number, err: any) => {
+        console.log(
+          "[UNHANDLED REJECTION] id=" + id +
+            " name=" + (err?.name ?? "?") +
+            " message=" + (err?.message ?? String(err))
+        );
+      },
+    });
+  }
+}
+
 /**
  * Load expo-notifications and register the device token.
  * The entire module is loaded via async import() so that Expo Go never
