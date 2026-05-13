@@ -12,6 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gaznger.app",
+      "icon": "./assets/images/adaptive-icon.png",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -20,7 +21,7 @@
       "package": "com.gaznger.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
@@ -59,7 +60,14 @@
           }
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#E6F4FE"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
