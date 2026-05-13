@@ -17,6 +17,7 @@ import { initActionQueue } from "@/lib/actionQueue";
 import { getPaystackPublicKey } from "@/lib/paystackKey";
 import DebugOverlay from "@/components/ui/global/DebugOverlay";
 import ErrorBoundary from "@/components/ui/global/ErrorBoundary";
+import RouteProbe from "@/components/ui/global/RouteProbe";
 import { useAppLockOnResume } from "@/hooks/useAppLockOnResume";
 import { StepUpAuthHost } from "@/components/ui/auth";
 
@@ -223,6 +224,9 @@ export default function RootLayout() {
                   cost is one Pressable + one ring buffer; the modal
                   only renders when the user deliberately opens it. */}
               <DebugOverlay />
+              {/* TEMP — diagnose routing issue in prod build. Remove
+                  alongside RouteProbe.tsx once fixed. */}
+              <RouteProbe />
               {/* Step-up auth host — listens to a Zustand store for
                   any `requireStepUpAuth({ reason })` call and shows a
                   PIN-entry sheet. Biometric is tried first inside the
