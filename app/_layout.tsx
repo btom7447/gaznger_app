@@ -131,14 +131,21 @@ export default function RootLayout() {
         // PIN. Idempotent: a no-op when the draft is already empty.
         usePendingSignupStore.getState().reset();
       }
-      // Register device token, connect socket, sync profile + wallet on login
+      // Register device token, connect socket, sync profile + wallet on login.
+      // Every one of these is non-blocking — if any throws asynchronously
+      // (Hermes / native-bridge / network), we trap it here so the React
+      // tree above doesn't unmount. Without these guards a failure in
+      // registerDeviceToken or syncWalletAndSubscribe surfaces as the
+      // post-OTP blank screen / RouteProbe-disappears bug.
       if (!prev && state.isLoggedIn && state.hasHydrated) {
-        registerDeviceToken();
-        connectSocket(state.accessToken);
-        initActionQueue();
-        syncUserSession();
-        detachWallet?.();
-        detachWallet = syncWalletAndSubscribe();
+        try { registerDeviceToken(); } catch { /* swallow */ }
+        try { connectSocket(state.accessToken); } catch { /* swallow */ }
+        try { initActionQueue(); } catch { /* swallow */ }
+        try { syncUserSession(); } catch { /* swallow */ }
+        try {
+          detachWallet?.();
+          detachWallet = syncWalletAndSubscribe();
+        } catch { /* swallow */ }
       }
       prev = state.isLoggedIn;
     });
@@ -156,12 +163,12 @@ export default function RootLayout() {
     // /auth/login, after which sync runs cleanly.
     const session = useSessionStore.getState();
     if (session.isLoggedIn) {
-      registerDeviceToken();
-      connectSocket(session.accessToken);
+      try { registerDeviceToken(); } catch { /* swallow */ }
+      try { connectSocket(session.accessToken); } catch { /* swallow */ }
       // Phase 10 — wire the offline action queue to drain whenever
       // the socket comes live. Idempotent — calling on every mount
       // is fine.
-      initActionQueue();
+      try { initActionQueue(); } catch { /* swallow */ }
       if (!session.user?.hasPin) {
         // No PIN configured — no unlock screen on cold start, so the
         // network calls below are safe to fire immediately. With a
@@ -172,8 +179,8 @@ export default function RootLayout() {
         // SecureStore) trips refreshTokens() → logout() → the
         // session subscriber routes to welcome WHILE the user is
         // mid-fingerprint.
-        syncUserSession();
-        detachWallet = syncWalletAndSubscribe();
+        try { syncUserSession(); } catch { /* swallow */ }
+        try { detachWallet = syncWalletAndSubscribe(); } catch { /* swallow */ }
       }
     }
     return () => {

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "gaznger",
+    "name": "Gaznger",
     "slug": "gaznger",
     "owner": "btom",
     "version": "1.0.0",
@@ -76,7 +76,9 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/68bb341e-e53b-4345-8b4d-5dd5f4c6ca52"
+      "url": "https://u.expo.dev/68bb341e-e53b-4345-8b4d-5dd5f4c6ca52",
+      "enabled": false,
+      "checkAutomatically": "NEVER"
     }
   }
 }
