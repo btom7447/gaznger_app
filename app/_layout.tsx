@@ -214,9 +214,7 @@ export default function RootLayout() {
                 <Stack.Screen name="(rider)" />
                 <Stack.Screen name="(vendor)" />
                 <Stack.Screen name="(screens)" />
-                <Stack.Screen name="(legal)/privacy" />
-                <Stack.Screen name="(legal)/terms" />
-                <Stack.Screen name="(legal)/oss" />
+                <Stack.Screen name="(legal)" />
               </Stack>
               {/* Phase 6 debug overlay — invisible long-press hit-area
                   in the top-left corner. Mounted at root so it overlays
