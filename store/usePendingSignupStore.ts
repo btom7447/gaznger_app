@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import { secureStorage } from "./secureStorage";
+import { persist, createJSONStorage } from "zustand/middleware";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 /**
  * Pending-signup state — persisted to SecureStore so a user who kills
@@ -184,7 +184,13 @@ export const usePendingSignupStore = create<PendingSignupState>()(
     }),
     {
       name: "pending-signup-store",
-      storage: secureStorage,
+      // AsyncStorage on Android, not SecureStore. expo-secure-store
+      // writes were causing the JS surface to tear down post-OTP on
+      // some Android builds — the encryption-backed keystore can throw
+      // an unhandled rejection that crashes the React surface. Pending
+      // signup data is non-sensitive (no PIN, no auth tokens at rest);
+      // AsyncStorage is plenty for resume-after-kill semantics.
+      storage: createJSONStorage(() => AsyncStorage),
       onRehydrateStorage: () => (state) => {
         state && (state.hasHydrated = true);
       },
