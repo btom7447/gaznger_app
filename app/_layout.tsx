@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { Stack, usePathname, useRouter } from "expo-router";
 import { useTheme } from "@/constants/theme";
 import { StatusBar } from "react-native";
@@ -189,26 +189,33 @@ export default function RootLayout() {
     };
   }, []);
 
-  // PaystackProvider on react-native-paystack-webview throws when
-  // mounted with an empty publicKey. Don't render it until we have
-  // either an env-baked fallback OR a server-supplied key. Without
-  // this guard a fresh APK install (no key in EAS env, no /initialize
-  // call yet) crashes the root tree synchronously, which surfaces as
-  // the post-OTP blank-screen / RouteProbe-disappears bug.
-  const paystackKey = getPaystackPublicKey();
-  const paystackReady = paystackKey.length > 0;
+  // PaystackProvider key: read ONCE on initial mount and cache. If the
+  // server-supplied key arrives later (via /payments/initialize), it
+  // gets stored in the module-level cache but we deliberately do NOT
+  // re-read here on subsequent renders. Reading on every render
+  // caused the tree-shape to flip (Paystack-wrapped → bare → wrapped)
+  // which unmounted GestureHandlerRootView and every child below it.
+  // Smoking-gun adb log:
+  //   [GESTURE HANDLER] Tearing down gesture handler registered for root view
+  // fired right after OTP success. The cure is structural stability:
+  // one Paystack wrapper for the lifetime of the app, with a dummy
+  // placeholder key if needed.
+  //
+  // PaystackProvider accepts an empty string at mount; the actual
+  // publicKey is re-supplied per-checkout via the openTransaction()
+  // call's `publicKey` override on the latest version of the SDK. If
+  // your version doesn't support that, the inner Paystack flow falls
+  // back to the cached key on first charge — but the root tree stays
+  // structurally identical.
+  const paystackInitialKey = useMemo(() => getPaystackPublicKey() || "pk_test_PLACEHOLDER", []);
 
   return (
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
-          {paystackReady ? (
-            <PaystackProvider publicKey={paystackKey} currency="NGN" debug={__DEV__}>
-              <RootChildren theme={theme} />
-            </PaystackProvider>
-          ) : (
+          <PaystackProvider publicKey={paystackInitialKey} currency="NGN" debug={__DEV__}>
             <RootChildren theme={theme} />
-          )}
+          </PaystackProvider>
         </SafeAreaProvider>
         <Toaster richColors position="top-center" toastOptions={{ style: { borderRadius: 14 } }} />
       </GestureHandlerRootView>
