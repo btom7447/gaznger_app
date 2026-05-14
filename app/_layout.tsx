@@ -111,10 +111,14 @@ function syncWalletAndSubscribe(): () => void {
   return wallet.attachSocket();
 }
 
+let __rootRenderCount = 0;
 export default function RootLayout() {
+  __rootRenderCount += 1;
+  console.log("[root] render #" + __rootRenderCount);
   const theme = useTheme();
   const router = useRouter();
   const pathname = usePathname();
+  console.log("[root] pathname=" + pathname + " render=" + __rootRenderCount);
 
   // App-lock on resume after >5min in background (audit B.9). Hook
   // attaches its AppState listener once for the app lifetime.
