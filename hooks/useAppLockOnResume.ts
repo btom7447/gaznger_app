@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
 import { AppState, AppStateStatus } from "react-native";
-import { useRouter, usePathname } from "expo-router";
+import { useRouter } from "expo-router";
 import { useSessionStore } from "@/store/useSessionStore";
 import { getBiometricEnabled } from "@/lib/auth";
+import { getCurrentPathname } from "@/lib/pathnameMirror";
 
 /**
  * App-lock on resume.
@@ -14,36 +15,23 @@ import { getBiometricEnabled } from "@/lib/auth";
  * lifetime (15 min) of unattended access to a customer's order +
  * payment methods.
  *
- * Why this implementation:
- *   - Single hook called from the root layout. AppState listener
- *     attaches once for the whole app lifetime.
- *   - Skipped when the user isn't logged in (signup / pre-PIN flows).
- *   - Skipped while already on the unlock screens (`/unlock/*`) so we
- *     don't infinite-loop a re-auth redirect.
- *   - Routes to `/(auth)/unlock/biometric` when bio is enabled,
- *     `/(auth)/unlock/pin` otherwise. Both screens already exist and
- *     handle the success path back into the app's main stack.
+ * Why we read pathname from the module-level mirror instead of
+ * subscribing via usePathname(): this hook is called inside
+ * RootLayout. Any pathname dependency at root level forces the
+ * <Stack> to re-render on every navigation, which in turn re-mounts
+ * the child screens and tears down GestureHandlerRootView — the
+ * post-OTP blank-screen bug. <PathnameTracker /> in app/_layout.tsx
+ * mirrors the pathname into a module variable; we read that here
+ * without subscribing.
  *
  * Tunables:
- *   - `LOCK_AFTER_MS = 5min` — banking apps are usually 1-5 min. We
- *     pick the higher end because customer flows (placing an order)
- *     often background the app to switch to WhatsApp/payment apps.
+ *   - `LOCK_AFTER_MS = 5min`
  */
 const LOCK_AFTER_MS = 5 * 60 * 1000;
 
 export function useAppLockOnResume() {
   const router = useRouter();
-  const pathname = usePathname();
-  // Track when the app most recently went background. We don't depend
-  // on AppState's prior value because we want the timestamp persisted
-  // across React re-renders.
   const backgroundedAtRef = useRef<number | null>(null);
-  // Cache the latest pathname in a ref so the AppState listener (which
-  // captures the closure once) always reads the *current* route.
-  const pathnameRef = useRef(pathname);
-  useEffect(() => {
-    pathnameRef.current = pathname;
-  }, [pathname]);
 
   useEffect(() => {
     const sub = AppState.addEventListener(
@@ -60,14 +48,11 @@ export function useAppLockOnResume() {
         const elapsed = Date.now() - since;
         if (elapsed < LOCK_AFTER_MS) return;
 
-        // Only lock when there's an actual session to lock. Signup /
-        // unauth flows don't have a PIN yet so re-auth is impossible.
         const session = useSessionStore.getState();
         if (!session.isLoggedIn) return;
 
-        // Don't redirect to unlock if we're already on an unlock /
-        // auth screen — would cause a navigation loop.
-        const path = pathnameRef.current ?? "";
+        // Read the current pathname from the module-level mirror.
+        const path = getCurrentPathname();
         if (
           path.startsWith("/(auth)/unlock") ||
           path.startsWith("/unlock") ||

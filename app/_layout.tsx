@@ -15,6 +15,7 @@ import { api } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
 import { initActionQueue } from "@/lib/actionQueue";
 import { getPaystackPublicKey } from "@/lib/paystackKey";
+import { getCurrentPathname, setCurrentPathname } from "@/lib/pathnameMirror";
 import DebugOverlay from "@/components/ui/global/DebugOverlay";
 import ErrorBoundary from "@/components/ui/global/ErrorBoundary";
 import RouteProbe from "@/components/ui/global/RouteProbe";
@@ -112,20 +113,19 @@ function syncWalletAndSubscribe(): () => void {
 }
 
 /**
- * Module-level mirror of the current Expo Router pathname. Updated by
- * <PathnameTracker /> mounted below. Read by the session subscriber
- * so it doesn't have to subscribe to usePathname() itself — which on
- * the root would force a re-render on every navigation and unmount
- * the entire <Stack> child tree (the post-OTP blank-screen bug —
- * adb log showed root render #7 at the exact moment unlock/pin tried
- * to mount, which tore down the gesture handler).
+ * Subscribes to the Expo Router pathname and mirrors it into the
+ * shared `lib/pathnameMirror` module. This is the ONLY component in
+ * the entire app that should call `usePathname()` at root-mount
+ * altitude — every other consumer reads via getCurrentPathname() so
+ * pathname changes don't ripple a re-render up to RootLayout and
+ * cause <Stack> to remount mid-navigation. (The post-OTP blank
+ * screen bug — adb log showed root render #7 at the exact moment
+ * unlock/pin mounted, which tore down the gesture handler.)
  */
-let currentPathname = "";
-
 function PathnameTracker() {
   const pathname = usePathname();
   useEffect(() => {
-    currentPathname = pathname;
+    setCurrentPathname(pathname);
   }, [pathname]);
   return null;
 }
@@ -145,7 +145,7 @@ export default function RootLayout() {
     let detachWallet: (() => void) | undefined;
     const unsub = useSessionStore.subscribe((state) => {
       if (prev && !state.isLoggedIn && state.hasHydrated) {
-        const path = currentPathname ?? "";
+        const path = getCurrentPathname();
         const sinceBoot = Date.now() - bootedAtRef.current;
         // Tolerance window: if a logout fires within the first 10s of
         // app boot OR while the user is on an unlock screen, it's
