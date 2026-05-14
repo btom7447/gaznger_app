@@ -111,29 +111,32 @@ function syncWalletAndSubscribe(): () => void {
   return wallet.attachSocket();
 }
 
-let __rootRenderCount = 0;
+/**
+ * Module-level mirror of the current Expo Router pathname. Updated by
+ * <PathnameTracker /> mounted below. Read by the session subscriber
+ * so it doesn't have to subscribe to usePathname() itself — which on
+ * the root would force a re-render on every navigation and unmount
+ * the entire <Stack> child tree (the post-OTP blank-screen bug —
+ * adb log showed root render #7 at the exact moment unlock/pin tried
+ * to mount, which tore down the gesture handler).
+ */
+let currentPathname = "";
+
+function PathnameTracker() {
+  const pathname = usePathname();
+  useEffect(() => {
+    currentPathname = pathname;
+  }, [pathname]);
+  return null;
+}
+
 export default function RootLayout() {
-  __rootRenderCount += 1;
-  console.log("[root] render #" + __rootRenderCount);
   const theme = useTheme();
   const router = useRouter();
-  const pathname = usePathname();
-  console.log("[root] pathname=" + pathname + " render=" + __rootRenderCount);
 
   // App-lock on resume after >5min in background (audit B.9). Hook
   // attaches its AppState listener once for the app lifetime.
   useAppLockOnResume();
-
-  // Stash pathname in a ref so the (one-shot) Zustand subscriber
-  // below can read the current route at the moment a logout fires
-  // — it doesn't re-bind on every render. Without this, the
-  // subscriber would aggressively route to welcome even when the
-  // user is actively on an unlock screen and the logout was a
-  // transient refresh-token failure.
-  const pathnameRef = useRef(pathname);
-  useEffect(() => {
-    pathnameRef.current = pathname;
-  }, [pathname]);
 
   // Redirect to auth whenever the session is cleared (e.g. token refresh fails after server restart)
   const bootedAtRef = useRef(Date.now());
@@ -142,7 +145,7 @@ export default function RootLayout() {
     let detachWallet: (() => void) | undefined;
     const unsub = useSessionStore.subscribe((state) => {
       if (prev && !state.isLoggedIn && state.hasHydrated) {
-        const path = pathnameRef.current ?? "";
+        const path = currentPathname ?? "";
         const sinceBoot = Date.now() - bootedAtRef.current;
         // Tolerance window: if a logout fires within the first 10s of
         // app boot OR while the user is on an unlock screen, it's
@@ -263,6 +266,7 @@ export default function RootLayout() {
 function RootChildren({ theme }: { theme: ReturnType<typeof useTheme> }) {
   return (
     <BottomSheetModalProvider>
+      <PathnameTracker />
       <StatusBar
         barStyle={theme.mode === "dark" ? "light-content" : "dark-content"}
         backgroundColor={theme.background}

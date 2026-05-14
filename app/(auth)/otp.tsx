@@ -129,45 +129,28 @@ export default function OtpScreen() {
           purpose === "recovery"
             ? { phone, otp: code }
             : { phone, otp: code, purpose };
-        console.log("[otp] step:before-api");
         const res = await api.post<VerifyOtpResponse>(endpoint, body, {
           headers: {
             "X-Device-Id": deviceId,
             "X-Device-Label": getDeviceLabel(),
           },
         });
-        console.log("[otp] step:after-api purpose=" + purpose);
-        try {
-          setVerificationToken(res.verificationToken, res.ttl);
-          console.log("[otp] step:after-setVerificationToken");
-        } catch (e: any) {
-          console.log("[otp] ERROR setVerificationToken: " + (e?.message ?? String(e)));
-        }
-        try {
-          setPhoneVerified();
-          console.log("[otp] step:after-setPhoneVerified");
-        } catch (e: any) {
-          console.log("[otp] ERROR setPhoneVerified: " + (e?.message ?? String(e)));
-        }
-        console.log("[otp] step:before-router.replace target=" +
-          (purpose === "signup"
-            ? "/(auth)/signup/role"
-            : purpose === "recovery"
-              ? "/(auth)/recovery/new-pin"
-              : "/(auth)/unlock/pin"));
+        setVerificationToken(res.verificationToken, res.ttl);
+        setPhoneVerified();
 
         if (purpose === "signup") {
           router.replace("/(auth)/signup/role" as never);
-          console.log("[otp] step:after-router.replace signup/role");
           return;
         }
         if (purpose === "recovery") {
           router.replace("/(auth)/recovery/new-pin" as never);
-          console.log("[otp] step:after-router.replace recovery/new-pin");
           return;
         }
+        // login — verify-otp returned a `verificationToken` we just
+        // persisted in the pending-signup store. Route to PIN unlock,
+        // which reads that token + the user's PIN and POSTs to
+        // /auth/login to actually mint the session.
         router.replace("/(auth)/unlock/pin" as never);
-        console.log("[otp] step:after-router.replace unlock/pin");
       } catch (err: any) {
         setError(err?.message ?? "That code didn't match. Try again.");
         setDigits("");
