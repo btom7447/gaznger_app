@@ -43,6 +43,23 @@ interface LoginResponse {
  * limit (see _server-asks/auth-login.md).
  */
 export default function PinUnlockScreen() {
+  // TEMP minimal-render diagnostic. If the user sees the red probe banner
+  // AND this label, the screen IS mounting — the original render crashes.
+  // If the screen still blanks, the crash is in the navigator itself.
+  console.log("[unlock/pin] MOUNT");
+  return (
+    <View style={{ flex: 1, backgroundColor: "#1a1a1a", paddingTop: 120, paddingHorizontal: 20 }}>
+      <Text style={{ color: "#fff", fontSize: 24, fontWeight: "700" }}>
+        unlock/pin TEMP minimal
+      </Text>
+      <Text style={{ color: "#999", marginTop: 12 }}>
+        If you see this, the screen mounted. The crash is in the original render.
+      </Text>
+    </View>
+  );
+}
+
+function PinUnlockScreenOriginal() {
   const theme = useTheme();
   const router = useRouter();
   const styles = useMemo(() => makeStyles(theme), [theme]);
