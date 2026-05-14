@@ -30,11 +30,32 @@ export default function AuthLayout() {
       <Stack.Screen name="onboarding" />
       <Stack.Screen name="phone" />
       <Stack.Screen name="otp" />
-      <Stack.Screen name="signup" />
-      <Stack.Screen name="unlock" />
-      <Stack.Screen name="recovery" />
-      <Stack.Screen name="verification" />
-      <Stack.Screen name="states" />
+      {/* Sub-group screens declared as flat children to avoid the
+          nested-Stack-inside-Stack reconciler bug in Expo Router prod
+          builds: a transition from a flat (auth)/* route into a
+          nested (auth)/unlock/pin tore down the root surface ~90ms
+          after mount. Keeping all (auth)/* screens at one nav level
+          fixes that without changing the file layout. */}
+      <Stack.Screen name="unlock/pin" />
+      <Stack.Screen name="unlock/biometric" />
+      <Stack.Screen name="signup/role" />
+      <Stack.Screen name="signup/profile-customer" />
+      <Stack.Screen name="signup/profile-rider" />
+      <Stack.Screen name="signup/profile-vendor" />
+      <Stack.Screen name="signup/pin-create" />
+      <Stack.Screen name="signup/security" />
+      <Stack.Screen name="signup/permissions" />
+      <Stack.Screen name="recovery/phone" />
+      <Stack.Screen name="recovery/new-pin" />
+      <Stack.Screen name="verification/pending" />
+      <Stack.Screen name="verification/rider" />
+      <Stack.Screen name="verification/vendor" />
+      <Stack.Screen name="states/suspended" />
+      <Stack.Screen name="states/deleted" />
+      <Stack.Screen name="states/maintenance" />
+      <Stack.Screen name="states/force-update" />
+      <Stack.Screen name="states/new-device" />
+      <Stack.Screen name="states/withdrawal-hold" />
     </Stack>
   );
 }
