@@ -19,7 +19,11 @@ import "dotenv/config";
 
 export default ({ config }) => ({
   ...config,
-  plugins: [...(config.plugins ?? []), "expo-secure-store"],
+  plugins: [
+    ...(config.plugins ?? []),
+    "expo-secure-store",
+    "expo-web-browser",
+  ],
   ios: {
     ...config.ios,
     config: {
