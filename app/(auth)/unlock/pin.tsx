@@ -43,6 +43,33 @@ interface LoginResponse {
  * limit (see _server-asks/auth-login.md).
  */
 export default function PinUnlockScreen() {
+  // TEMP: bare-minimum render to isolate whether the surface
+  // teardown is caused by THIS screen's content vs the navigation
+  // itself. The previous adb log proved that with React.memo on
+  // RootChildren and the pathname mirror fix:
+  //   [root] render #1 (root renders ONCE, never again)
+  //   [unlock/pin] MOUNT
+  //   [GESTURE HANDLER] Tearing down (92ms later)
+  //   [unlock/pin] UNMOUNT
+  // No native crash, no global error. The surface is being torn
+  // down deliberately by something on the Android side. Replacing
+  // the body with a single <View> proves:
+  //   - Still tears down → bug is in expo-router itself OR (auth)
+  //     layout transition logic.
+  //   - Doesn't tear down → bug is in PinKeypad / SecureStore reads /
+  //     biometric probe / one of the imports unique to unlock/pin.
+  console.log("[unlock/pin] minimal-render");
+  return (
+    <View style={{ flex: 1, backgroundColor: "#0b0b10" }}>
+      <Text style={{ color: "#fff", padding: 24, paddingTop: 120, fontSize: 20 }}>
+        unlock/pin minimal — if you see this, original render is the culprit
+      </Text>
+    </View>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _PinUnlockScreenOriginal() {
   const theme = useTheme();
   const router = useRouter();
   const styles = useMemo(() => makeStyles(theme), [theme]);
