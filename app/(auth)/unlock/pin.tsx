@@ -73,6 +73,12 @@ export default function PinUnlockScreen() {
   const [lockedUntil, setLockedUntil] = useState<number | null>(null);
   const [bioType, setBioType] = useState<BiometricType>("none");
 
+  // Mount / unmount probe.
+  useEffect(() => {
+    console.log("[unlock/pin] MOUNT");
+    return () => console.log("[unlock/pin] UNMOUNT");
+  }, []);
+
   // Probe biometric for the keypad shortcut + tracking.
   useEffect(() => {
     let cancelled = false;

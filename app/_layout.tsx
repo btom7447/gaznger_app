@@ -130,7 +130,10 @@ function PathnameTracker() {
   return null;
 }
 
+let __rootRenders = 0;
 export default function RootLayout() {
+  __rootRenders += 1;
+  console.log("[root] render #" + __rootRenders);
   const theme = useTheme();
   const router = useRouter();
 
@@ -263,7 +266,11 @@ export default function RootLayout() {
   );
 }
 
-function RootChildren({ theme }: { theme: ReturnType<typeof useTheme> }) {
+const RootChildren = React.memo(function RootChildren({
+  theme,
+}: {
+  theme: ReturnType<typeof useTheme>;
+}) {
   return (
     <BottomSheetModalProvider>
       <PathnameTracker />
@@ -308,4 +315,4 @@ function RootChildren({ theme }: { theme: ReturnType<typeof useTheme> }) {
       <StepUpAuthHost />
     </BottomSheetModalProvider>
   );
-}
+});

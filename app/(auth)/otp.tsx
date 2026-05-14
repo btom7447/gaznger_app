@@ -91,6 +91,12 @@ export default function OtpScreen() {
     sendOtp();
   }, [sendOtp]);
 
+  // Mount / unmount probe.
+  useEffect(() => {
+    console.log("[otp] MOUNT");
+    return () => console.log("[otp] UNMOUNT");
+  }, []);
+
   // Countdown.
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -135,22 +141,31 @@ export default function OtpScreen() {
             "X-Device-Label": getDeviceLabel(),
           },
         });
+        console.log("[otp] step:after-api purpose=" + purpose);
         setVerificationToken(res.verificationToken, res.ttl);
+        console.log("[otp] step:after-setVerificationToken");
         setPhoneVerified();
+        console.log("[otp] step:after-setPhoneVerified");
 
         if (purpose === "signup") {
+          console.log("[otp] step:before-router.replace target=signup/role");
           router.replace("/(auth)/signup/role" as never);
+          console.log("[otp] step:after-router.replace signup/role");
           return;
         }
         if (purpose === "recovery") {
+          console.log("[otp] step:before-router.replace target=recovery/new-pin");
           router.replace("/(auth)/recovery/new-pin" as never);
+          console.log("[otp] step:after-router.replace recovery/new-pin");
           return;
         }
+        console.log("[otp] step:before-router.replace target=unlock/pin");
         // login — verify-otp returned a `verificationToken` we just
         // persisted in the pending-signup store. Route to PIN unlock,
         // which reads that token + the user's PIN and POSTs to
         // /auth/login to actually mint the session.
         router.replace("/(auth)/unlock/pin" as never);
+        console.log("[otp] step:after-router.replace unlock/pin");
       } catch (err: any) {
         setError(err?.message ?? "That code didn't match. Try again.");
         setDigits("");
