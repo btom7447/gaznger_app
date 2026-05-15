@@ -9,7 +9,9 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { toast } from "sonner-native";
 import {
+  AlertChip,
   BarChart,
   FilterPills,
   type FilterPillOption,
@@ -49,27 +51,35 @@ export default function EarningsScreen() {
   const [data, setData] = useState<EarningsApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [hasError, setHasError] = useState(false);
 
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  const fetch = useCallback(async () => {
-    try {
-      const res = await api.get<EarningsApiResponse>(
-        `/api/vendor/earnings/periods?period=${period}`,
-        { timeoutMs: 10_000 },
-      );
-      setData(res);
-    } catch {
-      // keep prior
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [period]);
+  const fetch = useCallback(
+    async (opts: { silent?: boolean } = {}) => {
+      try {
+        const res = await api.get<EarningsApiResponse>(
+          `/api/vendor/earnings/periods?period=${period}`,
+          { timeoutMs: 10_000 },
+        );
+        setData(res);
+        setHasError(false);
+      } catch (err: any) {
+        if (!opts.silent) {
+          toast.error(err?.message ?? "Couldn't load earnings");
+        }
+        setHasError(true);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [period],
+  );
 
   useEffect(() => {
     setLoading(true);
-    fetch();
+    fetch({ silent: true });
   }, [fetch]);
 
   const onRefresh = useCallback(() => {
@@ -120,10 +130,24 @@ export default function EarningsScreen() {
         ) : !data ? (
           <VendorEmptyState
             icon="cloud-offline-outline"
+            iconTone="error"
             headline="Couldn't load earnings"
+            body="Check your connection and try again."
+            ctaLabel="Retry"
+            onCta={() => {
+              setLoading(true);
+              fetch();
+            }}
           />
         ) : (
           <>
+            {hasError ? (
+              <AlertChip
+                tone="warning"
+                title="Showing last known data"
+                sub="Pull to refresh once you're back online."
+              />
+            ) : null}
             <VendorCard>
               <Text style={styles.cardLabel}>Total</Text>
               <Text

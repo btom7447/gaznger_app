@@ -61,6 +61,7 @@ export default function VendorFinanceScreen() {
   const [recent, setRecent] = useState<TxApiRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [walletErrored, setWalletErrored] = useState(false);
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   const fetchAll = useCallback(async () => {
@@ -71,7 +72,12 @@ export default function VendorFinanceScreen() {
           timeoutMs: 10_000,
         }),
       ]);
-      if (w.status === "fulfilled") setWallet(w.value);
+      if (w.status === "fulfilled") {
+        setWallet(w.value);
+        setWalletErrored(false);
+      } else {
+        setWalletErrored(true);
+      }
       if (t.status === "fulfilled") setRecent(t.value.transactions ?? []);
     } finally {
       setLoading(false);
@@ -127,8 +133,14 @@ export default function VendorFinanceScreen() {
         ) : !wallet ? (
           <VendorEmptyState
             icon="cloud-offline-outline"
+            iconTone="error"
             headline="Couldn't load wallet"
-            body="Pull down to retry."
+            body="Check your connection and try again."
+            ctaLabel="Retry"
+            onCta={() => {
+              setLoading(true);
+              fetchAll();
+            }}
           />
         ) : (
           <>
@@ -137,6 +149,14 @@ export default function VendorFinanceScreen() {
               escrow={wallet.escrow}
               pending={wallet.pending}
             />
+
+            {walletErrored ? (
+              <AlertChip
+                tone="warning"
+                title="Showing last known balance"
+                sub="Pull to refresh once you're back online."
+              />
+            ) : null}
 
             {lowBalance ? (
               <AlertChip

@@ -284,6 +284,7 @@ export default function StationEditScreen() {
                       key={opt}
                       onPress={() => togglePayment(opt)}
                       accessibilityRole="button"
+                      accessibilityLabel={`Toggle ${opt}`}
                       accessibilityState={{ selected: active }}
                       hitSlop={4}
                       style={({ pressed }) => [
@@ -364,7 +365,17 @@ export default function StationEditScreen() {
                 Set per-litre / per-kg price for each fuel you sell here.
               </Text>
               {station.fuels.length === 0 ? (
-                <Text style={styles.hint}>No fuels yet.</Text>
+                <View style={styles.emptyInline}>
+                  <Ionicons
+                    name="water-outline"
+                    size={28}
+                    color={theme.fgMuted}
+                  />
+                  <Text style={styles.emptyInlineHeadline}>No fuels yet</Text>
+                  <Text style={styles.emptyInlineBody}>
+                    Add fuels in tanks to start selling here.
+                  </Text>
+                </View>
               ) : (
                 <View style={styles.fuelList}>
                   {station.fuels.map((f) => (
@@ -518,6 +529,23 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
       ...theme.type.bodySm,
       color: theme.fgMuted,
       marginBottom: 6,
+    },
+    emptyInline: {
+      alignItems: "center",
+      justifyContent: "center",
+      paddingVertical: 18,
+      gap: 4,
+    },
+    emptyInlineHeadline: {
+      ...theme.type.body,
+      color: theme.fg,
+      fontWeight: "700",
+      marginTop: 4,
+    },
+    emptyInlineBody: {
+      ...theme.type.bodySm,
+      color: theme.fgMuted,
+      textAlign: "center",
     },
     fuelList: { gap: 10 },
     fuelRow: {

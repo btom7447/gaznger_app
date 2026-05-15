@@ -273,6 +273,7 @@ export default function VendorTanksScreen() {
                       onPress={() => setAddFuelId(f._id)}
                       hitSlop={4}
                       accessibilityRole="button"
+                      accessibilityLabel={`Select ${f.name}`}
                       accessibilityState={{ selected: active }}
                       style={({ pressed }) => [
                         styles.fuelChip,
