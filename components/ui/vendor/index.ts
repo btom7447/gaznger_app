@@ -1,0 +1,30 @@
+// Vendor UI primitives — shared atoms used across every (vendor)/* screen.
+// Keep this list short and stable; one component per file.
+
+export { default as VendorTabBar } from "./VendorTabBar";
+export { default as VendorScreenShell } from "./VendorScreenShell";
+export { default as StationSwitcher } from "./StationSwitcher";
+
+export { default as VendorPill } from "./VendorPill";
+export type { PillTone, VendorPillProps } from "./VendorPill";
+
+export { default as VendorCard } from "./VendorCard";
+export type { VendorCardProps } from "./VendorCard";
+
+export { default as StatTile } from "./StatTile";
+export type { StatTileProps } from "./StatTile";
+
+export { default as AlertChip } from "./AlertChip";
+export type { AlertChipProps, AlertTone } from "./AlertChip";
+
+export { default as OrderRow } from "./OrderRow";
+export type { OrderRowProps, OrderStatus } from "./OrderRow";
+
+export { default as RiderCard } from "./RiderCard";
+export type { RiderCardProps, RiderStatus } from "./RiderCard";
+
+export { default as Skel, SkelStack } from "./Skel";
+export type { SkelProps } from "./Skel";
+
+export { default as VendorEmptyState } from "./VendorEmptyState";
+export type { VendorEmptyStateProps } from "./VendorEmptyState";
