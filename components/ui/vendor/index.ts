@@ -52,3 +52,12 @@ export type {
 
 export { default as SettingsRow } from "./SettingsRow";
 export type { SettingsRowProps } from "./SettingsRow";
+
+export { default as WalletHero } from "./WalletHero";
+export type { WalletHeroProps } from "./WalletHero";
+
+export { default as TxRow } from "./TxRow";
+export type { TxRowProps } from "./TxRow";
+
+export { default as BarChart } from "./BarChart";
+export type { BarChartProps, BarChartBucket } from "./BarChart";
