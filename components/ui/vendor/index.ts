@@ -40,3 +40,12 @@ export type { FilterPillOption, FilterPillsProps } from "./FilterPills";
 
 export { default as AssignRiderSheet } from "./AssignRiderSheet";
 export type { AssignRiderSheetRef, AssignRiderMode } from "./AssignRiderSheet";
+
+export { default as BulkInFlightCard } from "./BulkInFlightCard";
+export type { BulkInFlightCardProps } from "./BulkInFlightCard";
+
+export { default as BulkTrackerTimeline } from "./BulkTrackerTimeline";
+export type {
+  BulkTrackerTimelineProps,
+  TimelineEntry,
+} from "./BulkTrackerTimeline";
