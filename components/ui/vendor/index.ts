@@ -49,3 +49,6 @@ export type {
   BulkTrackerTimelineProps,
   TimelineEntry,
 } from "./BulkTrackerTimeline";
+
+export { default as SettingsRow } from "./SettingsRow";
+export type { SettingsRowProps } from "./SettingsRow";
