@@ -174,7 +174,7 @@ export default function PinUnlockScreen() {
         }
         if (role === "vendor") {
           if (res.user.verificationStatus === "approved") {
-            router.replace("/(vendor)/(dashboard)" as never);
+            router.replace("/(vendor)/(today)" as never);
           } else {
             router.replace(
               "/(auth)/verification/pending?role=vendor" as never
@@ -251,7 +251,7 @@ export default function PinUnlockScreen() {
     if (role === "vendor") {
       router.replace(
         user.verificationStatus === "approved"
-          ? ("/(vendor)/(dashboard)" as never)
+          ? ("/(vendor)/(today)" as never)
           : ("/(auth)/verification/pending?role=vendor" as never)
       );
       return;

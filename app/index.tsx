@@ -23,7 +23,7 @@ import {
  *     - customer/admin                               → /(customer)/(home)
  *     - rider, verified                              → /(rider)/(queue)
  *     - rider, pending                               → /(auth)/verification/pending?role=rider
- *     - vendor, verified                             → /(vendor)/(dashboard)
+ *     - vendor, verified                             → /(vendor)/(today)
  *     - vendor, pending                              → /(auth)/verification/pending?role=vendor
  *
  * Loading flag flips after 2s if fonts/hydration aren't done — gives
@@ -120,7 +120,9 @@ export default function SplashBootstrap() {
       }
       if (role === "vendor") {
         if (user.verificationStatus === "approved") {
-          router.replace("/(vendor)/(dashboard)" as never);
+          // Vendor app v6 architecture lands here. Today tab is the
+          // hero entry point per the chosen "hero" layout rule.
+          router.replace("/(vendor)/(today)" as never);
         } else {
           router.replace(
             "/(auth)/verification/pending?role=vendor" as never

@@ -86,7 +86,7 @@ export default function WelcomeGate() {
       if (role === "vendor") {
         router.replace(
           user.verificationStatus === "approved"
-            ? ("/(vendor)/(dashboard)" as never)
+            ? ("/(vendor)/(today)" as never)
             : ("/(auth)/verification/pending?role=vendor" as never)
         );
         return;

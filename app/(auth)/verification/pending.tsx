@@ -88,7 +88,7 @@ export default function VerificationPendingScreen() {
     if (role === "rider") {
       router.replace("/(rider)/(queue)" as never);
     } else {
-      router.replace("/(vendor)/(dashboard)" as never);
+      router.replace("/(vendor)/(today)" as never);
     }
   }, [router, role]);
 

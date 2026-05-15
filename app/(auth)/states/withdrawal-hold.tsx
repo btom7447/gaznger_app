@@ -28,7 +28,7 @@ export default function WithdrawalHoldScreen() {
       return;
     }
     if (user?.role === "vendor") {
-      router.replace("/(vendor)/(dashboard)" as never);
+      router.replace("/(vendor)/(today)" as never);
       return;
     }
     // Fallback (shouldn't be hit — only riders/vendors reach this).

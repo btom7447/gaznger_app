@@ -65,7 +65,7 @@ function getVariant(role: Role, verified: boolean, firstName: string): Variant {
             cta: "Open dashboard",
             icon: "business",
             badge: { label: "Status", value: "Verified", tone: "success" },
-            destination: "/(vendor)/(dashboard)",
+            destination: "/(vendor)/(today)",
           }
         : {
             headline: `Almost there, ${firstName}.`,

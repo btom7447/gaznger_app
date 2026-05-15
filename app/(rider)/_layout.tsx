@@ -17,7 +17,7 @@ export default function RiderLayout() {
     }
     if (user?.role !== "rider") {
       if (user?.role === "vendor") {
-        router.replace("/(vendor)/(dashboard)" as any);
+        router.replace("/(vendor)/(today)" as any);
       } else {
         router.replace("/(customer)/(home)" as any);
       }

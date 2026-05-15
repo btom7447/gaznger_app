@@ -160,7 +160,7 @@ export default function NotificationScreen() {
         case "new_order":
         case "order":
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          router.push("/(vendor)/(dashboard)/orders" as any);
+          router.push("/(vendor)/(orders)" as any);
           break;
         default:
           break;

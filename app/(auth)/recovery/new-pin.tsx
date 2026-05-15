@@ -94,7 +94,7 @@ export default function NewPinScreen() {
         if (role === "vendor") {
           router.replace(
             res.user.verificationStatus === "approved"
-              ? ("/(vendor)/(dashboard)" as never)
+              ? ("/(vendor)/(today)" as never)
               : ("/(auth)/verification/pending?role=vendor" as never)
           );
           return;

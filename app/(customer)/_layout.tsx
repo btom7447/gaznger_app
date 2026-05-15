@@ -18,7 +18,7 @@ export default function TabLayout() {
       if (user?.role === "rider") {
         router.replace("/(rider)/(queue)" as any);
       } else if (user?.role === "vendor") {
-        router.replace("/(vendor)/(dashboard)" as any);
+        router.replace("/(vendor)/(today)" as any);
       }
     }
   }, [hasHydrated, isLoggedIn, user?.role]);

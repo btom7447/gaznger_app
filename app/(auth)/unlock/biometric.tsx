@@ -82,7 +82,7 @@ export default function BiometricUnlockScreen() {
     if (role === "vendor") {
       router.replace(
         u.verificationStatus === "approved"
-          ? ("/(vendor)/(dashboard)" as never)
+          ? ("/(vendor)/(today)" as never)
           : ("/(auth)/verification/pending?role=vendor" as never)
       );
       return;
