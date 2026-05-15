@@ -34,3 +34,9 @@ export type { TodayHeroCardProps } from "./TodayHeroCard";
 
 export { default as TodayMiniGrid } from "./TodayMiniGrid";
 export type { TodayNextOrder, TodayTeamStatus } from "./TodayMiniGrid";
+
+export { default as FilterPills } from "./FilterPills";
+export type { FilterPillOption, FilterPillsProps } from "./FilterPills";
+
+export { default as AssignRiderSheet } from "./AssignRiderSheet";
+export type { AssignRiderSheetRef, AssignRiderMode } from "./AssignRiderSheet";
