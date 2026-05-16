@@ -200,24 +200,6 @@ export default function SupportHubScreen() {
         <Text style={styles.sectionLabel}>Get help</Text>
 
         <View style={styles.list}>
-          {data.liveChatEnabled ? (
-            <SupportRow
-              icon="chatbubbles"
-              tone="primary"
-              title="Live chat"
-              sub={
-                data.hours
-                  ? `Reply usually within minutes · ${data.hours}`
-                  : "Reply usually within minutes"
-              }
-              onPress={openingChat ? undefined : handleLiveChat}
-              trailing={
-                openingChat ? (
-                  <ActivityIndicator color={theme.primary} />
-                ) : undefined
-              }
-            />
-          ) : null}
           {data.phone ? (
             <SupportRow
               icon="call"
@@ -234,6 +216,24 @@ export default function SupportHubScreen() {
               title="Email support"
               sub={data.email}
               onPress={handleEmail}
+            />
+          ) : null}
+          {data.liveChatEnabled ? (
+            <SupportRow
+              icon="chatbubbles"
+              tone="primary"
+              title="Live chat"
+              sub={
+                data.hours
+                  ? `Reply usually within minutes · ${data.hours}`
+                  : "Reply usually within minutes"
+              }
+              onPress={openingChat ? undefined : handleLiveChat}
+              trailing={
+                openingChat ? (
+                  <ActivityIndicator color={theme.primary} />
+                ) : undefined
+              }
             />
           ) : null}
           {!data.liveChatEnabled && !data.phone && !data.email && !loading ? (
