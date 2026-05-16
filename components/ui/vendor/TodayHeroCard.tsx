@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { Theme, useTheme } from "@/constants/theme";
+import CountUpNumber from "@/components/ui/global/CountUpNumber";
 
 /**
  * Vendor Today hero card (v6 design).
@@ -97,9 +98,13 @@ export default function TodayHeroCard({
         </View>
       </View>
 
-      <Text style={styles.amount} numberOfLines={1} adjustsFontSizeToFit>
-        {fmtNaira(revenueToday)}
-      </Text>
+      <CountUpNumber
+        value={revenueToday}
+        format={(n) => fmtNaira(Math.round(n))}
+        style={styles.amount}
+        numberOfLines={1}
+        accessibilityLabel={`Revenue today ${fmtNaira(revenueToday)}`}
+      />
 
       <Text style={styles.subLine} numberOfLines={1}>
         {subLine}
@@ -125,9 +130,12 @@ function Tile({
 }) {
   return (
     <View style={[tileStyles.tile, { backgroundColor: bg }]}>
-      <Text style={tileStyles.value} numberOfLines={1}>
-        {value}
-      </Text>
+      <CountUpNumber
+        value={value}
+        format={(n) => `${Math.round(n)}`}
+        style={tileStyles.value}
+        numberOfLines={1}
+      />
       <Text style={tileStyles.label} numberOfLines={1}>
         {label}
       </Text>
