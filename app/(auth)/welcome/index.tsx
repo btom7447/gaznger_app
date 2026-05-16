@@ -43,6 +43,7 @@ import {
 } from "@/lib/permissions";
 import { api } from "@/lib/api";
 import { useSessionStore, type SessionUser } from "@/store/useSessionStore";
+import { postAuthPathFor } from "@/lib/authRouting";
 
 interface LoginResponse {
   user: SessionUser;
@@ -136,24 +137,7 @@ export default function WelcomeGate() {
 
   const goAfterLogin = useCallback(
     (user: SessionUser) => {
-      const role = user.role;
-      if (role === "rider") {
-        router.replace(
-          user.verificationStatus === "approved"
-            ? ("/(rider)/(queue)" as never)
-            : ("/(auth)/verification/pending?role=rider" as never),
-        );
-        return;
-      }
-      if (role === "vendor") {
-        router.replace(
-          user.verificationStatus === "approved"
-            ? ("/(vendor)/(today)" as never)
-            : ("/(auth)/verification/pending?role=vendor" as never),
-        );
-        return;
-      }
-      router.replace("/(customer)/(home)" as never);
+      router.replace(postAuthPathFor(user) as never);
     },
     [router],
   );

@@ -34,7 +34,10 @@ export default function AuthLayout() {
       <Stack.Screen name="welcome/vendor" />
       <Stack.Screen name="welcome/rider" />
       <Stack.Screen name="welcome-done" />
-      <Stack.Screen name="onboarding" />
+      <Stack.Screen name="onboarding/index" />
+      <Stack.Screen name="onboarding/customer/details" />
+      <Stack.Screen name="onboarding/vendor/wizard" />
+      <Stack.Screen name="onboarding/rider/wizard" />
       <Stack.Screen name="phone" />
       <Stack.Screen name="otp" />
       {/* Unlock screens declared flat — there's no app/(auth)/unlock/_layout.tsx

@@ -30,6 +30,13 @@ export interface SessionUser {
   defaultAddress?: string | null;
   role: UserRole;
   isOnboarded: boolean;
+  /**
+   * Vendor-only public business name (e.g. "Abkon Oil Ltd"). Set in
+   * the v7 vendor onboarding wizard's Step 1. Empty/missing on a fresh
+   * vendor signup → bootstrap routes the user to the wizard rather
+   * than the vendor home.
+   */
+  vendorBusinessName?: string;
   /** Server-managed. Surfaces the "Use saved card" path in checkout. */
   lastPaystackAuth?: SavedCard;
   /** "pending" | "active" | "suspended". Gated UI when not active. */

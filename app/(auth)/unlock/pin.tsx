@@ -20,6 +20,7 @@ import {
 } from "@/lib/auth";
 import { useSessionStore, type SessionUser } from "@/store/useSessionStore";
 import { usePendingSignupStore } from "@/store/usePendingSignupStore";
+import { postAuthPathFor } from "@/lib/authRouting";
 
 const PIN_LENGTH = 4;
 const MAX_ATTEMPTS = 5;
@@ -43,6 +44,7 @@ interface LoginResponse {
  * limit (see _server-asks/auth-login.md).
  */
 export default function PinUnlockScreen() {
+  console.log("[unlock/pin] render BEGIN");
   const theme = useTheme();
   const router = useRouter();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -81,14 +83,26 @@ export default function PinUnlockScreen() {
 
   // Probe biometric for the keypad shortcut + tracking.
   useEffect(() => {
+    console.log("[unlock/pin] bio-probe START");
     let cancelled = false;
     (async () => {
-      const enabled = await getBiometricEnabled();
-      if (!enabled) return;
-      const { available, type } = await checkBiometricAvailability();
-      if (!cancelled && available) setBioType(type);
+      try {
+        const enabled = await getBiometricEnabled();
+        console.log("[unlock/pin] bio-probe enabled=" + enabled);
+        if (!enabled) return;
+        const { available, type } = await checkBiometricAvailability();
+        console.log(
+          "[unlock/pin] bio-probe avail=" + available + " type=" + type
+        );
+        if (!cancelled && available) setBioType(type);
+      } catch (e: any) {
+        console.log(
+          "[unlock/pin] bio-probe THROW: " + (e?.message ?? String(e))
+        );
+      }
     })();
     return () => {
+      console.log("[unlock/pin] bio-probe CLEANUP");
       cancelled = true;
     };
   }, []);
@@ -161,28 +175,10 @@ export default function PinUnlockScreen() {
         // Recovery / login OTP draft is no longer needed.
         resetPending();
 
-        const role = res.user.role;
-        if (role === "rider") {
-          if (res.user.verificationStatus === "approved") {
-            router.replace("/(rider)/(queue)" as never);
-          } else {
-            router.replace(
-              "/(auth)/verification/pending?role=rider" as never
-            );
-          }
-          return;
-        }
-        if (role === "vendor") {
-          if (res.user.verificationStatus === "approved") {
-            router.replace("/(vendor)/(today)" as never);
-          } else {
-            router.replace(
-              "/(auth)/verification/pending?role=vendor" as never
-            );
-          }
-          return;
-        }
-        router.replace("/(customer)/(home)" as never);
+        // Single source of truth for the post-PIN landing (incl. the
+        // onboarding gate). Honours suspended → state screen,
+        // incomplete onboarding → wizard, verified vs pending split.
+        router.replace(postAuthPathFor(res.user) as never);
       } catch (err: any) {
         // Server-side lockout (audit A.4) returns 423 with retryAfterSec.
         // Honour it directly so the client clock matches the server's
@@ -239,24 +235,7 @@ export default function PinUnlockScreen() {
       router.replace("/(auth)/welcome" as never);
       return;
     }
-    const role = user.role;
-    if (role === "rider") {
-      router.replace(
-        user.verificationStatus === "approved"
-          ? ("/(rider)/(queue)" as never)
-          : ("/(auth)/verification/pending?role=rider" as never)
-      );
-      return;
-    }
-    if (role === "vendor") {
-      router.replace(
-        user.verificationStatus === "approved"
-          ? ("/(vendor)/(today)" as never)
-          : ("/(auth)/verification/pending?role=vendor" as never)
-      );
-      return;
-    }
-    router.replace("/(customer)/(home)" as never);
+    router.replace(postAuthPathFor(user) as never);
   }, [verifying, lockedUntil, user, router, sessionLogout]);
 
   const handleForgot = useCallback(() => {
@@ -268,6 +247,7 @@ export default function PinUnlockScreen() {
     router.replace("/(auth)/welcome" as never);
   }, [router, sessionLogout]);
 
+  console.log("[unlock/pin] render END (about to return JSX)");
   return (
     <AuthScreenContainer
       showBack={false}

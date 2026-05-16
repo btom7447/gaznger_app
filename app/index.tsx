@@ -9,6 +9,7 @@ import {
   getHasOnboarded,
   setBiometricEnabled,
 } from "@/lib/auth";
+import { needsOnboarding, onboardingPathFor } from "@/lib/authRouting";
 
 /**
  * Splash + bootstrap router. Replaces the legacy 2s-timer +
@@ -100,6 +101,17 @@ export default function SplashBootstrap() {
           console.log("[bootstrap] → /unlock/pin");
           router.replace("/(auth)/unlock/pin" as never);
         }
+        return;
+      }
+
+      // v7 unified onboarding: if the user has a session but their
+      // role-specific onboarding never finished (signed up but force-
+      // quit before saving name/address / station / vehicle), send
+      // them back into the wizard rather than the role home.
+      if (needsOnboarding(user)) {
+        const path = onboardingPathFor(user.role);
+        console.log(`[bootstrap] → ${path} (onboarding incomplete)`);
+        router.replace(path as never);
         return;
       }
 

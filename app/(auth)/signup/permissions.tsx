@@ -183,7 +183,10 @@ export default function PermissionsScreen() {
           role,
           pin: preparedPin,
           biometricPreference: securityChoice ?? "pin",
-          profile: profile[role],
+          // v7 unified wizard creates a lean user — profile fields are
+          // filled in by the onboarding screens after signup. Legacy
+          // signup paths still pass the per-role profile when present.
+          profile: profile?.[role] ?? {},
         },
         {
           headers: {
@@ -202,15 +205,24 @@ export default function PermissionsScreen() {
       });
       reset();
 
-      // 4. Route to welcome-done. `verified=true` for customers
-      //    unconditionally; riders/vendors only when the server has
-      //    pre-approved them on signup (rare, but possible).
-      const verified =
-        role === "customer" || res.user.verificationStatus === "approved";
-      router.replace({
-        pathname: "/(auth)/welcome-done" as never,
-        params: { role, verified: verified ? "true" : "false" },
-      });
+      // 4. Route into the v7 onboarding wizard for the chosen role.
+      //    Customer = single-page details (name/email/address); vendor
+      //    and rider get a 3-step wizard. After onboarding finishes
+      //    the user lands either on the role home (customer) or the
+      //    pending-verification screen (vendor/rider).
+      if (role === "customer") {
+        router.replace(
+          "/(auth)/onboarding/customer/details" as never,
+        );
+      } else if (role === "vendor") {
+        router.replace(
+          "/(auth)/onboarding/vendor/wizard" as never,
+        );
+      } else {
+        router.replace(
+          "/(auth)/onboarding/rider/wizard" as never,
+        );
+      }
     } catch (err: any) {
       toast.error("Couldn't finish signup", {
         description: err?.message ?? "Try again in a moment.",

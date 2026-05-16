@@ -10,6 +10,7 @@ import {
   type BiometricType,
 } from "@/lib/permissions";
 import { useSessionStore } from "@/store/useSessionStore";
+import { postAuthPathFor } from "@/lib/authRouting";
 
 /**
  * Biometric unlock — auto-fires the OS prompt on mount, falls through
@@ -59,8 +60,10 @@ export default function BiometricUnlockScreen() {
       // Session got cleared mid-flow (likely an /auth/me 401 +
       // refresh failure). Keep the user in the unlock funnel via
       // PIN — they shouldn't be punted back to welcome just because
-      // the access token expired.
-      router.replace("/(auth)/unlock/pin" as never);
+      // the access token expired. Push (not replace) to dodge the
+      // Fabric double-render → surface teardown bug we hit on auth
+      // → auth nested-route navigation.
+      router.push("/(auth)/unlock/pin" as never);
       return;
     }
     // NOTE: deliberately NOT calling /auth/me here. Biometric unlock
@@ -70,28 +73,11 @@ export default function BiometricUnlockScreen() {
     // BEFORE the user lands on home. The dashboards fetch what they
     // need on mount; the api wrapper transparently handles token
     // refresh on the first authenticated call from the dashboard.
-    const role = u.role;
-    if (role === "rider") {
-      router.replace(
-        u.verificationStatus === "approved"
-          ? ("/(rider)/(queue)" as never)
-          : ("/(auth)/verification/pending?role=rider" as never)
-      );
-      return;
-    }
-    if (role === "vendor") {
-      router.replace(
-        u.verificationStatus === "approved"
-          ? ("/(vendor)/(today)" as never)
-          : ("/(auth)/verification/pending?role=vendor" as never)
-      );
-      return;
-    }
-    router.replace("/(customer)/(home)" as never);
+    router.replace(postAuthPathFor(u) as never);
   }, [router]);
 
   const goToPin = useCallback(() => {
-    router.replace("/(auth)/unlock/pin" as never);
+    router.push("/(auth)/unlock/pin" as never);
   }, [router]);
 
   const trigger = useCallback(async () => {
