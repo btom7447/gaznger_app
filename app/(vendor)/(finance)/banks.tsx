@@ -171,6 +171,7 @@ export default function VendorBanksScreen() {
   return (
     <VendorScreenShell
       title="Banks"
+      hideStationSwitcher
       rightSlot={
         <Pressable
           onPress={() => router.push("/(vendor)/(finance)/bank-add" as never)}

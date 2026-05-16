@@ -105,7 +105,7 @@ export default function PayoutDetailScreen() {
   const isFailed = payout?.status === "failed" || payout?.status === "rejected";
 
   return (
-    <VendorScreenShell title="Payout">
+    <VendorScreenShell title="Payout" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}

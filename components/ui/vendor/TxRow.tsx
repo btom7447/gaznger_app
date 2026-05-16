@@ -43,7 +43,7 @@ function iconForKind(kind: string): {
     case "refund_credit":
       return { name: "return-down-back", tone: "info" };
     case "withdraw_debit":
-      return { name: "arrow-up-circle", tone: "primary" };
+      return { name: "cash-outline", tone: "primary" };
     case "withdraw_fee_debit":
       return { name: "remove-circle", tone: "warning" };
     case "withdraw_reversal_credit":

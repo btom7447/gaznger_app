@@ -234,7 +234,7 @@ export default function VendorOrderDetailScreen() {
     : false;
 
   return (
-    <VendorScreenShell title="Order">
+    <VendorScreenShell title="Order" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={

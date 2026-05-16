@@ -112,6 +112,7 @@ export default function VendorTeamScreen() {
   return (
     <VendorScreenShell
       title="Team"
+      hideStationSwitcher
       rightSlot={
         <Pressable
           onPress={handleInvite}

@@ -86,7 +86,7 @@ export default function PayoutFailedScreen() {
   }, [router]);
 
   return (
-    <VendorScreenShell title="Payout failed">
+    <VendorScreenShell title="Payout failed" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}

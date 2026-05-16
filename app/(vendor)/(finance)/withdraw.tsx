@@ -163,7 +163,7 @@ export default function WithdrawScreen() {
   }, [canSubmit, amountNum, pickedBankId, router]);
 
   return (
-    <VendorScreenShell title="Withdraw">
+    <VendorScreenShell title="Withdraw" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}

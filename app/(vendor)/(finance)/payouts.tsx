@@ -120,6 +120,7 @@ export default function PayoutsScreen() {
   return (
     <VendorScreenShell
       title="Payouts"
+      hideStationSwitcher
       rightSlot={
         <Pressable
           onPress={() => router.push("/(vendor)/(finance)/banks" as never)}
@@ -168,7 +169,7 @@ export default function PayoutsScreen() {
           </SkelStack>
         ) : !data || data.payouts.length === 0 ? (
           <VendorEmptyState
-            icon="paper-plane-outline"
+            icon="cash-outline"
             headline="No payouts yet"
             body="Withdraw to your bank to see history here."
             ctaLabel="Withdraw"
@@ -198,7 +199,7 @@ export default function PayoutsScreen() {
               <VendorCard tone="primary">
                 <View style={styles.scheduleRow}>
                   <View style={styles.nextIconWrap}>
-                    <Ionicons name="paper-plane" size={18} color="#fff" />
+                    <Ionicons name="cash-outline" size={18} color="#fff" />
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={styles.nextEyebrow}>Next payout</Text>

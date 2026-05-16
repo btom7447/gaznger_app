@@ -191,7 +191,7 @@ export default function StationEditScreen() {
   }, []);
 
   return (
-    <VendorScreenShell title="Station">
+    <VendorScreenShell title="Station" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}

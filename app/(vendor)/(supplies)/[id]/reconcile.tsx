@@ -183,7 +183,7 @@ export default function ReconcileScreen() {
   }, [order, router]);
 
   return (
-    <VendorScreenShell title="Reconcile">
+    <VendorScreenShell title="Reconcile" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}

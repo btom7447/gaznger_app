@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/vendor";
 import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
+import { useVendorStationStore } from "@/store/useVendorStationStore";
 
 interface InviteApiResponse {
   invite: {
@@ -24,6 +25,7 @@ interface InviteApiResponse {
     phone: string;
     token: string;
     status: string;
+    station: string;
   };
   inviteUrl: string;
 }
@@ -31,21 +33,32 @@ interface InviteApiResponse {
 export default function VendorInviteRiderScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const stations = useVendorStationStore((s) => s.stations);
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
+  // Default to the first station so a single-station vendor doesn't
+  // have to interact with the picker.
+  const [stationId, setStationId] = useState<string | null>(
+    stations[0]?.id ?? null,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<InviteApiResponse | null>(null);
 
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
+  // Keep stationId in sync if stations hydrate after mount.
+  React.useEffect(() => {
+    if (!stationId && stations[0]) setStationId(stations[0].id);
+  }, [stations, stationId]);
+
   const canSubmit = useMemo(() => {
-    // Loose phone validation — server normalises + validates strictly.
+    if (!stationId) return false;
     const cleaned = phone.replace(/\s+/g, "");
     return /^\+?\d{10,15}$/.test(cleaned);
-  }, [phone]);
+  }, [phone, stationId]);
 
   const handleInvite = useCallback(async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || !stationId) return;
     setSubmitting(true);
     try {
       const res = await api.post<InviteApiResponse>(
@@ -53,6 +66,7 @@ export default function VendorInviteRiderScreen() {
         {
           phone: phone.trim(),
           displayName: name.trim() || undefined,
+          stationId,
         },
       );
       setResult(res);
@@ -62,7 +76,7 @@ export default function VendorInviteRiderScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, phone, name]);
+  }, [canSubmit, phone, name, stationId]);
 
   const handleShare = useCallback(async () => {
     if (!result) return;
@@ -78,7 +92,7 @@ export default function VendorInviteRiderScreen() {
   }, [result]);
 
   return (
-    <VendorScreenShell title="Invite rider">
+    <VendorScreenShell title="Invite rider" hideStationSwitcher>
       <Pressable
         onPress={() => router.back()}
         accessibilityRole="button"
@@ -96,6 +110,54 @@ export default function VendorInviteRiderScreen() {
       <View style={styles.body}>
         {!result ? (
           <>
+            <VendorCard>
+              <Text style={styles.cardLabel}>Assign to station</Text>
+              {stations.length === 0 ? (
+                <Text style={styles.helperText}>
+                  Add a station first to assign a rider.
+                </Text>
+              ) : (
+                <View style={styles.stationList}>
+                  {stations.map((s) => {
+                    const picked = s.id === stationId;
+                    return (
+                      <Pressable
+                        key={s.id}
+                        onPress={() => setStationId(s.id)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: picked }}
+                        accessibilityLabel={`Assign to ${s.name}`}
+                        style={({ pressed }) => [
+                          styles.stationRow,
+                          picked && styles.stationRowActive,
+                          pressed && { opacity: 0.85 },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.radio,
+                            picked && styles.radioActive,
+                          ]}
+                        >
+                          {picked ? <View style={styles.radioDot} /> : null}
+                        </View>
+                        <Text
+                          style={styles.stationName}
+                          numberOfLines={1}
+                        >
+                          {s.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+              <Text style={styles.helperFooter}>
+                Riders are bound to one station. You can reassign later from the
+                rider's profile.
+              </Text>
+            </VendorCard>
+
             <VendorCard>
               <Text style={styles.cardLabel}>Rider phone</Text>
               <TextInput
@@ -217,6 +279,57 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
     body: {
       padding: 20,
       gap: 14,
+    },
+    stationList: {
+      gap: 8,
+    },
+    stationRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: theme.radius.md,
+      backgroundColor: theme.bg,
+      borderWidth: 1,
+      borderColor: theme.divider,
+    },
+    stationRowActive: {
+      borderColor: theme.primary,
+      backgroundColor: theme.primaryTint,
+    },
+    radio: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      borderWidth: 2,
+      borderColor: theme.border,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    radioActive: {
+      borderColor: theme.primary,
+    },
+    radioDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: theme.primary,
+    },
+    stationName: {
+      ...theme.type.body,
+      color: theme.fg,
+      fontWeight: "700",
+      flexShrink: 1,
+    },
+    helperText: {
+      ...theme.type.bodySm,
+      color: theme.fgMuted,
+    },
+    helperFooter: {
+      ...theme.type.caption,
+      color: theme.fgMuted,
+      marginTop: 10,
     },
     cardLabel: {
       ...theme.type.caption,

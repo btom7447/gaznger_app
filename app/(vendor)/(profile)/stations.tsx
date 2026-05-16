@@ -84,6 +84,7 @@ export default function VendorStationsScreen() {
   return (
     <VendorScreenShell
       title="Stations"
+      hideStationSwitcher
       rightSlot={
         <Pressable
           onPress={() => router.push("/(vendor)/(profile)/station-add" as never)}

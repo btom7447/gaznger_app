@@ -64,7 +64,7 @@ export default function LowBalanceScreen() {
   }, [router]);
 
   return (
-    <VendorScreenShell title="Wallet low">
+    <VendorScreenShell title="Wallet low" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}

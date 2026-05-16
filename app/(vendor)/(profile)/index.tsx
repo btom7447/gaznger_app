@@ -170,6 +170,7 @@ export default function VendorProfileScreen() {
   return (
     <VendorScreenShell
       title="Profile"
+      hideStationSwitcher
       rightSlot={
         <Pressable
           onPress={() =>
@@ -329,19 +330,9 @@ export default function VendorProfileScreen() {
               tone="success"
               label="Gaznger support"
               sub="Get help from our team"
-              onPress={async () => {
-                try {
-                  const res = await api.post<{ chat: { _id: string } }>(
-                    "/api/chats/support",
-                  );
-                  router.push({
-                    pathname: "/(screens)/chat/[id]" as never,
-                    params: { id: res.chat._id } as never,
-                  });
-                } catch (err: any) {
-                  toast.error(err?.message ?? "Support unavailable");
-                }
-              }}
+              onPress={() =>
+                router.push("/(screens)/help-support" as never)
+              }
             />
             <ListRow
               icon="person"

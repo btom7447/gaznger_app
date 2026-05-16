@@ -130,7 +130,7 @@ export default function WalletHero({
           ]}
         >
           <Ionicons
-            name="paper-plane"
+            name="cash-outline"
             size={14}
             color={theme.palette.green700}
           />

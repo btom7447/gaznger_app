@@ -94,7 +94,7 @@ export default function TransactionDetailScreen() {
   const isCredit = (tx?.amount ?? 0) >= 0;
 
   return (
-    <VendorScreenShell title="Transaction">
+    <VendorScreenShell title="Transaction" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}

@@ -84,7 +84,7 @@ export default function VendorKycScreen() {
   }, [router]);
 
   return (
-    <VendorScreenShell title="Verification">
+    <VendorScreenShell title="Verification" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}

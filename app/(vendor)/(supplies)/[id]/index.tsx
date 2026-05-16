@@ -232,7 +232,7 @@ export default function BulkOrderDetailScreen() {
   }, [order, actioning, handleMarkPaid, handleConfirmReceipt, handleGoReconcile, handleGoDispute]);
 
   return (
-    <VendorScreenShell title="Purchase">
+    <VendorScreenShell title="Purchase" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={

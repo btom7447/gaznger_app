@@ -118,7 +118,7 @@ export default function VendorFinanceScreen() {
   const lowBalance = (wallet?.available ?? Infinity) < LOW_BALANCE_NAIRA;
 
   return (
-    <VendorScreenShell title="Finance">
+    <VendorScreenShell title="Finance" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={
@@ -198,7 +198,7 @@ export default function VendorFinanceScreen() {
                   }
                 />
                 <SettingsRow
-                  icon="paper-plane"
+                  icon="cash-outline"
                   iconTone="primary"
                   title="Payouts"
                   sub="Withdrawal history"

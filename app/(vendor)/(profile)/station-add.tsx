@@ -126,7 +126,7 @@ export default function AddStationScreen() {
   ]);
 
   return (
-    <VendorScreenShell title="Add station">
+    <VendorScreenShell title="Add station" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}

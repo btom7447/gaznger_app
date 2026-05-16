@@ -136,7 +136,7 @@ export default function DisputeThreadScreen() {
   }, [order, draft]);
 
   return (
-    <VendorScreenShell title="Dispute">
+    <VendorScreenShell title="Dispute" hideStationSwitcher>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}

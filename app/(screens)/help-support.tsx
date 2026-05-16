@@ -1,120 +1,190 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Linking,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
 import { Theme, useTheme } from "@/constants/theme";
-import {
-  Row,
-  ScreenContainer,
-  ScreenHeader,
-} from "@/components/ui/primitives";
+import { ScreenContainer, ScreenHeader } from "@/components/ui/primitives";
+import { useSessionStore } from "@/store/useSessionStore";
+import { api } from "@/lib/api";
 
 /**
- * Help & support — v3.
+ * Shared SupportHub — surfaces customer-care phone, email, live-chat,
+ * and FAQ. Same UI for customer, vendor, and rider; copy + FAQ come
+ * from `GET /api/support-info?role=` so admin web can edit per-role
+ * without a mobile release.
  *
- * Layout:
- *   1. Search field — filters the FAQ accordion below.
- *   2. Quick topic cards (4 large tile shortcuts to common help routes).
- *   3. FAQ accordion grouped under "Common questions".
- *   4. Footer row → Contact support (route: /(screens)/contact-support).
- *
- * No server fetch — FAQ content is static. The accordion is driven by
- * a single open-index, not LayoutAnimation, so it works the same on
- * iOS + Android without `setLayoutAnimationEnabledExperimental`.
+ * Routes:
+ *   tel:/mailto: links via Linking.openURL
+ *   Live chat → /(screens)/chat-thread with the synthetic Support thread
+ *   FAQ entries expand inline; only one open at a time
  */
 
-const FAQS: Array<{ q: string; a: string }> = [
-  {
-    q: "How do I place a fuel order?",
-    a: "Tap a fuel on the home screen, set the quantity and delivery address, pick a station, then pay. We'll match you with the closest rider in under a minute.",
-  },
-  {
-    q: "How long does delivery take?",
-    a: "Typical delivery is 30–60 minutes depending on traffic and station distance. The Track screen shows a live ETA the moment a rider is matched.",
-  },
-  {
-    q: "Can I cancel an order?",
-    a: "Yes — open the order from Order History and tap Cancel. Cancellation is free until a rider picks up your fuel from the station.",
-  },
-  {
-    q: "How do Gaznger Points work?",
-    a: "You earn 50–200 points per delivered order. 1 point = ₦1 off any future order. Apply them on the Payment screen, or flip on Auto-redeem in Settings.",
-  },
-  {
-    q: "What payment methods are accepted?",
-    a: "Cards (saved or one-off via Paystack), the Gaznger wallet, and bank transfer. Cash on delivery isn't supported — every order needs an audit trail.",
-  },
-  {
-    q: "Why is my wallet balance pending?",
-    a: "Top-ups settle instantly. Refunds and earnings sit in pending until the order closes (delivery confirmed + 24-hour dispute window).",
-  },
-  {
-    q: "How do I update my saved card?",
-    a: "Tap any payment method in Settings → Payment methods. We don't store your card — Paystack does — so removing means re-entering on next checkout.",
-  },
-  {
-    q: "Is the LPG cylinder I receive new?",
-    a: "We swap your empty for a refilled, weighed cylinder of the same brand from a verified depot. We don't sell brand-new cylinders.",
-  },
-];
+interface FaqRow {
+  q: string;
+  a: string;
+}
 
-const QUICK_TOPICS: Array<{
-  id: string;
-  label: string;
-  icon: React.ComponentProps<typeof Ionicons>["name"];
-  route: string;
-}> = [
-  {
-    id: "order",
-    label: "Order help",
-    icon: "flame-outline",
-    route: "/(customer)/(order)/history",
-  },
-  {
-    id: "wallet",
-    label: "Wallet & payment",
-    icon: "wallet-outline",
-    route: "/(customer)/wallet",
-  },
-  {
-    id: "points",
-    label: "Points",
-    icon: "star-outline",
-    route: "/(screens)/points",
-  },
-  {
-    id: "account",
-    label: "Account",
-    icon: "person-outline",
-    route: "/(screens)/personal-info",
-  },
-];
+interface SupportBlock {
+  phone: string;
+  email: string;
+  hours: string;
+  liveChatEnabled: boolean;
+  faqs: FaqRow[];
+}
 
-export default function HelpSupportScreen() {
-  const theme = useTheme();
+interface SupportApiResponse {
+  role: "customer" | "vendor" | "rider";
+  support: SupportBlock;
+}
+
+/**
+ * Per-role fallback for when the server hasn't been configured yet.
+ * Empty contact fields hide the corresponding row; FAQs render as-is.
+ */
+const FALLBACK: Record<"customer" | "vendor" | "rider", SupportBlock> = {
+  customer: {
+    phone: "",
+    email: "",
+    hours: "",
+    liveChatEnabled: true,
+    faqs: [
+      {
+        q: "How do I place a fuel order?",
+        a: "Tap a fuel on the home screen, set the quantity and delivery address, pick a station, then pay. We'll match you with the closest rider in under a minute.",
+      },
+      {
+        q: "How long does delivery take?",
+        a: "Typical delivery is 30–60 minutes depending on traffic and station distance.",
+      },
+      {
+        q: "Can I cancel an order?",
+        a: "Yes — open the order from Order History and tap Cancel. Cancellation is free until a rider picks up your fuel from the station.",
+      },
+    ],
+  },
+  vendor: {
+    phone: "",
+    email: "",
+    hours: "",
+    liveChatEnabled: true,
+    faqs: [
+      {
+        q: "How do I add a station?",
+        a: "Profile → Stations → Add station. Fill in address, fuels, prices, and operating hours.",
+      },
+      {
+        q: "How do payouts work?",
+        a: "Settled wallet balance lands in your linked bank within 60 seconds of a withdrawal request.",
+      },
+      {
+        q: "How do I invite a rider?",
+        a: "Team → Invite rider. Pick the station first, then enter the rider's phone number. They're bound to that station once they sign up.",
+      },
+    ],
+  },
+  rider: {
+    phone: "",
+    email: "",
+    hours: "",
+    liveChatEnabled: true,
+    faqs: [
+      {
+        q: "How are orders assigned to me?",
+        a: "We match riders to nearby orders. Going online makes you eligible for dispatch.",
+      },
+      {
+        q: "When do I get paid?",
+        a: "Earnings settle on order delivery. Withdraw from the Wallet screen.",
+      },
+    ],
+  },
+};
+
+export default function SupportHubScreen() {
   const router = useRouter();
+  const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  const role = (useSessionStore((s) => s.user?.role) ?? "customer") as
+    | "customer"
+    | "vendor"
+    | "rider";
 
-  const [query, setQuery] = useState("");
-  const [openIdx, setOpenIdx] = useState<number | null>(0);
+  const [data, setData] = useState<SupportBlock>(FALLBACK[role]);
+  const [loading, setLoading] = useState(true);
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const [openingChat, setOpeningChat] = useState(false);
 
-  const visibleFaqs = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return FAQS.map((f, i) => ({ ...f, originalIdx: i }));
-    return FAQS.map((f, i) => ({ ...f, originalIdx: i })).filter(
-      (f) =>
-        f.q.toLowerCase().includes(q) || f.a.toLowerCase().includes(q)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get<SupportApiResponse>(
+          `/api/support-info?role=${role}`,
+          { timeoutMs: 10_000 },
+        );
+        if (cancelled) return;
+        // If server returns an empty FAQ list, keep the fallback FAQs
+        // so the screen is never blank during early rollout.
+        const incoming = res.support ?? FALLBACK[role];
+        setData({
+          ...incoming,
+          faqs:
+            incoming.faqs && incoming.faqs.length > 0
+              ? incoming.faqs
+              : FALLBACK[role].faqs,
+        });
+      } catch {
+        if (!cancelled) setData(FALLBACK[role]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [role]);
+
+  const handleCall = useCallback(() => {
+    if (!data.phone) return;
+    Linking.openURL(`tel:${data.phone}`).catch(() =>
+      toast.error("Couldn't open phone dialer"),
     );
-  }, [query]);
+  }, [data.phone]);
+
+  const handleEmail = useCallback(() => {
+    if (!data.email) return;
+    Linking.openURL(`mailto:${data.email}?subject=Gaznger%20support`).catch(
+      () => toast.error("Couldn't open email"),
+    );
+  }, [data.email]);
+
+  const handleLiveChat = useCallback(async () => {
+    setOpeningChat(true);
+    try {
+      const res = await api.post<{ chat: { _id: string } }>(
+        "/api/chats/support",
+        {},
+        { timeoutMs: 10_000 },
+      );
+      router.push({
+        pathname: "/(screens)/chat-thread" as never,
+        params: { id: res.chat._id } as never,
+      });
+    } catch (err: any) {
+      toast.error(err?.message ?? "Couldn't open support chat");
+    } finally {
+      setOpeningChat(false);
+    }
+  }, [router]);
 
   return (
     <ScreenContainer
@@ -124,292 +194,227 @@ export default function HelpSupportScreen() {
       }
     >
       <ScrollView
-        showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        {/* Search */}
-        <View style={styles.searchWrap}>
-          <Ionicons name="search" size={16} color={theme.fgMuted} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search articles"
-            placeholderTextColor={theme.fgSubtle}
-            style={styles.searchInput}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-          />
-          {query.length > 0 ? (
-            <Pressable
-              onPress={() => setQuery("")}
-              accessibilityRole="button"
-              accessibilityLabel="Clear search"
-              hitSlop={10}
-            >
-              <Ionicons
-                name="close-circle"
-                size={16}
-                color={theme.fgMuted}
-              />
-            </Pressable>
+        <Text style={styles.sectionLabel}>Get help</Text>
+
+        <View style={styles.list}>
+          {data.liveChatEnabled ? (
+            <SupportRow
+              icon="chatbubbles"
+              tone="primary"
+              title="Live chat"
+              sub={
+                data.hours
+                  ? `Reply usually within minutes · ${data.hours}`
+                  : "Reply usually within minutes"
+              }
+              onPress={openingChat ? undefined : handleLiveChat}
+              trailing={
+                openingChat ? (
+                  <ActivityIndicator color={theme.primary} />
+                ) : undefined
+              }
+            />
+          ) : null}
+          {data.phone ? (
+            <SupportRow
+              icon="call"
+              tone="info"
+              title="Call support"
+              sub={data.phone}
+              onPress={handleCall}
+            />
+          ) : null}
+          {data.email ? (
+            <SupportRow
+              icon="mail"
+              tone="info"
+              title="Email support"
+              sub={data.email}
+              onPress={handleEmail}
+            />
+          ) : null}
+          {!data.liveChatEnabled && !data.phone && !data.email && !loading ? (
+            <Text style={styles.empty}>
+              Support channels aren't configured yet.
+            </Text>
           ) : null}
         </View>
 
-        {/* Quick topics — only shown when not searching. Sits at the
-            top so the most-visited paths are reachable in one tap. */}
-        {!query ? (
-          <>
-            <Text style={styles.sectionLabel}>QUICK TOPICS</Text>
-            <View style={styles.topicGrid}>
-              {QUICK_TOPICS.map((t) => (
-                <Pressable
-                  key={t.id}
-                  onPress={() => router.push(t.route as never)}
-                  accessibilityRole="button"
-                  accessibilityLabel={t.label}
-                  style={({ pressed }) => [
-                    styles.topicCard,
-                    pressed && { opacity: 0.92 },
-                  ]}
-                >
-                  <View style={styles.topicIconTile}>
-                    <Ionicons
-                      name={t.icon}
-                      size={18}
-                      color={
-                        theme.mode === "dark"
-                          ? "#fff"
-                          : theme.palette.green700
-                      }
-                    />
-                  </View>
-                  <Text style={styles.topicLabel}>{t.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </>
-        ) : null}
-
-        {/* Talk to us — escalation channels. Moved ABOVE Common
-            Questions per UX direction so users who already know they
-            need to contact someone don't have to scroll past the FAQ
-            to find the channels. */}
-        {!query ? (
-          <>
-            <Text style={styles.sectionLabel}>TALK TO US</Text>
-            <View style={styles.rowGroup}>
-              <Row
-                icon="chatbubble-ellipses-outline"
-                label="Live chat"
-                sub="Coming soon · for now use WhatsApp"
-                onPress={() =>
-                  toast.info("Live chat is on the way", {
-                    description:
-                      "We're shipping in-app chat soon. WhatsApp is the fastest channel for now.",
-                  })
-                }
-              />
-              <Row
-                icon="logo-whatsapp"
-                label="WhatsApp"
-                sub="Fastest · 8am–10pm daily"
-                onPress={() => {
-                  const text = encodeURIComponent(
-                    "Hi Gaznger, I need help with…"
-                  );
-                  Linking.openURL(
-                    `https://wa.me/2347000000000?text=${text}`
-                  ).catch(() => {});
-                }}
-              />
-              <Row
-                icon="chatbubble-outline"
-                label="Contact support"
-                sub="WhatsApp · phone · email"
-                divider={false}
-                onPress={() =>
-                  router.push("/(screens)/contact-support" as never)
-                }
-              />
-            </View>
-          </>
-        ) : null}
-
-        {/* Common questions — moved to the bottom per UX direction.
-            Most users solve their problem from a quick topic or by
-            messaging us; the FAQ catches the tail. When the user is
-            actively searching, this stays the only block visible. */}
-        <Text style={styles.sectionLabel}>
-          {query ? "MATCHING ARTICLES" : "COMMON QUESTIONS"}
+        <Text style={[styles.sectionLabel, { marginTop: 18 }]}>
+          Common questions
         </Text>
-        {visibleFaqs.length === 0 ? (
-          <View style={styles.emptyWrap}>
-            <Text style={styles.emptyTitle}>No matches</Text>
-            <Text style={styles.emptyBody}>
-              Try a different word, or contact support directly.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.faqGroup}>
-            {visibleFaqs.map((f, i) => {
-              const isOpen = openIdx === f.originalIdx;
-              return (
-                <Pressable
-                  key={f.q}
-                  onPress={() =>
-                    setOpenIdx(isOpen ? null : f.originalIdx)
-                  }
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: isOpen }}
-                  style={({ pressed }) => [
-                    styles.faqRow,
-                    i < visibleFaqs.length - 1 && styles.faqRowDivider,
-                    pressed && { opacity: 0.92 },
-                  ]}
-                >
-                  <View style={styles.faqHead}>
-                    <Text style={styles.faqQ}>{f.q}</Text>
-                    <Ionicons
-                      name={isOpen ? "chevron-down" : "chevron-forward"}
-                      size={14}
-                      color={theme.fgMuted}
-                    />
-                  </View>
-                  {isOpen ? <Text style={styles.faqA}>{f.a}</Text> : null}
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
+        <View style={styles.faqCard}>
+          {data.faqs.map((f, i) => {
+            const open = openIdx === i;
+            return (
+              <Pressable
+                key={i}
+                onPress={() => setOpenIdx(open ? null : i)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: open }}
+                accessibilityLabel={f.q}
+                style={({ pressed }) => [
+                  styles.faqRow,
+                  i < data.faqs.length - 1 && styles.faqRowDivided,
+                  pressed && { opacity: 0.85 },
+                ]}
+              >
+                <View style={styles.faqHeader}>
+                  <Text style={styles.faqQuestion} numberOfLines={open ? 4 : 2}>
+                    {f.q}
+                  </Text>
+                  <Ionicons
+                    name={open ? "chevron-up" : "chevron-down"}
+                    size={18}
+                    color={theme.fgMuted}
+                  />
+                </View>
+                {open ? (
+                  <Text style={styles.faqAnswer}>{f.a}</Text>
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
       </ScrollView>
     </ScreenContainer>
   );
 }
 
+function SupportRow({
+  icon,
+  tone,
+  title,
+  sub,
+  onPress,
+  trailing,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  tone: "primary" | "info";
+  title: string;
+  sub: string;
+  onPress?: () => void;
+  trailing?: React.ReactNode;
+}) {
+  const theme = useTheme();
+  const bg = tone === "primary" ? theme.primaryTint : theme.infoTint;
+  const fg = tone === "primary" ? theme.primary : theme.info;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}. ${sub}`}
+      style={({ pressed }) => [
+        rowStyles.row,
+        { borderColor: theme.divider, backgroundColor: theme.surface },
+        !onPress && { opacity: 0.6 },
+        pressed && onPress && { opacity: 0.92 },
+      ]}
+    >
+      <View
+        style={[rowStyles.iconWrap, { backgroundColor: bg }]}
+      >
+        <Ionicons name={icon} size={18} color={fg} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          style={{ ...theme.type.body, color: theme.fg, fontWeight: "700" }}
+          numberOfLines={1}
+        >
+          {title}
+        </Text>
+        <Text
+          style={{
+            ...theme.type.bodySm,
+            color: theme.fgMuted,
+            marginTop: 2,
+          }}
+          numberOfLines={1}
+        >
+          {sub}
+        </Text>
+      </View>
+      {trailing ?? (
+        <Ionicons name="chevron-forward" size={16} color={theme.fgSubtle} />
+      )}
+    </Pressable>
+  );
+}
+
+const rowStyles = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  iconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});
+
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     scroll: {
-      paddingHorizontal: theme.space.s4,
-      paddingTop: theme.space.s2,
-      paddingBottom: theme.space.s5,
+      padding: 20,
+      paddingBottom: 40,
     },
-
-    /* Search */
-    searchWrap: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      paddingHorizontal: 14,
-      height: 48,
-      borderRadius: 12,
-      backgroundColor: theme.bgMuted,
-      borderWidth: 1,
-      borderColor: theme.border,
-    },
-    searchInput: {
-      flex: 1,
-      ...theme.type.body,
-      color: theme.fg,
-      padding: 0,
-    },
-
     sectionLabel: {
-      ...theme.type.micro,
+      ...theme.type.caption,
       color: theme.fgMuted,
-      letterSpacing: 0.5,
-      paddingTop: theme.space.s4,
-      paddingBottom: theme.space.s2,
+      fontWeight: "700",
+      letterSpacing: 0.6,
+      textTransform: "uppercase",
+      marginBottom: 8,
+      paddingHorizontal: 2,
     },
-
-    /* Quick topic grid (2x2) */
-    topicGrid: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 10,
+    list: { gap: 10 },
+    empty: {
+      ...theme.type.bodySm,
+      color: theme.fgMuted,
+      paddingHorizontal: 4,
+      paddingVertical: 8,
     },
-    topicCard: {
-      width: "48%",
-      flexGrow: 1,
-      paddingVertical: 16,
-      paddingHorizontal: 14,
+    faqCard: {
       borderRadius: 14,
-      backgroundColor: theme.surface,
-      borderWidth: 1,
+      borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.divider,
-      gap: 10,
-    },
-    topicIconTile: {
-      width: 36,
-      height: 36,
-      borderRadius: 10,
-      backgroundColor: theme.primaryTint,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    topicLabel: {
-      ...theme.type.body,
-      fontWeight: "800",
-      color: theme.fg,
-    },
-
-    /* FAQ */
-    faqGroup: {
       backgroundColor: theme.surface,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: theme.divider,
       overflow: "hidden",
     },
     faqRow: {
-      paddingHorizontal: 16,
+      paddingHorizontal: 14,
       paddingVertical: 14,
     },
-    faqRowDivider: {
-      borderBottomColor: theme.divider,
+    faqRowDivided: {
       borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.divider,
     },
-    faqHead: {
+    faqHeader: {
       flexDirection: "row",
       alignItems: "center",
       gap: 8,
     },
-    faqQ: {
-      fontSize: 13.5,
-      fontWeight: "700",
-      color: theme.fg,
+    faqQuestion: {
       flex: 1,
-    },
-    faqA: {
-      fontSize: 12.5,
-      color: theme.fgMuted,
-      marginTop: 8,
-      lineHeight: 19,
-    },
-
-    emptyWrap: {
-      alignItems: "center",
-      paddingVertical: 30,
-    },
-    emptyTitle: {
       ...theme.type.body,
       color: theme.fg,
-      fontWeight: "800",
-      marginBottom: 4,
+      fontWeight: "700",
     },
-    emptyBody: {
+    faqAnswer: {
       ...theme.type.bodySm,
       color: theme.fgMuted,
-      textAlign: "center",
-    },
-
-    /* Row group (escalation) */
-    rowGroup: {
-      backgroundColor: theme.surface,
-      borderRadius: theme.radius.md + 2,
-      borderWidth: 1,
-      borderColor: theme.divider,
-      overflow: "hidden",
+      marginTop: 8,
     },
   });

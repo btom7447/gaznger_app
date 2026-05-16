@@ -112,7 +112,7 @@ export default function EarningsScreen() {
   );
 
   return (
-    <VendorScreenShell title="Earnings">
+    <VendorScreenShell title="Earnings" hideStationSwitcher>
       <Pressable
         onPress={() => router.back()}
         accessibilityRole="button"

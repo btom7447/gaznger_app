@@ -6,7 +6,9 @@ import React, {
   useState,
 } from "react";
 import {
+  Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,12 +20,28 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as Haptics from "expo-haptics";
+import {
+  GestureDetector,
+  Gesture,
+} from "react-native-gesture-handler";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  runOnJS,
+} from "react-native-reanimated";
 import { Theme, useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import { useChatStore } from "@/store/useChatStore";
 import { useSessionStore } from "@/store/useSessionStore";
 import BackButton from "@/components/ui/global/BackButton";
+import {
+  pickAndUploadChatMedia,
+  type ChatMediaAttachment,
+} from "@/lib/uploadChatMedia";
+import { toast } from "sonner-native";
 
 /**
  * Chat thread screen — one-to-one conversation.
@@ -52,13 +70,25 @@ interface ChatResp {
   };
 }
 
+interface MessageAttachment {
+  kind: "image" | "video";
+  url: string;
+  thumbUrl?: string;
+  width?: number;
+  height?: number;
+  durationSec?: number;
+  mime?: string;
+}
+
 interface MessageRow {
   _id: string;
   chat: string;
   sender?: string;
   kind: "text" | "system";
   text: string;
+  attachments?: MessageAttachment[];
   readBy?: { user: string; at: string }[];
+  deletedAt?: string | null;
   createdAt: string;
 }
 
@@ -96,6 +126,10 @@ export default function ChatThreadScreen() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<
+    ChatMediaAttachment[]
+  >([]);
+  const [picking, setPicking] = useState(false);
   const listRef = useRef<FlatList<MessageRow>>(null);
 
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -163,9 +197,23 @@ export default function ChatThreadScreen() {
         api.post(`/api/chats/${chatId}/read`).catch(() => {});
       }
     };
+    const onDeleted = (payload: {
+      chatId: string;
+      messageId: string;
+      deletedAt: string;
+    }) => {
+      if (payload.chatId !== chatId) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m._id === payload.messageId ? { ...m, deletedAt: payload.deletedAt } : m,
+        ),
+      );
+    };
     socket.on("chat:message", onIncoming);
+    socket.on("chat:message-deleted", onDeleted);
     return () => {
       socket.off("chat:message", onIncoming);
+      socket.off("chat:message-deleted", onDeleted);
     };
   }, [chatId, meId]);
 
@@ -179,22 +227,26 @@ export default function ChatThreadScreen() {
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
-    if (!text || !chatId || sending) return;
+    if (!chatId || sending) return;
+    if (!text && pendingAttachments.length === 0) return;
     setSending(true);
+    const attachmentsToSend = pendingAttachments;
     const optimistic: MessageRow = {
       _id: `tmp-${Date.now()}`,
       chat: chatId,
       sender: meId,
       kind: "text",
       text,
+      attachments: attachmentsToSend,
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimistic]);
     setDraft("");
+    setPendingAttachments([]);
     try {
       const res = await api.post<{ message: MessageRow }>(
         `/api/chats/${chatId}/messages`,
-        { text },
+        { text, attachments: attachmentsToSend },
       );
       // Replace optimistic placeholder with server row (same _id from
       // the broadcast may have already landed via socket — dedupe).
@@ -207,10 +259,68 @@ export default function ChatThreadScreen() {
       // Roll back optimistic on failure.
       setMessages((prev) => prev.filter((m) => m._id !== optimistic._id));
       setDraft(text);
+      setPendingAttachments(attachmentsToSend);
     } finally {
       setSending(false);
     }
-  }, [draft, chatId, sending, meId]);
+  }, [draft, chatId, sending, meId, pendingAttachments]);
+
+  const handleAttach = useCallback(async () => {
+    if (picking || sending) return;
+    setPicking(true);
+    try {
+      const picked = await pickAndUploadChatMedia();
+      if (picked.length > 0) {
+        setPendingAttachments((prev) => [...prev, ...picked].slice(0, 9));
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      }
+    } catch (err: any) {
+      toast.error(err?.message ?? "Couldn't attach media");
+    } finally {
+      setPicking(false);
+    }
+  }, [picking, sending]);
+
+  const handleDeleteMessage = useCallback(
+    (msgId: string) => {
+      if (!chatId) return;
+      Alert.alert(
+        "Delete message?",
+        "This message will be removed for everyone in this thread.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              const optimisticAt = new Date().toISOString();
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m._id === msgId ? { ...m, deletedAt: optimisticAt } : m,
+                ),
+              );
+              try {
+                await api.delete(`/api/chats/${chatId}/messages/${msgId}`);
+                Haptics.notificationAsync(
+                  Haptics.NotificationFeedbackType.Success,
+                ).catch(() => {});
+              } catch (err: any) {
+                // Roll back on failure — re-fetch from server so we
+                // don't show a fake tombstone.
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m._id === msgId ? { ...m, deletedAt: null } : m,
+                  ),
+                );
+                toast.error(err?.message ?? "Couldn't delete message");
+              }
+            },
+          },
+        ],
+      );
+    },
+    [chatId],
+  );
 
   const renderItem = ({ item }: { item: MessageRow }) => {
     if (item.kind === "system") {
@@ -222,37 +332,14 @@ export default function ChatThreadScreen() {
     }
     const isMe = item.sender === meId;
     return (
-      <View
-        style={[
-          styles.msgRow,
-          { justifyContent: isMe ? "flex-end" : "flex-start" },
-        ]}
-      >
-        {!isMe ? (
-          <View style={styles.theirAvatar}>
-            <Text style={styles.theirAvatarText}>
-              {peer ? initialsFor(peer.user.displayName) : "?"}
-            </Text>
-          </View>
-        ) : null}
-        <View
-          style={[
-            styles.bubble,
-            isMe ? styles.bubbleMe : styles.bubbleThem,
-          ]}
-        >
-          <Text style={[styles.bubbleText, isMe && styles.bubbleTextMe]}>
-            {item.text}
-          </Text>
-          <Text
-            style={[styles.timeText, isMe && styles.timeTextMe]}
-            numberOfLines={1}
-          >
-            {fmtTime(item.createdAt)}
-            {isMe ? " · sent" : ""}
-          </Text>
-        </View>
-      </View>
+      <BubbleRow
+        item={item}
+        isMe={isMe}
+        peerInitials={peer ? initialsFor(peer.user.displayName) : "?"}
+        onDelete={isMe ? () => handleDeleteMessage(item._id) : undefined}
+        theme={theme}
+        styles={styles}
+      />
     );
   };
 
@@ -294,7 +381,51 @@ export default function ChatThreadScreen() {
           }
         />
 
+        {pendingAttachments.length > 0 ? (
+          <View style={styles.pendingStrip}>
+            {pendingAttachments.map((a, i) => (
+              <View key={i} style={styles.pendingThumbWrap}>
+                <Image
+                  source={{ uri: a.thumbUrl ?? a.url }}
+                  style={styles.pendingThumb}
+                />
+                {a.kind === "video" ? (
+                  <View style={styles.pendingVideoOverlay}>
+                    <Ionicons name="play" size={12} color="#fff" />
+                  </View>
+                ) : null}
+                <Pressable
+                  onPress={() =>
+                    setPendingAttachments((prev) =>
+                      prev.filter((_, j) => j !== i),
+                    )
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove attachment"
+                  style={styles.pendingRemove}
+                >
+                  <Ionicons name="close" size={12} color="#fff" />
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
         <View style={styles.composer}>
+          <Pressable
+            onPress={handleAttach}
+            disabled={picking || sending}
+            accessibilityRole="button"
+            accessibilityLabel="Attach photo or video"
+            hitSlop={6}
+            style={({ pressed }) => [
+              styles.attachBtn,
+              (picking || sending) && { opacity: 0.5 },
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <Ionicons name="attach" size={20} color={theme.fgMuted} />
+          </Pressable>
           <TextInput
             style={styles.input}
             value={draft}
@@ -307,12 +438,16 @@ export default function ChatThreadScreen() {
           />
           <Pressable
             onPress={handleSend}
-            disabled={!draft.trim() || sending}
+            disabled={
+              (!draft.trim() && pendingAttachments.length === 0) || sending
+            }
             accessibilityRole="button"
             accessibilityLabel="Send"
             style={({ pressed }) => [
               styles.sendBtn,
-              (!draft.trim() || sending) && { opacity: 0.5 },
+              ((!draft.trim() && pendingAttachments.length === 0) || sending) && {
+                opacity: 0.5,
+              },
               pressed && { opacity: 0.85 },
             ]}
           >
@@ -323,6 +458,228 @@ export default function ChatThreadScreen() {
     </SafeAreaView>
   );
 }
+
+/**
+ * Single message bubble. Owns:
+ *   - swipe-right gesture with haptic at the trigger threshold
+ *     (visual reply scaffolding kept minimal — a haptic + spring-back
+ *     is enough to confirm the gesture is wired; the quoted-reply UI
+ *     lands in the next pass)
+ *   - long-press to soft-delete (only for `isMe`)
+ *   - attachments grid rendering
+ *   - tombstone fallback when `deletedAt` is set
+ */
+function BubbleRow({
+  item,
+  isMe,
+  peerInitials,
+  onDelete,
+  theme,
+  styles,
+}: {
+  item: MessageRow;
+  isMe: boolean;
+  peerInitials: string;
+  onDelete?: () => void;
+  theme: Theme;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const translateX = useSharedValue(0);
+  const triggered = useRef(false);
+
+  const fireHaptic = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+  }, []);
+
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX(isMe ? -10 : 10)
+        .failOffsetY([-12, 12])
+        .onStart(() => {
+          triggered.current = false;
+        })
+        .onUpdate((e) => {
+          // Swipe direction depends on side: their bubble (left) drags
+          // right; my bubble drags left. Resistance after the trigger.
+          const raw = e.translationX;
+          const clamped = isMe
+            ? Math.max(-80, Math.min(0, raw))
+            : Math.min(80, Math.max(0, raw));
+          translateX.value = clamped;
+          if (!triggered.current && Math.abs(clamped) > 60) {
+            triggered.current = true;
+            runOnJS(fireHaptic)();
+          }
+        })
+        .onEnd(() => {
+          translateX.value = withTiming(0, { duration: 180 });
+        }),
+    [isMe, fireHaptic, translateX],
+  );
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  const isDeleted = !!item.deletedAt;
+
+  return (
+    <GestureDetector gesture={pan}>
+      <Animated.View
+        style={[
+          styles.msgRow,
+          { justifyContent: isMe ? "flex-end" : "flex-start" },
+          animatedStyle,
+        ]}
+      >
+        {!isMe ? (
+          <View style={styles.theirAvatar}>
+            <Text style={styles.theirAvatarText}>{peerInitials}</Text>
+          </View>
+        ) : null}
+        <Pressable
+          onLongPress={isMe && !isDeleted ? onDelete : undefined}
+          delayLongPress={350}
+          accessibilityRole={isMe && !isDeleted ? "button" : undefined}
+          accessibilityLabel={
+            isMe && !isDeleted
+              ? "Long press to delete your message"
+              : undefined
+          }
+          style={[
+            styles.bubble,
+            isMe ? styles.bubbleMe : styles.bubbleThem,
+            isDeleted && styles.bubbleDeleted,
+          ]}
+        >
+          {isDeleted ? (
+            <Text
+              style={[styles.deletedText, isMe && { color: "rgba(255,255,255,0.7)" }]}
+            >
+              This message was deleted
+            </Text>
+          ) : (
+            <>
+              {item.attachments && item.attachments.length > 0 ? (
+                <AttachmentGrid attachments={item.attachments} />
+              ) : null}
+              {item.text ? (
+                <Text
+                  style={[
+                    styles.bubbleText,
+                    isMe && styles.bubbleTextMe,
+                    item.attachments && item.attachments.length > 0
+                      ? { marginTop: 6 }
+                      : null,
+                  ]}
+                >
+                  {item.text}
+                </Text>
+              ) : null}
+              <Text
+                style={[styles.timeText, isMe && styles.timeTextMe]}
+                numberOfLines={1}
+              >
+                {fmtTime(item.createdAt)}
+                {isMe ? " · sent" : ""}
+              </Text>
+            </>
+          )}
+        </Pressable>
+      </Animated.View>
+    </GestureDetector>
+  );
+}
+
+/**
+ * 3×3 grid of media thumbnails. Layout cribbed from WhatsApp:
+ *   1   → 1 big tile
+ *   2   → 2 side-by-side
+ *   3   → 1 big + 2 stacked
+ *   4   → 2×2
+ *   5–9 → 3×N (3 columns, rows fill row-major)
+ * Videos overlay a centered play badge on the thumb image.
+ */
+function AttachmentGrid({
+  attachments,
+}: {
+  attachments: MessageAttachment[];
+}) {
+  const theme = useTheme();
+  const visible = attachments.slice(0, 9);
+  const overflow = attachments.length - visible.length;
+  const count = visible.length;
+  const cols = count === 1 ? 1 : count === 2 ? 2 : count <= 4 ? 2 : 3;
+  const size = 200 / Math.max(cols, 2); // px per tile
+  return (
+    <View style={[gridStyles.wrap, count === 1 && { width: 200 }]}>
+      {visible.map((a, i) => {
+        const isLastWithOverflow = overflow > 0 && i === visible.length - 1;
+        return (
+          <View
+            key={i}
+            style={[
+              gridStyles.tile,
+              {
+                width: count === 1 ? 200 : size * (cols === 2 ? 1 : 1),
+                height: count === 1 ? 200 : size,
+              },
+            ]}
+          >
+            <Image
+              source={{ uri: a.thumbUrl ?? a.url }}
+              style={gridStyles.image}
+              resizeMode="cover"
+            />
+            {a.kind === "video" ? (
+              <View style={gridStyles.playOverlay}>
+                <Ionicons name="play" size={20} color="#fff" />
+              </View>
+            ) : null}
+            {isLastWithOverflow ? (
+              <View style={gridStyles.overflowOverlay}>
+                <Text style={gridStyles.overflowText}>+{overflow}</Text>
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+const gridStyles = StyleSheet.create({
+  wrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 2,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  tile: {
+    backgroundColor: "rgba(0,0,0,0.2)",
+    overflow: "hidden",
+  },
+  image: { width: "100%", height: "100%" },
+  playOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.18)",
+  },
+  overflowOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  overflowText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 18,
+  },
+});
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
@@ -446,6 +803,60 @@ const makeStyles = (theme: Theme) =>
       backgroundColor: theme.primary,
       alignItems: "center",
       justifyContent: "center",
+    },
+    attachBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: theme.bgMuted,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    pendingStrip: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 6,
+      paddingHorizontal: 12,
+      paddingTop: 8,
+      backgroundColor: theme.surface,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.divider,
+    },
+    pendingThumbWrap: {
+      width: 56,
+      height: 56,
+      borderRadius: 8,
+      overflow: "hidden",
+      position: "relative",
+    },
+    pendingThumb: {
+      width: "100%",
+      height: "100%",
+    },
+    pendingVideoOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(0,0,0,0.25)",
+    },
+    pendingRemove: {
+      position: "absolute",
+      top: 2,
+      right: 2,
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      backgroundColor: "rgba(0,0,0,0.65)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    bubbleDeleted: {
+      opacity: 0.7,
+    },
+    deletedText: {
+      fontStyle: "italic",
+      fontSize: 13,
+      color: theme.fgMuted,
     },
     empty: {
       alignItems: "center",

@@ -156,7 +156,7 @@ export default function VendorBankAddScreen() {
   }, [canSubmit, picked, resolved, accountNumber, stationId, router]);
 
   return (
-    <VendorScreenShell title="Add bank">
+    <VendorScreenShell title="Add bank" hideStationSwitcher>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
