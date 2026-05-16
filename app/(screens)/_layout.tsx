@@ -25,6 +25,8 @@ export default function ScreensLayout() {
           animation: "slide_from_bottom",
         }}
       />
+      <Stack.Screen name="chats" options={{ headerShown: false }} />
+      <Stack.Screen name="chat/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="_primitives-preview" options={{ headerShown: false }} />
     </Stack>
   );

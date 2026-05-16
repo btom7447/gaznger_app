@@ -292,6 +292,11 @@ export default function ProfileScreen() {
             }
           />
           <Row
+            icon="chatbubbles-outline"
+            label="Messages"
+            onPress={() => router.push("/(screens)/chats" as never)}
+          />
+          <Row
             icon="settings-outline"
             label="Settings"
             divider={false}
@@ -302,6 +307,23 @@ export default function ProfileScreen() {
         {/* ── Get help ─────────────────────────────────────────── */}
         <Text style={styles.sectionLabel}>GET HELP</Text>
         <View style={styles.rowGroup}>
+          <Row
+            icon="help-buoy-outline"
+            label="Chat with support"
+            onPress={async () => {
+              try {
+                const res = await api.post<{ chat: { _id: string } }>(
+                  "/api/chats/support",
+                );
+                router.push({
+                  pathname: "/(screens)/chat/[id]" as never,
+                  params: { id: res.chat._id } as never,
+                });
+              } catch (err: any) {
+                toast.error(err?.message ?? "Support unavailable");
+              }
+            }}
+          />
           <Row
             icon="help-circle-outline"
             label="Help & support"

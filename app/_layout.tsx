@@ -1,7 +1,17 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import { Stack, usePathname, useRouter } from "expo-router";
 import { useTheme } from "@/constants/theme";
-import { StatusBar } from "react-native";
+import { AppState, StatusBar } from "react-native";
+import { enableFreeze, enableScreens } from "react-native-screens";
+
+// Keep react-native-screens enabled so previous screens unmount on
+// navigation. The earlier workaround disabled screens entirely, which
+// left the auth stack mounted after router.replace into the customer
+// or vendor home — visible as a double-rendered home. Freezing stays
+// off because it (not the native-screen optimisation) was what clashed
+// with Fabric's commit phase on the OTP → unlock/pin transition.
+enableScreens(true);
+enableFreeze(false);
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
@@ -18,9 +28,9 @@ import { getPaystackPublicKey } from "@/lib/paystackKey";
 import { getCurrentPathname, setCurrentPathname } from "@/lib/pathnameMirror";
 import DebugOverlay from "@/components/ui/global/DebugOverlay";
 import ErrorBoundary from "@/components/ui/global/ErrorBoundary";
-import RouteProbe from "@/components/ui/global/RouteProbe";
 import { useAppLockOnResume } from "@/hooks/useAppLockOnResume";
 import { StepUpAuthHost } from "@/components/ui/auth";
+import ChatUnreadBridge from "@/components/ui/global/ChatUnreadBridge";
 
 const isExpoGo = Constants.appOwnership === "expo";
 
@@ -38,6 +48,47 @@ if (typeof ErrorUtils !== "undefined") {
     );
     if (orig) orig(err, isFatal);
   });
+}
+// PROBE: intercept console.error too. React calls console.error for
+// internal "tried to render Suspense fallback" / "Maximum update depth"
+// / "Element type invalid" warnings BEFORE the surface tears down. The
+// original ErrorUtils handler only catches throws, not these warnings.
+const __origConsoleError = console.error;
+console.error = (...args: any[]) => {
+  try {
+    console.log(
+      "[CONSOLE.ERROR] " +
+        args
+          .map((a) =>
+            a instanceof Error
+              ? (a.message + " | " + (a.stack ?? "").split("\n").slice(0, 4).join(" / "))
+              : typeof a === "string"
+              ? a
+              : (() => {
+                  try { return JSON.stringify(a); } catch { return String(a); }
+                })()
+          )
+          .join(" ")
+          .slice(0, 600)
+    );
+  } catch { /* never throw from logger */ }
+  __origConsoleError(...args);
+};
+// PROBE: catch promise rejections that bubble past the Hermes tracker.
+if (typeof global !== "undefined") {
+  // @ts-ignore
+  const g: any = global;
+  if (typeof g.addEventListener === "function") {
+    try {
+      g.addEventListener("unhandledrejection", (ev: any) => {
+        const reason = ev?.reason;
+        console.log(
+          "[UNHANDLED REJECTION via addEventListener] " +
+            (reason?.message ?? String(reason))
+        );
+      });
+    } catch { /* not supported on Hermes */ }
+  }
 }
 // @ts-ignore - global
 if (typeof global !== "undefined") {
@@ -136,6 +187,18 @@ export default function RootLayout() {
   console.log("[root] render #" + __rootRenders);
   const theme = useTheme();
   const router = useRouter();
+
+  // PROBE: every AppState transition. If the OS is putting us to
+  // "inactive" right after OTP→PIN nav (e.g. native dialog stealing
+  // focus), we'll see it here even though useAppLockOnResume's own
+  // logic only acts on >5min backgrounds.
+  useEffect(() => {
+    console.log("[root] AppState start=" + AppState.currentState);
+    const sub = AppState.addEventListener("change", (next) => {
+      console.log("[root] AppState change → " + next);
+    });
+    return () => sub.remove();
+  }, []);
 
   // App-lock on resume after >5min in background (audit B.9). Hook
   // attaches its AppState listener once for the app lifetime.
@@ -271,6 +334,11 @@ const RootChildren = React.memo(function RootChildren({
 }: {
   theme: ReturnType<typeof useTheme>;
 }) {
+  console.log("[root children] render");
+  useEffect(() => {
+    console.log("[root children] MOUNT");
+    return () => console.log("[root children] UNMOUNT");
+  }, []);
   return (
     <BottomSheetModalProvider>
       <PathnameTracker />
@@ -305,14 +373,12 @@ const RootChildren = React.memo(function RootChildren({
       {/* Phase 6 debug overlay — invisible long-press hit-area in
           the top-left corner. */}
       <DebugOverlay />
-      {/* TEMP — diagnose routing issue in prod build. Remove
-          alongside RouteProbe.tsx once fixed. */}
-      <RouteProbe />
       {/* Step-up auth host — listens to a Zustand store for any
           `requireStepUpAuth({ reason })` call and shows a PIN-entry
           sheet. Biometric is tried first inside the helper; the
           sheet is only the fallback. */}
       <StepUpAuthHost />
+      <ChatUnreadBridge />
     </BottomSheetModalProvider>
   );
 });

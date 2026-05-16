@@ -41,6 +41,8 @@ export type TrackPhase =
   | "almost-there";
 
 export interface RiderInfo {
+  /** Rider user id — needed to open a chat thread. */
+  _id?: string;
   firstName: string;
   lastName: string;
   plate?: string;

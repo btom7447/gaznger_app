@@ -394,6 +394,42 @@ export default function VendorOrderDetailScreen() {
                   </Pressable>
                   <Pressable
                     onPress={async () => {
+                      if (!order.user?._id) return;
+                      try {
+                        const res = await api.post<{
+                          chat: { _id: string };
+                        }>("/api/chats", {
+                          peerUserId: order.user._id,
+                          peerRole: "customer",
+                          orderRef: order._id,
+                        });
+                        router.push({
+                          pathname: "/(screens)/chat/[id]" as never,
+                          params: { id: res.chat._id } as never,
+                        });
+                      } catch (err: any) {
+                        toast.error(
+                          err?.message ?? "Couldn't open chat",
+                        );
+                      }
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Message customer"
+                    hitSlop={6}
+                    style={({ pressed }) => [
+                      styles.contactBtn,
+                      pressed && { opacity: 0.85 },
+                    ]}
+                  >
+                    <Ionicons
+                      name="chatbubble-ellipses"
+                      size={14}
+                      color={theme.primary}
+                    />
+                    <Text style={styles.contactBtnText}>Message</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={async () => {
                       try {
                         await Clipboard.setStringAsync(order.user!.phone!);
                         toast.success("Phone copied", { description: order.user!.phone });
@@ -410,7 +446,7 @@ export default function VendorOrderDetailScreen() {
                     ]}
                   >
                     <Ionicons name="copy-outline" size={14} color={theme.fg} />
-                    <Text style={styles.contactBtnOutlineText}>Copy phone</Text>
+                    <Text style={styles.contactBtnOutlineText}>Copy</Text>
                   </Pressable>
                 </View>
               ) : null}
@@ -482,6 +518,42 @@ export default function VendorOrderDetailScreen() {
                         <Text style={styles.contactBtnText}>Call</Text>
                       </Pressable>
                       <Pressable
+                        onPress={async () => {
+                          if (!riderResolved?._id) return;
+                          try {
+                            const res = await api.post<{
+                              chat: { _id: string };
+                            }>("/api/chats", {
+                              peerUserId: riderResolved._id,
+                              peerRole: "rider",
+                              orderRef: order._id,
+                            });
+                            router.push({
+                              pathname: "/(screens)/chat/[id]" as never,
+                              params: { id: res.chat._id } as never,
+                            });
+                          } catch (err: any) {
+                            toast.error(
+                              err?.message ?? "Couldn't open chat",
+                            );
+                          }
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Message rider"
+                        hitSlop={6}
+                        style={({ pressed }) => [
+                          styles.contactBtn,
+                          pressed && { opacity: 0.85 },
+                        ]}
+                      >
+                        <Ionicons
+                          name="chatbubble-ellipses"
+                          size={14}
+                          color={theme.primary}
+                        />
+                        <Text style={styles.contactBtnText}>Message</Text>
+                      </Pressable>
+                      <Pressable
                         onPress={handleCopyRiderPhone}
                         accessibilityRole="button"
                         accessibilityLabel="Copy rider phone"
@@ -492,7 +564,7 @@ export default function VendorOrderDetailScreen() {
                         ]}
                       >
                         <Ionicons name="copy-outline" size={14} color={theme.fg} />
-                        <Text style={styles.contactBtnOutlineText}>Copy phone</Text>
+                        <Text style={styles.contactBtnOutlineText}>Copy</Text>
                       </Pressable>
                     </View>
                   ) : null}

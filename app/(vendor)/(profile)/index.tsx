@@ -25,6 +25,7 @@ import {
 import { Theme, useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
 import { beginIntentionalSignOut } from "@/lib/api";
+import { useChatStore } from "@/store/useChatStore";
 
 interface ProfileApiStation {
   _id: string;
@@ -77,6 +78,7 @@ export default function VendorProfileScreen() {
   const sessionLogout = useSessionStore((s) => s.logout);
   const setStations = useVendorStationStore((s) => s.setStations);
   const cachedStations = useVendorStationStore((s) => s.stations);
+  const chatUnread = useChatStore((s) => s.unread);
 
   const [profile, setProfile] = useState<ProfileApiResponse | null>(null);
   const [tanks, setTanks] = useState<TankApiRow[] | null>(null);
@@ -315,6 +317,33 @@ export default function VendorProfileScreen() {
               onPress={() => router.push("/(vendor)/(finance)" as never)}
             />
             <ListRow
+              icon="chatbubbles"
+              tone="primary"
+              label="Messages"
+              sub="Customers, riders, and Gaznger support"
+              badge={chatUnread}
+              onPress={() => router.push("/(screens)/chats" as never)}
+            />
+            <ListRow
+              icon="help-buoy"
+              tone="success"
+              label="Gaznger support"
+              sub="Get help from our team"
+              onPress={async () => {
+                try {
+                  const res = await api.post<{ chat: { _id: string } }>(
+                    "/api/chats/support",
+                  );
+                  router.push({
+                    pathname: "/(screens)/chat/[id]" as never,
+                    params: { id: res.chat._id } as never,
+                  });
+                } catch (err: any) {
+                  toast.error(err?.message ?? "Support unavailable");
+                }
+              }}
+            />
+            <ListRow
               icon="person"
               tone="primary"
               label="Account"
@@ -349,6 +378,7 @@ function ListRow({
   tone,
   label,
   sub,
+  badge,
   onPress,
   last,
 }: {
@@ -356,6 +386,8 @@ function ListRow({
   tone: "primary" | "success" | "gold" | "muted";
   label: string;
   sub?: string;
+  /** Optional unread count rendered as a small primary pill next to the chevron. */
+  badge?: number;
   onPress?: () => void;
   last?: boolean;
 }) {
@@ -411,6 +443,29 @@ function ListRow({
           </Text>
         ) : null}
       </View>
+      {badge && badge > 0 ? (
+        <View
+          style={{
+            minWidth: 22,
+            height: 22,
+            paddingHorizontal: 7,
+            borderRadius: 11,
+            backgroundColor: theme.primary,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 11,
+              fontWeight: "800",
+              color: theme.fgOnPrimary,
+            }}
+          >
+            {badge > 9 ? "9+" : badge}
+          </Text>
+        </View>
+      ) : null}
       {onPress ? (
         <Ionicons name="chevron-forward" size={14} color={theme.fgMuted} />
       ) : null}

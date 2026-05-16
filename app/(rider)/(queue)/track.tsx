@@ -75,7 +75,7 @@ interface ActiveDelivery {
     _id: string;
     fuel: { name: string; unit: string };
     quantity: number;
-    user: { displayName: string; phone?: string; profileImage?: string };
+    user: { _id?: string; displayName: string; phone?: string; profileImage?: string };
     deliveryAddress: {
       street: string;
       city: string;
@@ -1018,7 +1018,24 @@ export default function RiderTrackScreen() {
             <View style={s.contactBtns}>
               <TouchableOpacity
                 style={[s.contactBtn, { backgroundColor: theme.tertiary }]}
-                onPress={() => Linking.openURL(`sms:${delivery.order.user.phone}?body=Hi, I'm tracking my delivery    `)}
+                onPress={async () => {
+                  if (!delivery.order.user._id) return;
+                  try {
+                    const res = await api.post<{
+                      chat: { _id: string };
+                    }>("/api/chats", {
+                      peerUserId: delivery.order.user._id,
+                      peerRole: "customer",
+                      orderRef: delivery.order._id,
+                    });
+                    router.push({
+                      pathname: "/(screens)/chat/[id]" as never,
+                      params: { id: res.chat._id } as never,
+                    });
+                  } catch (err: any) {
+                    toast.error(err?.message ?? "Couldn't open chat");
+                  }
+                }}
                 activeOpacity={0.8}
               >
                 <Ionicons name="chatbubble-outline" size={15} color={theme.primary} />

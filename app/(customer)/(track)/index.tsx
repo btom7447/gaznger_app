@@ -228,6 +228,7 @@ export default function TrackScreen() {
         const display = r.displayName ?? "Your rider";
         const [first, ...rest] = display.split(/\s+/);
         const riderInfo: RiderInfo = {
+          _id: r._id,
           firstName: first ?? "Rider",
           lastName: rest.join(" "),
           plate: order.riderProfile?.plate,
@@ -789,17 +790,25 @@ export default function TrackScreen() {
     if (rider?.phone) Linking.openURL(`tel:${rider.phone}`);
   }, [rider?.phone]);
 
-  const handleChat = useCallback(() => {
-    // In-app chat is coming in v6.5 (audit B.7). Until then, this CTA
-    // surfaces a toast pointing the user to the call icon next to it.
-    // We KEEP the icon visible because removing it would leave a gap
-    // in the rider card; the design accommodates it and it's worth
-    // signalling that real-time messaging is on the roadmap.
-    if (!rider) return;
-    toast.info("Chat with rider coming soon", {
-      description: "Tap the call icon to reach them now.",
-    });
-  }, [rider]);
+  const handleChat = useCallback(async () => {
+    if (!rider?._id) return;
+    try {
+      const res = await api.post<{ chat: { _id: string } }>(
+        "/api/chats",
+        {
+          peerUserId: rider._id,
+          peerRole: "rider",
+          orderRef: effectiveOrderId,
+        },
+      );
+      router.push({
+        pathname: "/(screens)/chat/[id]" as never,
+        params: { id: res.chat._id } as never,
+      });
+    } catch (err: any) {
+      toast.error(err?.message ?? "Couldn't open chat");
+    }
+  }, [rider?._id, effectiveOrderId, router]);
 
   /**
    * Stable snap-point array. gorhom/bottom-sheet v5 compares this
