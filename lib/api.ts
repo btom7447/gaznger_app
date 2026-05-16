@@ -307,6 +307,22 @@ async function request<T = unknown>(
     if (path === "/auth/logout") {
       throw new Error("Logged out.");
     }
+    // Auth endpoints can legitimately return 401 for credential
+    // failures (wrong PIN, expired OTP token, etc.) — those are NOT
+    // session-expired events. Don't fire the global redirect; let the
+    // caller surface its own error toast. Without this, a wrong PIN
+    // on /auth/login bumps the user to phone-entry with a misleading
+    // "Session expired" toast instead of "Wrong PIN."
+    if (path.startsWith("/auth/")) {
+      const errData = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        attemptsRemaining?: number;
+        retryAfterSec?: number;
+      };
+      const err = new Error(errData.message ?? "Authentication failed.");
+      Object.assign(err, { status: 401, ...errData });
+      throw err;
+    }
     const refreshed = await refreshTokens();
     if (refreshed) {
       return request<T>(path, options, false);
