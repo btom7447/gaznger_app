@@ -7,7 +7,7 @@ import Constants from "expo-constants";
 import { useSessionStore } from "@/store/useSessionStore";
 import { Theme, useTheme, formatCurrency } from "@/constants/theme";
 import { useWalletStore } from "@/store/useWalletStore";
-import { api } from "@/lib/api";
+import { api, beginIntentionalSignOut } from "@/lib/api";
 import {
   clearBioCredential,
   markBioCredentialPresent,
@@ -104,6 +104,11 @@ export default function ProfileScreen() {
 
   const handleSignOut = useCallback(async () => {
     setSigningOut(true);
+    // Race window: in-flight authenticated requests can hit 401 against
+    // wiped tokens while we tear down the session. Suppress the global
+    // "Session expired" path for a few seconds so the user only sees
+    // the "Signed out" toast they expect.
+    beginIntentionalSignOut();
     try {
       // Pass refresh token so the server can drop the session row.
       const refreshToken = useSessionStore.getState().refreshToken;
@@ -123,6 +128,7 @@ export default function ProfileScreen() {
       ]);
       logout();
       router.replace("/(auth)/welcome" as never);
+      toast.success("Signed out");
     }
   }, [logout, router]);
 

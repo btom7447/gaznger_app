@@ -64,7 +64,19 @@ let sessionExpiredFired = false;
 const apiBootedAt = Date.now();
 const COLD_START_TOLERANCE_MS = 15_000;
 
+// When the user deliberately signs out, any in-flight authenticated
+// request (focus effects, polling, sockets reconnecting) can race the
+// token wipe and hit 401 on stale tokens. Without this flag the user
+// sees "Session expired" + a route-to-phone toast moments after the
+// "Signed out" toast — confusing and wrong. The sign-out handler
+// raises this for a few seconds; while it's up, 401s are swallowed.
+let intentionalSignOutUntil = 0;
+export function beginIntentionalSignOut(holdMs = 4000) {
+  intentionalSignOutUntil = Date.now() + holdMs;
+}
+
 function fireSessionExpired() {
+  if (Date.now() < intentionalSignOutUntil) return;
   if (sessionExpiredFired) return;
   sessionExpiredFired = true;
   const phone = useSessionStore.getState().user?.phone;
@@ -287,6 +299,14 @@ async function request<T = unknown>(
   // sessionExpiredFired guard prevents N parallel toasts after the
   // refresh fails.
   if (res.status === 401 && retry) {
+    // /auth/logout is intentionally tearing the session down — a 401
+    // here just means the server already considers the session gone,
+    // which is the desired end state. Surfacing "Session expired" in
+    // that case is misleading; the caller is about to route to
+    // welcome anyway.
+    if (path === "/auth/logout") {
+      throw new Error("Logged out.");
+    }
     const refreshed = await refreshTokens();
     if (refreshed) {
       return request<T>(path, options, false);

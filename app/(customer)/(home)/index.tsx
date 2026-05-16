@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RefreshControl, StyleSheet, Text, View } from "react-native";
+import { RefreshControl, StyleSheet, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Theme, useTheme } from "@/constants/theme";
 import { useSessionStore } from "@/store/useSessionStore";
@@ -342,7 +342,7 @@ export default function HomeScreen() {
   }, [router]);
 
   const handlePointsPress = useCallback(() => {
-    router.push("/(screens)/profile" as never);
+    router.push("/(screens)/points" as never);
   }, [router]);
 
   const handleRecentRowPress = useCallback(
@@ -431,16 +431,6 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.root, { backgroundColor: theme.bg }]}>
-      {/* TEMP DEBUG marker — confirms the home route mounted. Remove
-          after diagnosing. */}
-      <View style={{ backgroundColor: "#ff3b30", padding: 16 }}>
-        <Text style={{ color: "#fff", fontWeight: "800", fontSize: 18 }}>
-          HOME ROUTE MOUNTED
-        </Text>
-        <Text style={{ color: "#fff", fontSize: 12, marginTop: 4 }}>
-          theme.bg={String(theme?.bg)} user={String(!!user)}
-        </Text>
-      </View>
       <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
       <ScrollView
         contentContainerStyle={styles.scroll}

@@ -26,14 +26,12 @@ import {
 /**
  * Personal info — v3.
  *
- * Edit name, phone, gender, profile photo. Email is read-only — change
- * requires the verify-email-again flow which we don't surface here.
+ * Edit name, gender, profile photo. Phone + email are read-only — phone
+ * is the auth identity and email change needs a verify-again flow we
+ * don't surface here.
  *
  * Save fires PUT /auth/me with only the dirty fields. The avatar tap
  * uploads to /api/upload/image first, then PUT /auth/me with the URL.
- *
- * Phone validation lives client-side (`/^\+?\d{10,14}$/`) since the
- * server's existing rule is permissive (>=10 chars).
  */
 
 const GENDER_OPTIONS: Array<{
@@ -45,8 +43,6 @@ const GENDER_OPTIONS: Array<{
   { value: "female", label: "Female", icon: "female-outline" },
 ];
 
-const PHONE_REGEX = /^\+?\d{10,14}$/;
-
 export default function PersonalInfoScreen() {
   const theme = useTheme();
   const router = useRouter();
@@ -55,7 +51,7 @@ export default function PersonalInfoScreen() {
   const { user, updateUser } = useSessionStore();
 
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
-  const [phone, setPhone] = useState(user?.phone ?? "");
+  const phone = user?.phone ?? "";
   const [gender, setGender] = useState<"male" | "female" | undefined>(
     (user?.gender as "male" | "female" | undefined) ?? undefined
   );
@@ -72,12 +68,10 @@ export default function PersonalInfoScreen() {
 
   const dirty =
     displayName !== (user?.displayName ?? "") ||
-    phone !== (user?.phone ?? "") ||
     gender !== ((user?.gender as "male" | "female" | undefined) ?? undefined);
 
-  const phoneValid = !phone || PHONE_REGEX.test(phone);
   const nameValid = displayName.trim().length >= 2;
-  const canSave = dirty && nameValid && phoneValid && !saving;
+  const canSave = dirty && nameValid && !saving;
 
   const handleAvatarTap = useCallback(async () => {
     setUploadingAvatar(true);
@@ -103,7 +97,6 @@ export default function PersonalInfoScreen() {
       const payload: Record<string, unknown> = {};
       if (displayName !== (user?.displayName ?? ""))
         payload.displayName = displayName.trim();
-      if (phone !== (user?.phone ?? "")) payload.phone = phone.trim();
       if (
         gender !== ((user?.gender as "male" | "female" | undefined) ?? undefined)
       )
@@ -128,7 +121,7 @@ export default function PersonalInfoScreen() {
     } finally {
       setSaving(false);
     }
-  }, [canSave, displayName, phone, gender, user, updateUser, router]);
+  }, [canSave, displayName, gender, user, updateUser, router]);
 
   return (
     <ScreenContainer
@@ -198,11 +191,9 @@ export default function PersonalInfoScreen() {
           <Field
             label="Phone number"
             value={phone}
-            onChangeText={setPhone}
             placeholder="+234..."
-            keyboardType="phone-pad"
             icon="call-outline"
-            error={!phoneValid ? "10–14 digits, optional + prefix" : undefined}
+            editable={false}
           />
           <Field
             label="Email"
@@ -210,8 +201,10 @@ export default function PersonalInfoScreen() {
             placeholder=""
             icon="mail-outline"
             editable={false}
-            sub="To change your email, contact support."
           />
+          <Text style={styles.readOnlyNote}>
+            To change your phone or email, contact support.
+          </Text>
         </View>
 
         {/* Gender */}
@@ -256,20 +249,6 @@ export default function PersonalInfoScreen() {
           })}
         </View>
 
-        {/* Soft warning when phone is changed — server may require re-OTP. */}
-        {phone !== (user?.phone ?? "") && phoneValid ? (
-          <View style={styles.tipCard}>
-            <Ionicons
-              name="information-circle"
-              size={16}
-              color={theme.info}
-            />
-            <Text style={styles.tipText}>
-              Changing your phone number doesn't trigger a re-verification yet.
-              Make sure it's reachable — riders use it for delivery questions.
-            </Text>
-          </View>
-        ) : null}
       </ScrollView>
     </ScreenContainer>
   );
@@ -455,6 +434,12 @@ const makeStyles = (theme: Theme) =>
     fieldGroup: {
       gap: theme.space.s3,
     },
+    readOnlyNote: {
+      ...theme.type.caption,
+      color: theme.fgMuted,
+      marginTop: theme.space.s2,
+      paddingHorizontal: 2,
+    },
 
     genderRow: {
       flexDirection: "row",
@@ -483,20 +468,5 @@ const makeStyles = (theme: Theme) =>
     },
     genderTextActive: {
       color: theme.mode === "dark" ? "#fff" : theme.palette.green700,
-    },
-
-    tipCard: {
-      flexDirection: "row",
-      gap: 10,
-      marginTop: theme.space.s4,
-      padding: 14,
-      borderRadius: theme.radius.md,
-      backgroundColor: theme.infoTint,
-    },
-    tipText: {
-      flex: 1,
-      ...theme.type.caption,
-      color: theme.fg,
-      lineHeight: 17,
     },
   });

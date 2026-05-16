@@ -151,17 +151,14 @@ export default function PaymentScreen() {
       balance: walletAvailable,
       insufficient: walletAvailable < finalTotal,
     });
-    // Bank transfer is dev-only until Paystack bank_transfer is
-    // wired (audit B.4). In production the option is hidden so
-    // users can't pick it and end up at the "coming soon" alert.
-    if (__DEV__) {
-      list.push({
-        id: "transfer",
-        kind: "transfer",
-        label: "Bank transfer",
-        sublabel: "Pay to a one-time account · DEV ONLY",
-      });
-    }
+    list.push({
+      id: "transfer",
+      kind: "transfer",
+      label: "Bank transfer",
+      sublabel: __DEV__
+        ? "Pay to a one-time account · DEV bypass"
+        : "Pay to a one-time account",
+    });
     return list;
   }, [hasSavedCard, lastCard?.last4, lastCard?.brand, finalTotal, walletAvailable]);
 
