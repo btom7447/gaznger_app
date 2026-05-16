@@ -176,7 +176,7 @@ export default function SupportHubScreen() {
         { timeoutMs: 10_000 },
       );
       router.push({
-        pathname: "/(screens)/chat-thread" as never,
+        pathname: "/(screens)/chat/[id]" as never,
         params: { id: res.chat._id } as never,
       });
     } catch (err: any) {
