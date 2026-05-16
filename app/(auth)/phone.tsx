@@ -19,6 +19,7 @@ import { getDeviceLabel, getOrCreateDeviceId } from "@/lib/auth";
 import { usePendingSignupStore } from "@/store/usePendingSignupStore";
 
 type Mode = "signup" | "login";
+type Role = "customer" | "vendor" | "rider";
 
 interface CheckPhoneResponse {
   exists: boolean;
@@ -52,8 +53,21 @@ const NIGERIA: Country = {
 export default function PhoneEntryScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const params = useLocalSearchParams<{ mode?: Mode }>();
-  const mode: Mode = params.mode === "login" ? "login" : "signup";
+  const params = useLocalSearchParams<{
+    mode?: Mode | "signin";
+    role?: Role;
+  }>();
+  // "signin" is the v7 unified-auth alias for the existing "login" mode
+  // — accept both so callers from welcome (signin) and the legacy
+  // login flow keep working.
+  const mode: Mode =
+    params.mode === "login" || params.mode === "signin" ? "login" : "signup";
+  const role: Role | undefined =
+    params.role === "customer" ||
+    params.role === "vendor" ||
+    params.role === "rider"
+      ? (params.role as Role)
+      : undefined;
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   const [country, setCountry] = useState<Country>(NIGERIA);
@@ -125,7 +139,7 @@ export default function PhoneEntryScreen() {
       );
 
       if (check.accountStatus === "suspended") {
-        router.replace("/(auth)/states/suspended" as never);
+        router.push("/(auth)/states/suspended" as never);
         return;
       }
 
@@ -171,8 +185,9 @@ export default function PhoneEntryScreen() {
         params: {
           phone: e164,
           purpose: mode,
+          ...(role ? { role } : {}),
         },
-      });
+      } as never);
     } catch (err: any) {
       // Surface the server message verbatim — no generic strings.
       toast.error("Couldn't continue", {
@@ -201,6 +216,12 @@ export default function PhoneEntryScreen() {
       }
     >
       <View style={styles.headerWrap}>
+        {!isLogin ? (
+          <View style={styles.eyebrowRow}>
+            <Text style={styles.eyebrow}>Step 1 of 3</Text>
+            {role ? <RoleChip role={role} theme={theme} /> : null}
+          </View>
+        ) : null}
         <Text style={styles.title}>{headerTitle}</Text>
         <Text style={styles.sub}>{headerSub}</Text>
       </View>
@@ -265,10 +286,51 @@ export default function PhoneEntryScreen() {
   );
 }
 
+function RoleChip({ role, theme }: { role: Role; theme: Theme }) {
+  const cfg = {
+    customer: { bg: theme.primaryTint, fg: theme.palette.green700, label: "Customer" },
+    vendor: { bg: theme.infoTint, fg: theme.info, label: "Vendor" },
+    rider: { bg: theme.warningTint, fg: theme.warning, label: "Rider" },
+  }[role];
+  return (
+    <View
+      style={{
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 999,
+        backgroundColor: cfg.bg,
+      }}
+    >
+      <Text
+        style={{
+          color: cfg.fg,
+          fontSize: 11,
+          fontWeight: "800",
+          letterSpacing: 0.2,
+        }}
+      >
+        {cfg.label} · Sign up
+      </Text>
+    </View>
+  );
+}
+
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     headerWrap: {
       gap: theme.space.s2,
+    },
+    eyebrowRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+      marginBottom: 4,
+    },
+    eyebrow: {
+      ...theme.type.micro,
+      color: theme.palette.green700,
+      fontWeight: "800",
     },
     title: {
       fontSize: 26,

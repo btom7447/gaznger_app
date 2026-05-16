@@ -1,5 +1,5 @@
 import { Stack } from "expo-router";
-import React from "react";
+import React, { useEffect } from "react";
 import { useTheme } from "@/constants/theme";
 
 /**
@@ -12,6 +12,11 @@ import { useTheme } from "@/constants/theme";
  * own their StatusBar via AuthScreenContainer.
  */
 export default function AuthLayout() {
+  console.log("[auth layout] render");
+  useEffect(() => {
+    console.log("[auth layout] MOUNT");
+    return () => console.log("[auth layout] UNMOUNT");
+  }, []);
   const theme = useTheme();
   // Explicit Stack.Screen list — production bundlers drop any route
   // group not declared here (see app/_layout.tsx for the full
@@ -25,17 +30,16 @@ export default function AuthLayout() {
         contentStyle: { backgroundColor: theme.bg },
       }}
     >
-      <Stack.Screen name="welcome" />
+      <Stack.Screen name="welcome/index" />
+      <Stack.Screen name="welcome/vendor" />
+      <Stack.Screen name="welcome/rider" />
       <Stack.Screen name="welcome-done" />
       <Stack.Screen name="onboarding" />
       <Stack.Screen name="phone" />
       <Stack.Screen name="otp" />
-      {/* Sub-group screens declared as flat children to avoid the
-          nested-Stack-inside-Stack reconciler bug in Expo Router prod
-          builds: a transition from a flat (auth)/* route into a
-          nested (auth)/unlock/pin tore down the root surface ~90ms
-          after mount. Keeping all (auth)/* screens at one nav level
-          fixes that without changing the file layout. */}
+      {/* Unlock screens declared flat — there's no app/(auth)/unlock/_layout.tsx
+          so the route names use literal slashes, matching how signup/
+          recovery/verification/states are declared below. */}
       <Stack.Screen name="unlock/pin" />
       <Stack.Screen name="unlock/biometric" />
       <Stack.Screen name="signup/role" />
