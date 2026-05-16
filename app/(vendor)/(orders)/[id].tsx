@@ -305,14 +305,9 @@ export default function VendorOrderDetailScreen() {
                 </Svg>
               </View>
 
-              <View style={styles.heroHeaderRow}>
-                <Text style={styles.heroEyebrow}>
-                  Order · #{order._id.slice(-6).toUpperCase()}
-                </Text>
-                <View style={styles.heroBoltBadge}>
-                  <Ionicons name="flash" size={16} color="#fff" />
-                </View>
-              </View>
+              <Text style={styles.heroEyebrow}>
+                Order · #{order._id.slice(-6).toUpperCase()}
+              </Text>
 
               <Text
                 style={styles.heroAmount}
@@ -674,25 +669,12 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
       right: -20,
       top: -20,
     },
-    heroHeaderRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
     heroEyebrow: {
       fontSize: 11,
       fontWeight: "800",
       color: "rgba(255,255,255,0.7)",
       letterSpacing: 0.5,
       textTransform: "uppercase",
-    },
-    heroBoltBadge: {
-      width: 32,
-      height: 32,
-      borderRadius: 10,
-      backgroundColor: "rgba(255,255,255,0.16)",
-      alignItems: "center",
-      justifyContent: "center",
     },
     heroAmount: {
       fontSize: 38,

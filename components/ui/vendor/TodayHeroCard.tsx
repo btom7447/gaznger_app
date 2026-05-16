@@ -1,18 +1,19 @@
 import React, { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
+import Svg, { Circle } from "react-native-svg";
 import { Theme, useTheme } from "@/constants/theme";
 import CountUpNumber from "@/components/ui/global/CountUpNumber";
 
 /**
- * Vendor Today hero card (v6 design).
+ * Vendor Today hero card.
  *
- * Layout: dark-green gradient surface holding the day's fuel revenue as
- * the headline figure, "REVENUE · TODAY" eyebrow above, a sub-line of
- * "Across N orders · ₦Xk vs <prev day>", and a 3-tile breakdown strip
- * across the bottom: Queue · In-flight · Done. A small bolt badge sits
- * in the top-right.
+ * Matches the Wallet hero language exactly: dark forest gradient,
+ * concentric SVG circles top-right, eyebrow + amount + sub-line, then
+ * a 3-tile breakdown strip across the bottom (Queue · In-flight · Done).
+ *
+ * No bolt badge — design consistency rule across all vendor hero
+ * cards (Today, Wallet, Order detail) is "circles only".
  */
 export interface TodayHeroCardProps {
   /** Whole NGN, not kobo. */
@@ -38,11 +39,6 @@ function fmtNaira(value: number): string {
   return `₦${value.toLocaleString("en-NG")}`;
 }
 
-// Always full thousand-separated naira across the vendor app — no
-// compact suffixes. The sub-line wraps if it overflows; numberOfLines
-// caps each line.
-
-
 export default function TodayHeroCard({
   revenueToday,
   revenueYesterday,
@@ -56,14 +52,11 @@ export default function TodayHeroCard({
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  // Dark forest-green outer per design. The bolt badge + 3 tiles use a
-  // lighter overlay so they pop off the darker card surface.
   const gradient =
     theme.mode === "dark"
       ? [theme.palette.green900, "#000"]
       : [theme.palette.green700, theme.palette.green900];
-  // Inner accents (bolt badge + tile bg) — lighter green tinted with
-  // transparency so the gradient still bleeds through.
+  // Inner tile bg — lighter overlay so tiles pop off the darker card.
   const innerBg = "rgba(255,255,255,0.16)";
 
   const subLine =
@@ -85,12 +78,37 @@ export default function TodayHeroCard({
       end={{ x: 1, y: 1 }}
       style={styles.card}
     >
-      <View style={styles.headerRow} accessible accessibilityLabel={a11y}>
-        <Text style={styles.eyebrow} numberOfLines={1}>{eyebrow}</Text>
-        <View style={[styles.boltBadge, { backgroundColor: innerBg }]}>
-          <Ionicons name="flash" size={16} color="#fff" />
-        </View>
+      <View pointerEvents="none" style={styles.circles}>
+        <Svg width={120} height={120} viewBox="0 0 120 120">
+          <Circle
+            cx={60}
+            cy={60}
+            r={50}
+            stroke="#fff"
+            strokeWidth={2}
+            fill="none"
+            opacity={0.08}
+          />
+          <Circle
+            cx={60}
+            cy={60}
+            r={30}
+            stroke="#fff"
+            strokeWidth={2}
+            fill="none"
+            opacity={0.08}
+          />
+        </Svg>
       </View>
+
+      <Text
+        style={styles.eyebrow}
+        numberOfLines={1}
+        accessible
+        accessibilityLabel={a11y}
+      >
+        {eyebrow}
+      </Text>
 
       <CountUpNumber
         value={revenueToday}
@@ -137,43 +155,37 @@ function Tile({
   );
 }
 
-const makeStyles = (theme: Theme) =>
+const makeStyles = (_theme: Theme) =>
   StyleSheet.create({
     card: {
-      borderRadius: theme.radius.xl,
+      borderRadius: 20,
       paddingHorizontal: 20,
       paddingTop: 18,
       paddingBottom: 16,
-      gap: 4,
+      overflow: "hidden",
+      position: "relative",
     },
-    headerRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
+    circles: {
+      position: "absolute",
+      right: -20,
+      top: -20,
     },
     eyebrow: {
-      fontSize: 12,
-      fontWeight: "700",
-      color: "rgba(255,255,255,0.85)",
-      letterSpacing: 0.6,
+      fontSize: 11,
+      fontWeight: "800",
+      color: "rgba(255,255,255,0.7)",
+      letterSpacing: 0.5,
       textTransform: "uppercase",
     },
-    boltBadge: {
-      width: 32,
-      height: 32,
-      borderRadius: 10,
-      alignItems: "center",
-      justifyContent: "center",
-    },
     amount: {
-      fontSize: 36,
+      fontSize: 38,
       fontWeight: "800",
       letterSpacing: -0.8,
       color: "#fff",
-      marginTop: 8,
+      marginTop: 4,
     },
     subLine: {
-      ...theme.type.bodySm,
+      fontSize: 12,
       color: "rgba(255,255,255,0.75)",
       marginTop: 2,
     },
