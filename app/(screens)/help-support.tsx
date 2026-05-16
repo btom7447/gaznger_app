@@ -200,23 +200,25 @@ export default function SupportHubScreen() {
         <Text style={styles.sectionLabel}>Get help</Text>
 
         <View style={styles.list}>
-          {data.phone ? (
-            <SupportRow
-              icon="call"
-              tone="info"
-              title="Call support"
-              sub={data.phone}
-              onPress={handleCall}
-            />
-          ) : null}
-          {data.email ? (
-            <SupportRow
-              icon="mail"
-              tone="info"
-              title="Email support"
-              sub={data.email}
-              onPress={handleEmail}
-            />
+          {data.phone || data.email ? (
+            <View style={styles.contactTilesRow}>
+              {data.phone ? (
+                <ContactTile
+                  icon="call"
+                  title="Call"
+                  sub={data.phone}
+                  onPress={handleCall}
+                />
+              ) : null}
+              {data.email ? (
+                <ContactTile
+                  icon="mail"
+                  title="Email"
+                  sub={data.email}
+                  onPress={handleEmail}
+                />
+              ) : null}
+            </View>
           ) : null}
           {data.liveChatEnabled ? (
             <SupportRow
@@ -345,6 +347,83 @@ function SupportRow({
   );
 }
 
+function ContactTile({
+  icon,
+  title,
+  sub,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  title: string;
+  sub: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}. ${sub}`}
+      style={({ pressed }) => [
+        tileStyles.tile,
+        {
+          borderColor: theme.divider,
+          backgroundColor: theme.surface,
+        },
+        pressed && { opacity: 0.92 },
+      ]}
+    >
+      <View
+        style={[
+          tileStyles.iconWrap,
+          { backgroundColor: theme.infoTint },
+        ]}
+      >
+        <Ionicons name={icon} size={18} color={theme.info} />
+      </View>
+      <Text
+        style={{
+          ...theme.type.body,
+          color: theme.fg,
+          fontWeight: "700",
+          marginTop: 10,
+        }}
+        numberOfLines={1}
+      >
+        {title}
+      </Text>
+      <Text
+        style={{
+          ...theme.type.bodySm,
+          color: theme.fgMuted,
+          marginTop: 2,
+        }}
+        numberOfLines={1}
+      >
+        {sub}
+      </Text>
+    </Pressable>
+  );
+}
+
+const tileStyles = StyleSheet.create({
+  tile: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "flex-start",
+  },
+  iconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});
+
 const rowStyles = StyleSheet.create({
   row: {
     flexDirection: "row",
@@ -380,6 +459,10 @@ const makeStyles = (theme: Theme) =>
       paddingHorizontal: 2,
     },
     list: { gap: 10 },
+    contactTilesRow: {
+      flexDirection: "row",
+      gap: 10,
+    },
     empty: {
       ...theme.type.bodySm,
       color: theme.fgMuted,
