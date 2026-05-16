@@ -32,6 +32,9 @@ export type { VendorEmptyStateProps } from "./VendorEmptyState";
 export { default as TodayHeroCard } from "./TodayHeroCard";
 export type { TodayHeroCardProps } from "./TodayHeroCard";
 
+export { default as TodayHeroCarousel } from "./TodayHeroCarousel";
+export type { TodayHeroCarouselProps } from "./TodayHeroCarousel";
+
 export { default as TodayMiniGrid } from "./TodayMiniGrid";
 export type { TodayNextOrder, TodayTeamStatus } from "./TodayMiniGrid";
 

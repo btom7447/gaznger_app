@@ -30,8 +30,8 @@ const TABS: TabConfig[] = [
   {
     match: "(today)",
     label: "Today",
-    iconActive: "home",
-    iconInactive: "home-outline",
+    iconActive: "time",
+    iconInactive: "time-outline",
   },
   {
     match: "(orders)",

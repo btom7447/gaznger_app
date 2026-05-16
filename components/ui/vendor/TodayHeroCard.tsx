@@ -5,49 +5,83 @@ import { Ionicons } from "@expo/vector-icons";
 import { Theme, useTheme } from "@/constants/theme";
 
 /**
- * Vendor Today hero card — the revenue-anchored entry point.
+ * Vendor Today hero card (v6 design).
  *
- * Layout: gradient surface (primary → primary-darker) holding the day's
- * fuel revenue as the headline figure, a "Today" eyebrow above, and a
- * 3-cell breakdown strip beneath: Done · In-flight · Bulk in transit.
- *
- * Terse copy: numbers do the talking. Eyebrow + label tokens only.
+ * Layout: dark-green gradient surface holding the day's fuel revenue as
+ * the headline figure, "REVENUE · TODAY" eyebrow above, a sub-line of
+ * "Across N orders · ₦Xk vs <prev day>", and a 3-tile breakdown strip
+ * across the bottom: Queue · In-flight · Done. A small bolt badge sits
+ * in the top-right.
  */
 export interface TodayHeroCardProps {
   /** Whole NGN, not kobo. */
   revenueToday: number;
-  ordersDone: number;
+  /** Whole NGN, not kobo — sum of fuelCost for orders delivered the prev Lagos day. */
+  revenueYesterday: number;
+  /** 3-letter weekday for the prev Lagos day, e.g. "Mon". */
+  prevDayLabel: string;
+  /** Total orders touching today across queue + in-flight + done. */
+  ordersTotal: number;
+  ordersQueue: number;
   ordersInFlight: number;
-  bulkInTransit: number;
-  /** Active station name (omitted on the all-stations view). */
-  stationName?: string | null;
+  ordersDone: number;
+  /**
+   * Eyebrow override. Aggregate cards show "Revenue · Today" (the
+   * default). Per-station cards in the carousel show the station name
+   * so the operator knows which one they're looking at.
+   */
+  eyebrow?: string;
 }
 
 function fmtNaira(value: number): string {
   return `₦${value.toLocaleString("en-NG")}`;
 }
 
+/**
+ * Compact naira: 14k for 14_000, 1.2m for 1_200_000, 8.3k for 8300.
+ * Used in the sub-line where a full ₦ figure would crowd the row.
+ */
+function fmtCompactNaira(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `₦${(value / 1_000_000).toFixed(1)}m`;
+  if (abs >= 1_000) return `₦${(value / 1_000).toFixed(0)}k`;
+  return `₦${value.toLocaleString("en-NG")}`;
+}
+
 export default function TodayHeroCard({
   revenueToday,
-  ordersDone,
+  revenueYesterday,
+  prevDayLabel,
+  ordersTotal,
+  ordersQueue,
   ordersInFlight,
-  bulkInTransit,
-  stationName,
+  ordersDone,
+  eyebrow = "Revenue · Today",
 }: TodayHeroCardProps) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
-  // Gradient palette derived from primary. Slightly darker stop at the
-  // bottom so the card reads as elevated against the screen bg.
+  // Dark forest-green outer per design. The bolt badge + 3 tiles use a
+  // lighter overlay so they pop off the darker card surface.
   const gradient =
     theme.mode === "dark"
-      ? [theme.palette.green700, theme.palette.green900]
-      : [theme.palette.green500, theme.palette.green700];
+      ? [theme.palette.green900, "#000"]
+      : [theme.palette.green700, theme.palette.green900];
+  // Inner accents (bolt badge + tile bg) — lighter green tinted with
+  // transparency so the gradient still bleeds through.
+  const innerBg = "rgba(255,255,255,0.16)";
+
+  const subLine =
+    ordersTotal > 0
+      ? prevDayLabel
+        ? `Across ${ordersTotal} order${ordersTotal === 1 ? "" : "s"} · ${fmtCompactNaira(revenueYesterday)} vs ${prevDayLabel}`
+        : `Across ${ordersTotal} order${ordersTotal === 1 ? "" : "s"}`
+      : "No orders yet today";
 
   const a11y =
     `Today's revenue ${fmtNaira(revenueToday)}.` +
-    ` ${ordersDone} delivered, ${ordersInFlight} in flight,` +
-    ` ${bulkInTransit} bulk in transit.`;
+    ` ${ordersQueue} in queue, ${ordersInFlight} in flight,` +
+    ` ${ordersDone} done.`;
 
   return (
     <LinearGradient
@@ -57,11 +91,9 @@ export default function TodayHeroCard({
       style={styles.card}
     >
       <View style={styles.headerRow} accessible accessibilityLabel={a11y}>
-        <View style={styles.eyebrowWrap}>
-          <Ionicons name="trending-up" size={12} color="rgba(255,255,255,0.85)" />
-          <Text style={styles.eyebrow}>
-            {stationName ? `Today · ${stationName}` : "Today"}
-          </Text>
+        <Text style={styles.eyebrow} numberOfLines={1}>{eyebrow}</Text>
+        <View style={[styles.boltBadge, { backgroundColor: innerBg }]}>
+          <Ionicons name="flash" size={16} color="#fff" />
         </View>
       </View>
 
@@ -69,26 +101,34 @@ export default function TodayHeroCard({
         {fmtNaira(revenueToday)}
       </Text>
 
-      <View style={styles.divider} />
+      <Text style={styles.subLine} numberOfLines={1}>
+        {subLine}
+      </Text>
 
-      <View style={styles.breakdownRow}>
-        <BreakdownCell label="Done" value={ordersDone} />
-        <View style={styles.cellDivider} />
-        <BreakdownCell label="In-flight" value={ordersInFlight} />
-        <View style={styles.cellDivider} />
-        <BreakdownCell label="Bulk" value={bulkInTransit} />
+      <View style={styles.tileRow}>
+        <Tile value={ordersQueue} label="Queue" bg={innerBg} />
+        <Tile value={ordersInFlight} label="In-flight" bg={innerBg} />
+        <Tile value={ordersDone} label="Done" bg={innerBg} />
       </View>
     </LinearGradient>
   );
 }
 
-function BreakdownCell({ label, value }: { label: string; value: number }) {
+function Tile({
+  value,
+  label,
+  bg,
+}: {
+  value: number;
+  label: string;
+  bg: string;
+}) {
   return (
-    <View style={cellStyles.cell}>
-      <Text style={cellStyles.value} numberOfLines={1}>
+    <View style={[tileStyles.tile, { backgroundColor: bg }]}>
+      <Text style={tileStyles.value} numberOfLines={1}>
         {value}
       </Text>
-      <Text style={cellStyles.label} numberOfLines={1}>
+      <Text style={tileStyles.label} numberOfLines={1}>
         {label}
       </Text>
     </View>
@@ -100,7 +140,8 @@ const makeStyles = (theme: Theme) =>
     card: {
       borderRadius: theme.radius.xl,
       paddingHorizontal: 20,
-      paddingVertical: 18,
+      paddingTop: 18,
+      paddingBottom: 16,
       gap: 4,
     },
     headerRow: {
@@ -108,45 +149,45 @@ const makeStyles = (theme: Theme) =>
       alignItems: "center",
       justifyContent: "space-between",
     },
-    eyebrowWrap: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-    },
     eyebrow: {
       fontSize: 12,
       fontWeight: "700",
       color: "rgba(255,255,255,0.85)",
-      letterSpacing: 0.5,
+      letterSpacing: 0.6,
       textTransform: "uppercase",
+    },
+    boltBadge: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      alignItems: "center",
+      justifyContent: "center",
     },
     amount: {
       fontSize: 36,
       fontWeight: "800",
       letterSpacing: -0.8,
       color: "#fff",
-      marginTop: 4,
+      marginTop: 8,
     },
-    divider: {
-      height: 1,
-      backgroundColor: "rgba(255,255,255,0.15)",
-      marginVertical: 14,
+    subLine: {
+      ...theme.type.bodySm,
+      color: "rgba(255,255,255,0.75)",
+      marginTop: 2,
     },
-    breakdownRow: {
+    tileRow: {
       flexDirection: "row",
-      alignItems: "center",
-    },
-    cellDivider: {
-      width: 1,
-      alignSelf: "stretch",
-      backgroundColor: "rgba(255,255,255,0.15)",
+      gap: 10,
+      marginTop: 16,
     },
   });
 
-const cellStyles = StyleSheet.create({
-  cell: {
+const tileStyles = StyleSheet.create({
+  tile: {
     flex: 1,
-    alignItems: "center",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     gap: 2,
   },
   value: {
@@ -157,8 +198,7 @@ const cellStyles = StyleSheet.create({
   label: {
     fontSize: 11,
     fontWeight: "600",
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
     color: "rgba(255,255,255,0.75)",
-    textTransform: "uppercase",
   },
 });

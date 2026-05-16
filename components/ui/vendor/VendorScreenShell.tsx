@@ -29,6 +29,11 @@ interface Props {
   rightSlot?: ReactNode;
   children: ReactNode;
   contentStyle?: ViewStyle;
+  /**
+   * Hide the station-switcher chip from the top-left of the header.
+   * Today screen uses this so its hero card owns the header row.
+   */
+  hideStationSwitcher?: boolean;
 }
 
 export default function VendorScreenShell({
@@ -37,6 +42,7 @@ export default function VendorScreenShell({
   rightSlot,
   children,
   contentStyle,
+  hideStationSwitcher,
 }: Props) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -80,13 +86,19 @@ export default function VendorScreenShell({
 
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <StationSwitcher />
+          {hideStationSwitcher ? null : <StationSwitcher />}
+          {/* When the station chip is hidden the title takes its slot
+              on the same row as the rightSlot (Today does this so the
+              "Today" + notification icon sit on one row per design). */}
+          {hideStationSwitcher && title ? (
+            <Text style={styles.titleInline}>{title}</Text>
+          ) : null}
           {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
         </View>
         {rightSlot ? <View>{rightSlot}</View> : null}
       </View>
 
-      {title ? (
+      {title && !hideStationSwitcher ? (
         <View style={styles.titleRow}>
           <Text style={styles.title}>{title}</Text>
         </View>
@@ -126,6 +138,11 @@ const makeStyles = (theme: Theme) =>
       paddingBottom: 8,
     },
     title: {
+      ...theme.type.h1,
+      color: theme.fg,
+      letterSpacing: -0.4,
+    },
+    titleInline: {
       ...theme.type.h1,
       color: theme.fg,
       letterSpacing: -0.4,

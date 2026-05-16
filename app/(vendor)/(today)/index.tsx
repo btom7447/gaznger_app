@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
 import {
   AlertChip,
@@ -13,7 +15,7 @@ import {
   OrderRow,
   Skel,
   SkelStack,
-  TodayHeroCard,
+  TodayHeroCarousel,
   TodayMiniGrid,
   type TodayNextOrder,
   type TodayTeamStatus,
@@ -63,14 +65,30 @@ interface TodayApiQueueRow {
   addr?: string | null;
 }
 
+interface TodayApiPerStation {
+  stationId: string;
+  stationName: string;
+  revenueToday: number;
+  revenueYesterday: number;
+  ordersTotal: number;
+  ordersQueue: number;
+  ordersInFlight: number;
+  ordersDone: number;
+}
+
 interface TodayApiResponse {
   stationName: string | null;
   revenueToday: number;
+  revenueYesterday: number;
+  prevDayLabel: string;
+  ordersTotal: number;
   breakdown: {
+    ordersQueue: number;
     ordersDone: number;
     ordersInFlight: number;
     bulkInTransit: number;
   };
+  perStation: TodayApiPerStation[];
   alerts: TodayApiAlert[];
   nextOrder: TodayApiQueueRow | null;
   teamStatus: TodayTeamStatus;
@@ -80,20 +98,20 @@ interface TodayApiResponse {
 export default function VendorTodayScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const activeStationId = useVendorStationStore((s) => s.activeStationId);
+  const hasStations = useVendorStationStore(
+    (s) => s.stations.length > 0,
+  );
 
   const [data, setData] = useState<TodayApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchToday = useCallback(async () => {
-    if (!activeStationId) {
-      setLoading(false);
-      return;
-    }
     try {
+      // No stationId param — Today is always the all-stations aggregate.
+      // Per-station cards live in the carousel.
       const res = await api.get<TodayApiResponse>(
-        `/api/vendor/today?stationId=${encodeURIComponent(activeStationId)}`,
+        "/api/vendor/today",
         { timeoutMs: 10_000 },
       );
       setData(res);
@@ -103,7 +121,7 @@ export default function VendorTodayScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [activeStationId]);
+  }, []);
 
   // Initial + station-change fetch.
   useEffect(() => {
@@ -162,8 +180,33 @@ export default function VendorTodayScreen() {
 
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
+  const handleNotifsPress = useCallback(() => {
+    router.push("/(screens)/notification" as never);
+  }, [router]);
+
   return (
-    <VendorScreenShell title="Today">
+    <VendorScreenShell
+      title="Today"
+      hideStationSwitcher
+      rightSlot={
+        <Pressable
+          onPress={handleNotifsPress}
+          accessibilityRole="button"
+          accessibilityLabel="Notifications"
+          hitSlop={6}
+          style={({ pressed }) => [
+            styles.notifsBtn,
+            pressed && { opacity: 0.85 },
+          ]}
+        >
+          <Ionicons
+            name="notifications-outline"
+            size={20}
+            color={theme.fg}
+          />
+        </Pressable>
+      }
+    >
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={
@@ -176,39 +219,62 @@ export default function VendorTodayScreen() {
         showsVerticalScrollIndicator={false}
       >
         {loading && !data ? (
-          <SkelStack gap={14}>
-            <Skel height={160} radius={24} />
-            <Skel height={56} radius={16} />
-            <View style={{ flexDirection: "row", gap: 12 }}>
-              <Skel height={130} radius={16} style={{ flex: 1 } as never} />
-              <Skel height={130} radius={16} style={{ flex: 1 } as never} />
-            </View>
-            <Skel height={86} radius={16} />
-            <Skel height={86} radius={16} />
-          </SkelStack>
-        ) : !activeStationId ? (
-          <VendorEmptyState
-            icon="business-outline"
-            headline="No station yet"
-            body="Add a station to start receiving orders."
-            ctaLabel="Add station"
-            onCta={() => router.push("/(vendor)/(profile)" as never)}
-          />
+          <View style={styles.paddedSlot}>
+            <SkelStack gap={14}>
+              <Skel height={160} radius={24} />
+              <Skel height={56} radius={16} />
+              <View style={{ flexDirection: "row", gap: 12 }}>
+                <Skel height={130} radius={16} style={{ flex: 1 } as never} />
+                <Skel height={130} radius={16} style={{ flex: 1 } as never} />
+              </View>
+              <Skel height={86} radius={16} />
+              <Skel height={86} radius={16} />
+            </SkelStack>
+          </View>
+        ) : !hasStations ? (
+          <View style={styles.paddedSlot}>
+            <VendorEmptyState
+              icon="business-outline"
+              headline="No station yet"
+              body="Add a station to start receiving orders."
+              ctaLabel="Add station"
+              onCta={() => router.push("/(vendor)/(profile)" as never)}
+            />
+          </View>
         ) : !data ? (
-          <VendorEmptyState
-            icon="cloud-offline-outline"
-            headline="Couldn't load Today"
-            body="Pull down to retry."
-          />
+          <View style={styles.paddedSlot}>
+            <VendorEmptyState
+              icon="cloud-offline-outline"
+              headline="Couldn't load Today"
+              body="Pull down to retry."
+            />
+          </View>
         ) : (
           <>
-            <TodayHeroCard
-              revenueToday={data.revenueToday}
-              ordersDone={data.breakdown.ordersDone}
-              ordersInFlight={data.breakdown.ordersInFlight}
-              bulkInTransit={data.breakdown.bulkInTransit}
-              stationName={data.stationName}
-            />
+            <View style={styles.heroSlot}>
+              <TodayHeroCarousel
+                aggregate={{
+                  revenueToday: data.revenueToday,
+                  revenueYesterday: data.revenueYesterday,
+                  prevDayLabel: data.prevDayLabel,
+                  ordersTotal: data.ordersTotal,
+                  ordersQueue: data.breakdown.ordersQueue,
+                  ordersInFlight: data.breakdown.ordersInFlight,
+                  ordersDone: data.breakdown.ordersDone,
+                }}
+                perStation={data.perStation.map((s) => ({
+                  stationId: s.stationId,
+                  revenueToday: s.revenueToday,
+                  revenueYesterday: s.revenueYesterday,
+                  prevDayLabel: data.prevDayLabel,
+                  ordersTotal: s.ordersTotal,
+                  ordersQueue: s.ordersQueue,
+                  ordersInFlight: s.ordersInFlight,
+                  ordersDone: s.ordersDone,
+                  eyebrow: s.stationName,
+                }))}
+              />
+            </View>
 
             {data.alerts.length > 0 ? (
               <View style={styles.alertsCol}>
@@ -225,12 +291,14 @@ export default function VendorTodayScreen() {
               </View>
             ) : null}
 
-            <TodayMiniGrid
-              nextOrder={data.nextOrder as TodayNextOrder | null}
-              team={data.teamStatus}
-              onNextOrderPress={handleOrderPress}
-              onTeamPress={handleTeamPress}
-            />
+            <View style={styles.gridSlot}>
+              <TodayMiniGrid
+                nextOrder={data.nextOrder as TodayNextOrder | null}
+                team={data.teamStatus}
+                onNextOrderPress={handleOrderPress}
+                onTeamPress={handleTeamPress}
+              />
+            </View>
 
             <View style={styles.queueWrap}>
               <Text style={styles.queueLabel}>In queue</Text>
@@ -269,16 +337,38 @@ export default function VendorTodayScreen() {
 const makeStyles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
     scroll: {
-      padding: 20,
-      gap: 14,
+      paddingTop: 8,
       paddingBottom: 80,
+      gap: 14,
+    },
+    notifsBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: theme.bgMuted,
+    },
+    // The carousel needs to bleed to the screen's left edge so cards
+    // align with the 20pt rail used by the rest of the screen. We add
+    // paddingLeft here; the carousel itself handles the right peek.
+    heroSlot: {
+      paddingLeft: 20,
+    },
+    gridSlot: {
+      paddingHorizontal: 20,
+    },
+    paddedSlot: {
+      paddingHorizontal: 20,
     },
     alertsCol: {
       gap: 8,
+      paddingHorizontal: 20,
     },
     queueWrap: {
       gap: 10,
       marginTop: 8,
+      paddingHorizontal: 20,
     },
     queueLabel: {
       ...theme.type.caption,

@@ -100,10 +100,26 @@ function NextOrderCard({
           </Text>
         </>
       ) : (
-        <>
-          <Text style={styles.primary}>No queue</Text>
-          <Text style={styles.secondary}>Nothing waiting.</Text>
-        </>
+        <View style={styles.emptyWrap}>
+          <View
+            style={[
+              styles.emptyIconCircle,
+              { backgroundColor: theme.bgMuted },
+            ]}
+          >
+            <Ionicons
+              name="checkmark-done-outline"
+              size={20}
+              color={theme.fgMuted}
+            />
+          </View>
+          <Text style={styles.emptyHeadline} numberOfLines={1}>
+            All caught up
+          </Text>
+          <Text style={styles.emptyBody} numberOfLines={2}>
+            Nothing waiting.
+          </Text>
+        </View>
       )}
     </>
   );
@@ -141,30 +157,60 @@ function TeamCard({
   styles: ReturnType<typeof makeStyles>;
   theme: Theme;
 }) {
+  const isEmpty = team.active + team.idle + team.offline === 0;
   const body = (
     <>
       <View style={styles.eyebrowRow}>
         <Ionicons name="people" size={12} color={theme.fgMuted} />
         <Text style={styles.eyebrow}>Team</Text>
       </View>
-      <View style={styles.teamRow}>
-        <View style={[styles.teamDot, { backgroundColor: theme.primary }]} />
-        <Text style={styles.teamLabel} numberOfLines={1}>
-          {team.active} active
-        </Text>
-      </View>
-      <View style={styles.teamRow}>
-        <View style={[styles.teamDot, { backgroundColor: theme.success }]} />
-        <Text style={styles.teamLabel} numberOfLines={1}>
-          {team.idle} idle
-        </Text>
-      </View>
-      <View style={styles.teamRow}>
-        <View style={[styles.teamDot, { backgroundColor: theme.fgSubtle }]} />
-        <Text style={styles.teamLabel} numberOfLines={1}>
-          {team.offline} offline
-        </Text>
-      </View>
+      {isEmpty ? (
+        <View style={styles.emptyWrap}>
+          <View
+            style={[
+              styles.emptyIconCircle,
+              { backgroundColor: theme.bgMuted },
+            ]}
+          >
+            <Ionicons
+              name="person-add-outline"
+              size={20}
+              color={theme.fgMuted}
+            />
+          </View>
+          <Text style={styles.emptyHeadline} numberOfLines={1}>
+            No riders yet
+          </Text>
+          <Text style={styles.emptyBody} numberOfLines={2}>
+            Invite riders to get going.
+          </Text>
+        </View>
+      ) : (
+        <>
+          <View style={styles.teamRow}>
+            <View style={[styles.teamDot, { backgroundColor: theme.primary }]} />
+            <Text style={styles.teamLabel} numberOfLines={1}>
+              {team.active} active
+            </Text>
+          </View>
+          <View style={styles.teamRow}>
+            <View
+              style={[styles.teamDot, { backgroundColor: theme.success }]}
+            />
+            <Text style={styles.teamLabel} numberOfLines={1}>
+              {team.idle} idle
+            </Text>
+          </View>
+          <View style={styles.teamRow}>
+            <View
+              style={[styles.teamDot, { backgroundColor: theme.fgSubtle }]}
+            />
+            <Text style={styles.teamLabel} numberOfLines={1}>
+              {team.offline} offline
+            </Text>
+          </View>
+        </>
+      )}
     </>
   );
 
@@ -245,5 +291,30 @@ const makeStyles = (theme: Theme) =>
       ...theme.type.bodySm,
       color: theme.fg,
       fontWeight: "600",
+    },
+    emptyWrap: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 4,
+      paddingTop: 4,
+    },
+    emptyIconCircle: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 4,
+    },
+    emptyHeadline: {
+      ...theme.type.bodySm,
+      color: theme.fg,
+      fontWeight: "700",
+    },
+    emptyBody: {
+      ...theme.type.caption,
+      color: theme.fgMuted,
+      textAlign: "center",
     },
   });
