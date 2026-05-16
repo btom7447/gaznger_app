@@ -1,211 +1,463 @@
 import React, { useCallback, useEffect, useMemo } from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Circle } from "react-native-svg";
+import { LinearGradient } from "expo-linear-gradient";
 import { Theme, useTheme } from "@/constants/theme";
-import {
-  PendingTimeline,
-  type PendingRow,
-} from "@/components/ui/auth";
 import { Button } from "@/components/ui/primitives";
 import { getSocket, useSocketStatus } from "@/lib/socket";
 import { useSessionStore } from "@/store/useSessionStore";
+import { beginIntentionalSignOut } from "@/lib/api";
+import { api } from "@/lib/api";
 
 type Role = "rider" | "vendor";
 
 /**
- * Verification pending lobby. Reached after kickoff "Save and finish
- * later" OR as the bootstrap router's destination for any
- * rider/vendor with `verificationStatus === "pending"`.
+ * Verification pending — v7 design.
  *
- * Subscribes to the `verification:status` socket event so an
- * approval flips the user straight to /welcome-done without a
- * relaunch (per _server-asks/auth-verification-status.md).
+ * Forest-gradient hero card (same language as Today / Wallet heroes,
+ * "circles only" rule) with a status pill, headline, and sub. Below:
+ *   - Primary CTA: Complete verification → routes to KYC screen
+ *   - Card of CheckRows ("What you can do now") — what's unlocked vs
+ *     waiting on approval
+ *   - Secondary tile links: Contact support · Sign out
+ *
+ * Keeps the existing socket subscription (verification:status) — when
+ * the admin approves, we updateUser + route to the role home.
  */
 export default function VerificationPendingScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const styles = useMemo(() => makeStyles(theme), [theme]);
-  const params = useLocalSearchParams<{ role?: Role }>();
+  const styles = useMemo(
+    () => makeStyles(theme, insets.top, insets.bottom),
+    [theme, insets.top, insets.bottom],
+  );
+  const params = useLocalSearchParams<{ role?: Role; submitted?: string }>();
   const role: Role = params.role === "vendor" ? "vendor" : "rider";
+  const submitted = params.submitted === "true";
 
+  const user = useSessionStore((s) => s.user);
   const updateUser = useSessionStore((s) => s.updateUser);
+  const logout = useSessionStore((s) => s.logout);
   const socketStatus = useSocketStatus();
 
-  // Listen for server-side approval flip.
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
-    const handler = (data: { status?: "approved" | "rejected"; reason?: string }) => {
+    const handler = (data: {
+      status?: "approved" | "rejected";
+      reason?: string;
+    }) => {
       if (!data.status) return;
       updateUser({ verificationStatus: data.status });
       if (data.status === "approved") {
-        router.replace({
-          pathname: "/(auth)/welcome-done" as never,
-          params: { role, verified: "true" },
-        });
+        if (role === "rider") {
+          router.replace("/(rider)/(queue)" as never);
+        } else {
+          router.replace("/(vendor)/(today)" as never);
+        }
       }
-      // Rejected screen is part of `_drift/auth-verification-uploads-pending.md`;
-      // until designs land, surfacing the status flip in-place is the
-      // honest behaviour — the user can read the reason in their profile.
     };
     socket.on("verification:status", handler);
     return () => {
       socket.off("verification:status", handler);
     };
-    // socketStatus dep — re-binds when the socket flips to live, so
-    // a screen mounted before the socket connects doesn't miss its
-    // first attach. Same pattern as the customer Track screen.
   }, [socketStatus, role, updateUser, router]);
 
-  const rows: PendingRow[] =
-    role === "rider"
-      ? [
-          { label: "Documents received", status: "Done", tone: "success" },
-          { label: "Identity check", status: "In progress", tone: "warning" },
-          { label: "Bike inspection", status: "Pending", tone: "neutral" },
-          { label: "Activation", status: "Pending", tone: "neutral" },
-        ]
-      : [
-          { label: "Documents received", status: "Done", tone: "success" },
-          { label: "Licence check", status: "In progress", tone: "warning" },
-          { label: "Station inspection", status: "Pending", tone: "neutral" },
-          { label: "Activation", status: "Pending", tone: "neutral" },
-        ];
-
-  const headlineSub =
-    role === "rider"
-      ? "We're reviewing your bike papers and identity. We'll send a push notification once you're cleared — usually within 18 hours."
-      : "We're reviewing your station licence and photos. Our team may reach out to schedule a quick call. Usually cleared within 48 hours.";
-
-  const handleGotIt = useCallback(() => {
-    // Send rider/vendor to their (limited) dashboard while pending.
-    // The real dashboard layouts already render a read-only state when
-    // the user isn't approved — they can read messages, see profile,
-    // but can't accept work.
+  const handleVerify = useCallback(() => {
     if (role === "rider") {
-      router.replace("/(rider)/(queue)" as never);
+      router.push("/(auth)/verification/rider" as never);
     } else {
-      router.replace("/(vendor)/(today)" as never);
+      router.push("/(auth)/verification/vendor" as never);
     }
   }, [router, role]);
 
   const handleSupport = useCallback(() => {
-    Linking.openURL("mailto:support@gaznger.com").catch(() => {});
-  }, []);
+    router.push("/(screens)/help-support" as never);
+  }, [router]);
+
+  const handleSignOut = useCallback(async () => {
+    beginIntentionalSignOut();
+    try {
+      const refreshToken = useSessionStore.getState().refreshToken;
+      await api
+        .post("/auth/logout", refreshToken ? { refreshToken } : {})
+        .catch(() => {});
+    } finally {
+      logout();
+      router.replace("/(auth)/welcome" as never);
+    }
+  }, [logout, router]);
+
+  const headline = submitted
+    ? "We're reviewing your account"
+    : "One more step to go live";
+  const sub = submitted
+    ? "Usually 12–24 hours during business hours. We'll text you the moment you're approved."
+    : `Upload a few documents to start receiving ${role === "vendor" ? "orders" : "jobs"}. Takes about 3 minutes.`;
+  const statusLabel = submitted ? "Under review" : "Awaiting docs";
 
   return (
-    <View
-      style={[
-        styles.root,
-        {
-          backgroundColor: theme.bg,
-          paddingTop: insets.top + theme.space.s4,
-          paddingBottom: insets.bottom + theme.space.s4,
-        },
-      ]}
-    >
-      <View style={styles.body}>
-        <View style={styles.iconRing}>
-          <Ionicons
-            name="time-outline"
-            size={44}
-            color={theme.mode === "dark" ? theme.palette.gold300 : theme.warning}
+    <View style={styles.root}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Hero card */}
+        <View style={styles.heroCard}>
+          <ForestHeroBg theme={theme} />
+          <View style={styles.heroTop}>
+            <View style={styles.heroIcon}>
+              <Ionicons name="shield-checkmark" size={26} color="#fff" />
+            </View>
+            <View style={styles.statusPill}>
+              <View style={styles.statusDot} />
+              <Text style={styles.statusText}>{statusLabel}</Text>
+            </View>
+          </View>
+          <Text
+            style={styles.heroHeadline}
+            accessibilityRole="header"
+            accessibilityLabel={headline}
+          >
+            {headline}
+          </Text>
+          <Text style={styles.heroSub}>{sub}</Text>
+        </View>
+
+        {!submitted ? (
+          <Button
+            variant="primary"
+            size="lg"
+            full
+            onPress={handleVerify}
+            accessibilityLabel="Complete verification"
+          >
+            Complete verification  →
+          </Button>
+        ) : null}
+
+        {/* What you can do now */}
+        <View style={styles.card}>
+          <Text style={styles.cardEyebrow}>What you can do now</Text>
+          <CheckRow
+            ok
+            text={`Browse the ${role === "vendor" ? "vendor" : "rider"} dashboard`}
+            theme={theme}
+          />
+          <CheckRow ok text="Edit your profile and contact details" theme={theme} />
+          <CheckRow
+            ok
+            text="Reach Gaznger support if anything's unclear"
+            theme={theme}
+          />
+          <CheckRow
+            text={
+              role === "vendor"
+                ? "Accept orders & receive payouts"
+                : "Accept jobs & receive payouts"
+            }
+            sub="Unlocks after approval"
+            theme={theme}
           />
         </View>
-        <View style={styles.copyWrap}>
-          <Text style={styles.headline}>Sit tight. We're checking.</Text>
-          <Text style={styles.sub}>{headlineSub}</Text>
-        </View>
-        <View style={styles.timelineWrap}>
-          <PendingTimeline rows={rows} />
-        </View>
-      </View>
 
-      <View style={styles.footer}>
-        <Button
-          variant="primary"
-          size="lg"
-          full
-          onPress={handleGotIt}
-          accessibilityLabel="Got it — open dashboard"
-        >
-          Got it
-        </Button>
-        <View style={styles.supportRow}>
-          <Text style={styles.supportLeading}>Questions? </Text>
-          <Pressable
+        {/* Secondary links */}
+        <View style={styles.secondaryRow}>
+          <SecondaryLink
+            icon="call"
+            label="Contact support"
+            sub="Chat or call — usually replies in 5 min"
             onPress={handleSupport}
-            accessibilityRole="link"
-            accessibilityLabel="Chat with support"
-          >
-            <Text style={styles.supportLink}>Chat with support</Text>
-          </Pressable>
+            theme={theme}
+          />
+          <SecondaryLink
+            icon="log-out-outline"
+            label="Sign out"
+            sub="You can come back anytime"
+            onPress={handleSignOut}
+            theme={theme}
+          />
         </View>
+
+        <Text style={styles.footer}>
+          We'll text you the moment you're approved.
+        </Text>
+      </ScrollView>
+    </View>
+  );
+}
+
+/* ─────────────── Pieces ─────────────── */
+
+function ForestHeroBg({ theme }: { theme: Theme }) {
+  return (
+    <>
+      <LinearGradient
+        colors={[theme.palette.green700, theme.palette.green900, "#08231a"]}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        locations={[0, 0.65, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+      <View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          right: -100,
+          top: -90,
+          opacity: 0.28,
+        }}
+      >
+        <Svg width={280} height={280} viewBox="0 0 280 280">
+          {[150, 118, 88, 62, 40].map((r) => (
+            <Circle
+              key={r}
+              cx={140}
+              cy={140}
+              r={r}
+              stroke="#fff"
+              strokeWidth={1.1}
+              fill="none"
+              opacity={1 - r / 200}
+            />
+          ))}
+        </Svg>
+      </View>
+    </>
+  );
+}
+
+function CheckRow({
+  ok,
+  text,
+  sub,
+  theme,
+}: {
+  ok?: boolean;
+  text: string;
+  sub?: string;
+  theme: Theme;
+}) {
+  return (
+    <View style={{ flexDirection: "row", gap: 10, paddingVertical: 6 }}>
+      <View
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: 999,
+          backgroundColor: ok ? theme.successTint : theme.bgMuted,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {ok ? (
+          <Ionicons name="checkmark" size={14} color={theme.success} />
+        ) : (
+          <View
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: 999,
+              backgroundColor: theme.fgMuted,
+            }}
+          />
+        )}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text
+          style={{
+            fontSize: 13,
+            color: ok ? theme.fg : theme.fgMuted,
+            fontWeight: "700",
+          }}
+        >
+          {text}
+        </Text>
+        {sub ? (
+          <Text
+            style={{
+              fontSize: 11.5,
+              color: theme.fgMuted,
+              marginTop: 2,
+            }}
+          >
+            {sub}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
 }
 
-const makeStyles = (theme: Theme) =>
+function SecondaryLink({
+  icon,
+  label,
+  sub,
+  onPress,
+  theme,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  label: string;
+  sub: string;
+  onPress: () => void;
+  theme: Theme;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}. ${sub}`}
+      style={({ pressed }) => [
+        {
+          backgroundColor: theme.surface,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.divider,
+          borderRadius: 14,
+          padding: 12,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 12,
+        },
+        pressed && { opacity: 0.92 },
+      ]}
+    >
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 10,
+          backgroundColor: theme.bgMuted,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Ionicons name={icon} size={18} color={theme.fg} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          style={{
+            ...theme.type.body,
+            color: theme.fg,
+            fontWeight: "800",
+          }}
+        >
+          {label}
+        </Text>
+        <Text
+          style={{
+            ...theme.type.bodySm,
+            color: theme.fgMuted,
+            marginTop: 2,
+          }}
+          numberOfLines={1}
+        >
+          {sub}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={theme.fgMuted} />
+    </Pressable>
+  );
+}
+
+const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
   StyleSheet.create({
     root: {
       flex: 1,
-      paddingHorizontal: theme.space.s5,
+      backgroundColor: theme.bg,
     },
-    body: {
-      flex: 1,
+    scroll: {
+      paddingHorizontal: 16,
+      paddingTop: topInset + 12,
+      paddingBottom: bottomInset + 20,
+      gap: 14,
+    },
+    heroCard: {
+      position: "relative",
+      borderRadius: 24,
+      overflow: "hidden",
+      minHeight: 260,
+      padding: 24,
+    },
+    heroTop: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+    },
+    heroIcon: {
+      width: 52,
+      height: 52,
+      borderRadius: 16,
+      backgroundColor: "rgba(255,255,255,0.14)",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.25)",
       alignItems: "center",
       justifyContent: "center",
-      gap: theme.space.s5,
     },
-    iconRing: {
-      width: 88,
-      height: 88,
-      borderRadius: 44,
-      backgroundColor: theme.warningTint,
+    statusPill: {
+      flexDirection: "row",
       alignItems: "center",
-      justifyContent: "center",
+      gap: 6,
+      backgroundColor: "rgba(255,255,255,0.14)",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.25)",
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
     },
-    copyWrap: {
-      alignItems: "center",
-      gap: theme.space.s2 + 2,
+    statusDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 999,
+      backgroundColor: "#FFE08A",
     },
-    headline: {
-      fontSize: 24,
-      lineHeight: 28,
+    statusText: {
+      color: "#fff",
+      fontSize: 11,
       fontWeight: "800",
-      letterSpacing: -0.5,
-      color: theme.fg,
-      textAlign: "center",
+      letterSpacing: 0.3,
+      textTransform: "uppercase",
     },
-    sub: {
-      ...theme.type.body,
-      color: theme.fgMuted,
-      textAlign: "center",
+    heroHeadline: {
+      color: "#fff",
+      fontSize: 26,
+      fontWeight: "800",
+      letterSpacing: -0.4,
+      lineHeight: 30,
+      marginTop: 20,
+    },
+    heroSub: {
+      color: "rgba(255,255,255,0.85)",
+      fontSize: 14,
       lineHeight: 22,
-      maxWidth: 280,
+      marginTop: 10,
+      maxWidth: 320,
     },
-    timelineWrap: {
-      width: "100%",
+    card: {
+      backgroundColor: theme.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.divider,
+      borderRadius: 16,
+      padding: 14,
+    },
+    cardEyebrow: {
+      fontSize: 11,
+      fontWeight: "800",
+      letterSpacing: 0.4,
+      textTransform: "uppercase",
+      color: theme.fgMuted,
+      marginBottom: 10,
+    },
+    secondaryRow: {
+      gap: 8,
     },
     footer: {
-      gap: theme.space.s2 + 2,
-    },
-    supportRow: {
-      flexDirection: "row",
-      justifyContent: "center",
-      alignItems: "center",
-    },
-    supportLeading: {
-      ...theme.type.bodySm,
+      fontSize: 11.5,
       color: theme.fgMuted,
-    },
-    supportLink: {
-      ...theme.type.bodySm,
-      color: theme.primary,
-      fontWeight: "700",
+      textAlign: "center",
+      paddingVertical: 8,
     },
   });
