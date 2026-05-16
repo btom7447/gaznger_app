@@ -240,8 +240,9 @@ export default function WithdrawScreen() {
                           styles.quickText,
                           active && styles.quickTextActive,
                         ]}
+                        numberOfLines={1}
                       >
-                        {(q / 1000).toFixed(0)}k
+                        {fmtNaira(q)}
                       </Text>
                     </Pressable>
                   );

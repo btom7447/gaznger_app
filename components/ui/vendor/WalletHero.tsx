@@ -42,12 +42,9 @@ function fmtNaira(value: number): string {
   return `₦${Math.round(value).toLocaleString("en-NG")}`;
 }
 
-/** Compact naira: 14k, 1.2m. Used for the tile values so they fit. */
-function fmtCompactNaira(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `₦${(value / 1_000_000).toFixed(1)}M`;
-  if (abs >= 10_000) return `₦${(value / 1_000).toFixed(0)}k`;
-  return `₦${value.toLocaleString("en-NG")}`;
+/** Full thousand-separated naira. */
+function fmtNairaFull(value: number): string {
+  return `₦${Math.round(value).toLocaleString("en-NG")}`;
 }
 
 export default function WalletHero({
@@ -157,8 +154,8 @@ export default function WalletHero({
       <View style={styles.divider} />
 
       <View style={styles.tileRow}>
-        <Tile label="In escrow" value={fmtCompactNaira(escrow)} />
-        <Tile label="Pending settle" value={fmtCompactNaira(pendingSettle)} />
+        <Tile label="In escrow" value={fmtNairaFull(escrow)} />
+        <Tile label="Pending settle" value={fmtNairaFull(pendingSettle)} />
         <Tile label="Next payout" value={nextPayoutLabel ?? "—"} />
       </View>
     </LinearGradient>

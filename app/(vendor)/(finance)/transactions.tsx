@@ -22,7 +22,7 @@ import {
 import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
 
-type TxFilter = "all" | "orders" | "bulk" | "payouts" | "topups";
+type TxFilter = "all" | "credit" | "payout" | "hold" | "debit";
 
 interface TxApiRow {
   id: string;
@@ -45,10 +45,10 @@ interface TxApiResponse {
 
 const FILTERS: FilterPillOption<TxFilter>[] = [
   { value: "all", label: "All" },
-  { value: "orders", label: "Orders" },
-  { value: "bulk", label: "Bulk" },
-  { value: "payouts", label: "Payouts" },
-  { value: "topups", label: "Top-ups" },
+  { value: "credit", label: "Credits" },
+  { value: "payout", label: "Payouts" },
+  { value: "hold", label: "Escrow" },
+  { value: "debit", label: "Fees" },
 ];
 
 export default function VendorTransactionsScreen() {

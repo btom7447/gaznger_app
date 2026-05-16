@@ -11,6 +11,8 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import Svg, { Circle } from "react-native-svg";
 import * as Clipboard from "expo-clipboard";
 import { toast } from "sonner-native";
 import {
@@ -273,37 +275,78 @@ export default function VendorOrderDetailScreen() {
           />
         ) : (
           <>
-            {/* Status + customer header */}
-            <VendorCard>
-              <View style={styles.headerRow}>
-                <View style={{ flex: 1, gap: 4 }}>
-                  <Text style={styles.customer} numberOfLines={1}>
-                    {order.user?.displayName ?? "Customer"}
-                  </Text>
-                  <Text style={styles.sub} numberOfLines={1}>
-                    {order.quantity} {order.fuel?.unit ?? ""} {order.fuel?.name ?? ""}
-                    {"  ·  "}
-                    {relativeTime(order.createdAt)}
-                  </Text>
-                </View>
-                <VendorPill tone={STATUS_TONE[order.status]} size="md" dot>
-                  {STATUS_LABEL[order.status]}
-                </VendorPill>
+            {/* Order hero — dark gradient matching Today/Wallet */}
+            <LinearGradient
+              colors={[theme.palette.green700, theme.palette.green900]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.hero}
+            >
+              <View pointerEvents="none" style={styles.heroCircles}>
+                <Svg width={120} height={120} viewBox="0 0 120 120">
+                  <Circle
+                    cx={60}
+                    cy={60}
+                    r={50}
+                    stroke="#fff"
+                    strokeWidth={2}
+                    fill="none"
+                    opacity={0.08}
+                  />
+                  <Circle
+                    cx={60}
+                    cy={60}
+                    r={30}
+                    stroke="#fff"
+                    strokeWidth={2}
+                    fill="none"
+                    opacity={0.08}
+                  />
+                </Svg>
               </View>
 
-              <View style={styles.divider} />
+              <View style={styles.heroHeaderRow}>
+                <Text style={styles.heroEyebrow}>
+                  Order · #{order._id.slice(-6).toUpperCase()}
+                </Text>
+                <View style={styles.heroBoltBadge}>
+                  <Ionicons name="flash" size={16} color="#fff" />
+                </View>
+              </View>
 
-              <Text style={styles.amount} numberOfLines={1} adjustsFontSizeToFit>
+              <Text
+                style={styles.heroAmount}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
                 {fmtNaira(order.totalPrice)}
               </Text>
-              <View style={styles.feeRow}>
-                <FeeCell label="Fuel" value={fmtNaira(order.fuelCost)} />
-                <View style={styles.cellDivider} />
-                <FeeCell label="Delivery" value={fmtNaira(order.deliveryFee)} />
-                <View style={styles.cellDivider} />
-                <FeeCell label="Service" value={fmtNaira(order.serviceFee)} />
+              <Text style={styles.heroSub} numberOfLines={1}>
+                {order.user?.displayName ?? "Customer"} · {order.quantity}{" "}
+                {order.fuel?.unit ?? ""} {order.fuel?.name ?? ""} ·{" "}
+                {relativeTime(order.createdAt)}
+              </Text>
+
+              <View style={styles.heroDivider} />
+
+              <View style={styles.heroTileRow}>
+                <HeroTile label="Fuel" value={fmtNaira(order.fuelCost)} />
+                <HeroTile
+                  label="Delivery"
+                  value={fmtNaira(order.deliveryFee)}
+                />
+                <HeroTile
+                  label="Status"
+                  valueComponent={
+                    <View style={styles.heroStatusPill}>
+                      <Text style={styles.heroStatusText}>
+                        {STATUS_LABEL[order.status]}
+                      </Text>
+                    </View>
+                  }
+                />
               </View>
-              <Text style={styles.payNote}>
+              <Text style={styles.heroPayNote}>
                 Payment:{" "}
                 {order.paymentStatus === "paid"
                   ? "Paid"
@@ -311,7 +354,7 @@ export default function VendorOrderDetailScreen() {
                     ? "Refunded"
                     : "Unpaid"}
               </Text>
-            </VendorCard>
+            </LinearGradient>
 
             {/* Cancellation reason (if any) */}
             {order.status === "cancelled" && order.cancellationReason ? (
@@ -487,18 +530,48 @@ export default function VendorOrderDetailScreen() {
   );
 }
 
-function FeeCell({ label, value }: { label: string; value: string }) {
+function HeroTile({
+  label,
+  value,
+  valueComponent,
+}: {
+  label: string;
+  value?: string;
+  valueComponent?: React.ReactNode;
+}) {
   return (
-    <View style={cellStyles.cell}>
-      <Text style={cellStyles.value} numberOfLines={1}>
-        {value}
-      </Text>
-      <Text style={cellStyles.label} numberOfLines={1}>
+    <View style={heroTileStyles.tile}>
+      <Text style={heroTileStyles.label} numberOfLines={1}>
         {label}
       </Text>
+      {valueComponent ?? (
+        <Text style={heroTileStyles.value} numberOfLines={1}>
+          {value}
+        </Text>
+      )}
     </View>
   );
 }
+
+const heroTileStyles = StyleSheet.create({
+  tile: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  label: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.7)",
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  value: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#fff",
+  },
+});
 
 const makeStyles = (theme: ReturnType<typeof useTheme>) =>
   StyleSheet.create({
@@ -518,44 +591,77 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
       color: theme.fgMuted,
       fontWeight: "600",
     },
-    headerRow: {
+    hero: {
+      borderRadius: 20,
+      padding: 20,
+      overflow: "hidden",
+      position: "relative",
+    },
+    heroCircles: {
+      position: "absolute",
+      right: -20,
+      top: -20,
+    },
+    heroHeaderRow: {
       flexDirection: "row",
       alignItems: "center",
+      justifyContent: "space-between",
+    },
+    heroEyebrow: {
+      fontSize: 11,
+      fontWeight: "800",
+      color: "rgba(255,255,255,0.7)",
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+    },
+    heroBoltBadge: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      backgroundColor: "rgba(255,255,255,0.16)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    heroAmount: {
+      fontSize: 38,
+      fontWeight: "800",
+      letterSpacing: -0.8,
+      color: "#fff",
+      marginTop: 8,
+    },
+    heroSub: {
+      fontSize: 12,
+      color: "rgba(255,255,255,0.75)",
+      marginTop: 2,
+    },
+    heroDivider: {
+      marginTop: 14,
+      marginBottom: 14,
+      borderTopWidth: 1,
+      borderTopColor: "rgba(255,255,255,0.14)",
+    },
+    heroTileRow: {
+      flexDirection: "row",
       gap: 12,
     },
-    customer: {
-      ...theme.type.h2,
-      color: theme.fg,
+    heroStatusPill: {
+      alignSelf: "flex-start",
+      backgroundColor: "rgba(255,255,255,0.18)",
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
     },
-    sub: {
-      ...theme.type.bodySm,
-      color: theme.fgMuted,
-    },
-    divider: {
-      height: 1,
-      backgroundColor: theme.border,
-      marginVertical: 12,
-    },
-    amount: {
-      fontSize: 32,
+    heroStatusText: {
+      fontSize: 11,
       fontWeight: "800",
-      letterSpacing: -0.6,
-      color: theme.fg,
+      color: "#fff",
+      letterSpacing: 0.3,
     },
-    feeRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      marginTop: 10,
-    },
-    cellDivider: {
-      width: 1,
-      alignSelf: "stretch",
-      backgroundColor: theme.border,
-    },
-    payNote: {
-      ...theme.type.bodySm,
-      color: theme.fgMuted,
-      marginTop: 10,
+    heroPayNote: {
+      fontSize: 11.5,
+      color: "rgba(255,255,255,0.75)",
+      fontWeight: "600",
+      marginTop: 12,
     },
     cardLabel: {
       ...theme.type.caption,
@@ -647,21 +753,3 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
     },
   });
 
-const cellStyles = StyleSheet.create({
-  cell: {
-    flex: 1,
-    alignItems: "center",
-    gap: 2,
-  },
-  value: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  label: {
-    fontSize: 11,
-    color: "#888",
-    fontWeight: "600",
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
-  },
-});

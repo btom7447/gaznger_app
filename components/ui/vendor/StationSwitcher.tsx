@@ -1,7 +1,12 @@
 import React, { useMemo, useRef, useCallback } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
+import {
+  BottomSheetBackdrop,
+  BottomSheetBackdropProps,
+  BottomSheetModal,
+  BottomSheetView,
+} from "@gorhom/bottom-sheet";
 import { Theme, useTheme } from "@/constants/theme";
 import { useVendorStationStore } from "@/store/useVendorStationStore";
 
@@ -28,6 +33,21 @@ export default function StationSwitcher() {
 
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ["50%", "85%"], []);
+
+  // Dark backdrop — tap-to-close + dims the screen so the sheet pops
+  // off the page (item 1 spec).
+  const renderBackdrop = useCallback(
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        opacity={theme.mode === "dark" ? 0.7 : 0.55}
+        pressBehavior="close"
+      />
+    ),
+    [theme.mode],
+  );
 
   const active = useMemo(
     () => stations.find((s) => s.id === activeStationId) ?? null,
@@ -91,6 +111,7 @@ export default function StationSwitcher() {
       <BottomSheetModal
         ref={sheetRef}
         snapPoints={snapPoints}
+        backdropComponent={renderBackdrop}
         backgroundStyle={{ backgroundColor: theme.bg }}
         handleIndicatorStyle={{ backgroundColor: theme.fgMuted }}
       >

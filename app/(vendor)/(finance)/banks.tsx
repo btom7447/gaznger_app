@@ -30,6 +30,8 @@ interface BankAccountRow {
   accountName: string;
   isPrimary: boolean;
   bvnVerified: boolean;
+  /** Populated GasStation from /banks/saved. May be null on legacy rows. */
+  station?: { _id: string; name: string } | null;
 }
 
 /**
@@ -271,6 +273,11 @@ export default function VendorBanksScreen() {
                       <Text style={styles.acct} numberOfLines={1}>
                         {b.accountName}
                       </Text>
+                      <Text style={styles.stationLine} numberOfLines={1}>
+                        {b.station?.name
+                          ? `Settles for ${b.station.name}`
+                          : "Unassigned · edit to link a station"}
+                      </Text>
                     </View>
                     {b.isPrimary ? (
                       <VendorPill tone="primary" size="sm">
@@ -392,6 +399,11 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
     acct: {
       ...theme.type.bodySm,
       color: theme.fgMuted,
+    },
+    stationLine: {
+      ...theme.type.caption,
+      color: theme.fgMuted,
+      marginTop: 2,
     },
     actionRow: {
       flexDirection: "row",

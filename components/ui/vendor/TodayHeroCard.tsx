@@ -38,16 +38,10 @@ function fmtNaira(value: number): string {
   return `₦${value.toLocaleString("en-NG")}`;
 }
 
-/**
- * Compact naira: 14k for 14_000, 1.2m for 1_200_000, 8.3k for 8300.
- * Used in the sub-line where a full ₦ figure would crowd the row.
- */
-function fmtCompactNaira(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `₦${(value / 1_000_000).toFixed(1)}m`;
-  if (abs >= 1_000) return `₦${(value / 1_000).toFixed(0)}k`;
-  return `₦${value.toLocaleString("en-NG")}`;
-}
+// Always full thousand-separated naira across the vendor app — no
+// compact suffixes. The sub-line wraps if it overflows; numberOfLines
+// caps each line.
+
 
 export default function TodayHeroCard({
   revenueToday,
@@ -75,7 +69,7 @@ export default function TodayHeroCard({
   const subLine =
     ordersTotal > 0
       ? prevDayLabel
-        ? `Across ${ordersTotal} order${ordersTotal === 1 ? "" : "s"} · ${fmtCompactNaira(revenueYesterday)} vs ${prevDayLabel}`
+        ? `Across ${ordersTotal} order${ordersTotal === 1 ? "" : "s"} · ${fmtNaira(revenueYesterday)} vs ${prevDayLabel}`
         : `Across ${ordersTotal} order${ordersTotal === 1 ? "" : "s"}`
       : "No orders yet today";
 

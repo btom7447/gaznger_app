@@ -21,10 +21,8 @@ export interface BarChartProps {
   height?: number;
 }
 
-function fmtCompactNaira(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return `${Math.round(n)}`;
+function fmtNairaFull(n: number): string {
+  return `₦${Math.round(n).toLocaleString("en-NG")}`;
 }
 
 export default function BarChart({ buckets, height = 140 }: BarChartProps) {
@@ -53,7 +51,7 @@ export default function BarChart({ buckets, height = 140 }: BarChartProps) {
             <View key={i} style={styles.col}>
               {b.value > 0 ? (
                 <Text style={styles.value} numberOfLines={1}>
-                  {fmtCompactNaira(b.value)}
+                  {fmtNairaFull(b.value)}
                 </Text>
               ) : (
                 <View style={{ height: 14 }} />

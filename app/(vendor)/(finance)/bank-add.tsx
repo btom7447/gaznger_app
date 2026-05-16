@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { toast } from "sonner-native";
 import {
   AlertChip,
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/vendor";
 import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
+import { useVendorStationStore } from "@/store/useVendorStationStore";
 
 interface PaystackBank {
   id: number;
@@ -42,6 +43,8 @@ interface ResolveResp {
 export default function VendorBankAddScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const params = useLocalSearchParams<{ stationId?: string }>();
+  const stations = useVendorStationStore((s) => s.stations);
 
   const [banks, setBanks] = useState<PaystackBank[] | null>(null);
   const [banksLoading, setBanksLoading] = useState(true);
@@ -53,6 +56,13 @@ export default function VendorBankAddScreen() {
   const [resolved, setResolved] = useState<string | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Station this bank belongs to. Preselected if the user came here
+  // with a ?stationId param, otherwise defaults to the first station.
+  const [stationId, setStationId] = useState<string | null>(
+    params.stationId ?? stations[0]?.id ?? null,
+  );
+  const [stationPickerOpen, setStationPickerOpen] = useState(false);
+  const pickedStation = stations.find((s) => s.id === stationId) ?? null;
 
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
@@ -118,16 +128,18 @@ export default function VendorBankAddScreen() {
     return banks.filter((b) => b.name.toLowerCase().includes(q));
   }, [banks, pickerQuery]);
 
-  const canSubmit = !!picked && !!resolved && !submitting;
+  const canSubmit =
+    !!picked && !!resolved && !!stationId && !submitting;
 
   const handleSubmit = useCallback(async () => {
-    if (!canSubmit || !picked || !resolved) return;
+    if (!canSubmit || !picked || !resolved || !stationId) return;
     setSubmitting(true);
     try {
       await api.post("/api/vendor/banks/saved", {
         bankName: picked.name,
         bankCode: picked.code,
         accountNumber,
+        stationId,
       });
       toast.success("Bank added");
       router.replace("/(vendor)/(finance)/banks" as never);
@@ -141,7 +153,7 @@ export default function VendorBankAddScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, picked, resolved, accountNumber, router]);
+  }, [canSubmit, picked, resolved, accountNumber, stationId, router]);
 
   return (
     <VendorScreenShell title="Add bank">
@@ -163,6 +175,38 @@ export default function VendorBankAddScreen() {
           <Ionicons name="chevron-back" size={18} color={theme.fgMuted} />
           <Text style={styles.backText}>Back to banks</Text>
         </Pressable>
+
+        <VendorCard>
+          <Text style={styles.cardLabel}>Station</Text>
+          <Pressable
+            onPress={() => setStationPickerOpen(true)}
+            disabled={stations.length === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Choose station"
+            style={({ pressed }) => [
+              styles.selectBtn,
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <Text
+              style={[
+                styles.selectText,
+                !pickedStation && { color: theme.fgMuted },
+              ]}
+              numberOfLines={1}
+            >
+              {pickedStation?.name ?? "Pick a station"}
+            </Text>
+            <Ionicons
+              name="chevron-down"
+              size={18}
+              color={theme.fgMuted}
+            />
+          </Pressable>
+          <Text style={styles.helper}>
+            Payouts from this station settle to the bank below.
+          </Text>
+        </VendorCard>
 
         <VendorCard>
           <Text style={styles.cardLabel}>Bank</Text>
@@ -334,6 +378,67 @@ export default function VendorBankAddScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={stationPickerOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setStationPickerOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Choose station</Text>
+              <Pressable
+                onPress={() => setStationPickerOpen(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                hitSlop={6}
+              >
+                <Ionicons name="close" size={22} color={theme.fg} />
+              </Pressable>
+            </View>
+            <FlatList
+              data={stations}
+              keyExtractor={(s) => s.id}
+              keyboardShouldPersistTaps="handled"
+              ItemSeparatorComponent={() => (
+                <View style={styles.modalSep} />
+              )}
+              renderItem={({ item }) => (
+                <Pressable
+                  onPress={() => {
+                    setStationId(item.id);
+                    setStationPickerOpen(false);
+                  }}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [
+                    styles.modalRow,
+                    pressed && { backgroundColor: theme.bgMuted },
+                  ]}
+                >
+                  <Text style={styles.modalRowText} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  {stationId === item.id ? (
+                    <Ionicons
+                      name="checkmark"
+                      size={18}
+                      color={theme.primary}
+                    />
+                  ) : null}
+                </Pressable>
+              )}
+              ListEmptyComponent={
+                <Text style={styles.modalEmpty}>
+                  No stations yet. Add one in Profile.
+                </Text>
+              }
+            />
+          </View>
+        </View>
+      </Modal>
     </VendorScreenShell>
   );
 }
@@ -363,6 +468,11 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
       letterSpacing: 0.6,
       textTransform: "uppercase",
       marginBottom: 8,
+    },
+    helper: {
+      ...theme.type.bodySm,
+      color: theme.fgMuted,
+      marginTop: 8,
     },
     selectBtn: {
       flexDirection: "row",
