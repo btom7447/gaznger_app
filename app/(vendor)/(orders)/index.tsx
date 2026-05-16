@@ -62,6 +62,7 @@ export default function VendorOrdersScreen() {
   const router = useRouter();
   const theme = useTheme();
   const activeStationId = useVendorStationStore((s) => s.activeStationId);
+  const hasStations = useVendorStationStore((s) => s.stations.length > 0);
 
   const [filter, setFilter] = useState<FilterValue>("all");
   const [data, setData] = useState<OrdersApiResponse | null>(null);
@@ -69,16 +70,14 @@ export default function VendorOrdersScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchOrders = useCallback(async () => {
-    if (!activeStationId) {
-      setLoading(false);
-      return;
-    }
     try {
       const params = new URLSearchParams({
-        stationId: activeStationId,
         filter,
         limit: "30",
       });
+      // Omit the param when "All stations" is selected so the server
+      // returns orders across every station this vendor owns.
+      if (activeStationId) params.set("stationId", activeStationId);
       const res = await api.get<OrdersApiResponse>(
         `/api/vendor/orders?${params.toString()}`,
         { timeoutMs: 12_000 },
@@ -168,7 +167,7 @@ export default function VendorOrdersScreen() {
             <Skel height={84} radius={16} />
             <Skel height={84} radius={16} />
           </SkelStack>
-        ) : !activeStationId ? (
+        ) : !hasStations ? (
           <VendorEmptyState
             icon="business-outline"
             headline="No station yet"

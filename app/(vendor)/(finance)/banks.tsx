@@ -32,6 +32,53 @@ interface BankAccountRow {
   bvnVerified: boolean;
 }
 
+/**
+ * Deterministic-by-name color so each bank renders the same disc tint
+ * across screens. Pulled from a small Nigerian-bank brand palette.
+ */
+const BANK_BRAND_COLORS: Record<string, string> = {
+  gtb: "#E63946",
+  "guaranty trust": "#E63946",
+  access: "#0066AA",
+  zenith: "#E60023",
+  uba: "#D00C2E",
+  firstbank: "#0033A0",
+  "first bank": "#0033A0",
+  fcmb: "#5B0F4A",
+  fidelity: "#0F5132",
+  union: "#005DAA",
+  stanbic: "#0033A0",
+  sterling: "#D11243",
+  wema: "#5A189A",
+  polaris: "#7E22CE",
+  ecobank: "#1D6BB0",
+  keystone: "#0E4D64",
+  heritage: "#00A859",
+  citibank: "#003D7A",
+};
+
+function bankBrandColor(name: string): string {
+  const key = name.toLowerCase();
+  for (const [k, v] of Object.entries(BANK_BRAND_COLORS)) {
+    if (key.includes(k)) return v;
+  }
+  // Fallback — deterministic hash → muted palette slot.
+  const palette = ["#1A7F4F", "#2E73C8", "#9B2A22", "#B8900E", "#5B0F4A"];
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return palette[hash % palette.length];
+}
+
+function bankInitials(name: string): string {
+  const cleaned = name.replace(/bank|ltd|plc|nigeria/gi, "").trim();
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return name.slice(0, 2).toUpperCase();
+  if (tokens.length === 1) return tokens[0].slice(0, 3).toUpperCase();
+  return (tokens[0][0] + tokens[1][0]).toUpperCase();
+}
+
 export default function VendorBanksScreen() {
   const router = useRouter();
   const theme = useTheme();
@@ -180,68 +227,92 @@ export default function VendorBanksScreen() {
           />
         ) : (
           <View style={styles.list}>
-            {banks.map((b) => (
-              <VendorCard key={b._id}>
-                <View style={styles.row}>
-                  <View style={styles.iconDisc}>
-                    <Ionicons name="card" size={18} color={theme.primary} />
-                  </View>
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <View style={styles.titleRow}>
-                      <Text style={styles.bankName} numberOfLines={1}>
-                        {b.bankName}
+            {banks.map((b) => {
+              const brandColor = bankBrandColor(b.bankName);
+              return (
+                <VendorCard
+                  key={b._id}
+                  style={
+                    b.isPrimary
+                      ? {
+                          borderColor: theme.primary,
+                          borderWidth: 2,
+                        }
+                      : undefined
+                  }
+                >
+                  <View style={styles.row}>
+                    <View
+                      style={[
+                        styles.iconDisc,
+                        { backgroundColor: brandColor },
+                      ]}
+                    >
+                      <Text style={styles.iconDiscText}>
+                        {bankInitials(b.bankName)}
                       </Text>
-                      {b.isPrimary ? (
-                        <VendorPill tone="primary" size="sm">
-                          Primary
-                        </VendorPill>
-                      ) : null}
                     </View>
-                    <Text style={styles.acct} numberOfLines={1}>
-                      {b.accountNumber} · {b.accountName}
-                    </Text>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <View style={styles.titleRow}>
+                        <Text style={styles.bankName} numberOfLines={1}>
+                          {b.bankName}
+                          {b.accountNumber
+                            ? ` ••${b.accountNumber.slice(-4)}`
+                            : ""}
+                        </Text>
+                        {b.bvnVerified ? (
+                          <Ionicons
+                            name="shield-checkmark"
+                            size={14}
+                            color={theme.success}
+                          />
+                        ) : null}
+                      </View>
+                      <Text style={styles.acct} numberOfLines={1}>
+                        {b.accountName}
+                      </Text>
+                    </View>
+                    {b.isPrimary ? (
+                      <VendorPill tone="primary" size="sm">
+                        Primary
+                      </VendorPill>
+                    ) : null}
                   </View>
-                </View>
-                <View style={styles.actionRow}>
-                  {!b.isPrimary ? (
+                  <View style={styles.dashedDivider} />
+                  <View style={styles.actionRow}>
+                    {!b.isPrimary ? (
+                      <Pressable
+                        onPress={() => handleMakePrimary(b._id)}
+                        disabled={busyId === b._id}
+                        accessibilityRole="button"
+                        hitSlop={4}
+                        style={({ pressed }) => [
+                          styles.ghostBtn,
+                          busyId === b._id && { opacity: 0.5 },
+                          pressed && { opacity: 0.85 },
+                        ]}
+                      >
+                        <Text style={styles.ghostBtnText}>Make primary</Text>
+                      </Pressable>
+                    ) : null}
                     <Pressable
-                      onPress={() => handleMakePrimary(b._id)}
+                      onPress={() => handleRemove(b)}
                       disabled={busyId === b._id}
                       accessibilityRole="button"
+                      accessibilityLabel="Remove bank"
                       hitSlop={4}
                       style={({ pressed }) => [
-                        styles.ghostBtn,
+                        styles.removeBtn,
                         busyId === b._id && { opacity: 0.5 },
                         pressed && { opacity: 0.85 },
                       ]}
                     >
-                      <Text style={styles.ghostBtnText}>Make primary</Text>
+                      <Text style={styles.removeBtnText}>Remove</Text>
                     </Pressable>
-                  ) : (
-                    <View style={{ flex: 1 }} />
-                  )}
-                  <Pressable
-                    onPress={() => handleRemove(b)}
-                    disabled={busyId === b._id}
-                    accessibilityRole="button"
-                    accessibilityLabel="Remove bank"
-                    hitSlop={4}
-                    style={({ pressed }) => [
-                      styles.dangerBtn,
-                      busyId === b._id && { opacity: 0.5 },
-                      pressed && { opacity: 0.85 },
-                    ]}
-                  >
-                    <Ionicons
-                      name="trash-outline"
-                      size={16}
-                      color={theme.error}
-                    />
-                    <Text style={styles.dangerBtnText}>Remove</Text>
-                  </Pressable>
-                </View>
-              </VendorCard>
-            ))}
+                  </View>
+                </VendorCard>
+              );
+            })}
           </View>
         )}
       </ScrollView>
@@ -288,12 +359,24 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
       gap: 12,
     },
     iconDisc: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
+      width: 44,
+      height: 44,
+      borderRadius: 11,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: theme.primaryTint,
+    },
+    iconDiscText: {
+      color: "#fff",
+      fontSize: 11,
+      fontWeight: "800",
+      letterSpacing: 0.4,
+    },
+    dashedDivider: {
+      marginTop: 12,
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: theme.divider,
+      borderStyle: "dashed",
     },
     titleRow: {
       flexDirection: "row",
@@ -314,7 +397,6 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
       flexDirection: "row",
       alignItems: "center",
       gap: 10,
-      marginTop: 12,
     },
     ghostBtn: {
       flex: 1,
@@ -330,21 +412,14 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
       color: theme.fg,
       fontWeight: "700",
     },
-    dangerBtn: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 4,
-      borderWidth: 1,
-      borderColor: theme.errorTint,
-      backgroundColor: theme.errorTint,
-      paddingHorizontal: 14,
+    removeBtn: {
+      marginLeft: "auto",
+      paddingHorizontal: 6,
       paddingVertical: 8,
-      borderRadius: theme.radius.pill,
     },
-    dangerBtnText: {
+    removeBtnText: {
       ...theme.type.bodySm,
       color: theme.error,
-      fontWeight: "700",
+      fontWeight: "800",
     },
   });

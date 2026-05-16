@@ -15,6 +15,7 @@ import {
   Skel,
   SkelStack,
   TxRow,
+  VendorCard,
   VendorEmptyState,
   VendorScreenShell,
 } from "@/components/ui/vendor";
@@ -147,8 +148,8 @@ export default function VendorTransactionsScreen() {
             }
           />
         ) : (
-          <View style={styles.list}>
-            {data.transactions.map((tx) => (
+          <VendorCard noPadding>
+            {data.transactions.map((tx, i, arr) => (
               <TxRow
                 key={tx.id}
                 description={tx.description}
@@ -159,6 +160,7 @@ export default function VendorTransactionsScreen() {
                 amountFormatted={tx.amountFormatted}
                 signed={tx.signed}
                 state={tx.state}
+                last={i === arr.length - 1}
                 onPress={() =>
                   router.push(
                     `/(vendor)/(finance)/transaction/${tx.id}` as never,
@@ -166,7 +168,7 @@ export default function VendorTransactionsScreen() {
                 }
               />
             ))}
-          </View>
+          </VendorCard>
         )}
       </ScrollView>
     </VendorScreenShell>

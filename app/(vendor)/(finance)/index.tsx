@@ -15,6 +15,7 @@ import {
   Skel,
   SkelStack,
   TxRow,
+  VendorCard,
   VendorEmptyState,
   VendorScreenShell,
   WalletHero,
@@ -26,6 +27,12 @@ interface WalletApiResponse {
   available: number;
   pending: number;
   escrow: number;
+  /** Optional — server may not expose yet. */
+  pendingSettle?: number;
+  /** Optional — sum of fees deducted today. Defaults to undefined. */
+  afterFeesToday?: number;
+  /** Optional — human label like "Tomorrow". */
+  nextPayoutLabel?: string;
   currency: "NGN";
 }
 
@@ -147,7 +154,15 @@ export default function VendorFinanceScreen() {
             <WalletHero
               available={wallet.available}
               escrow={wallet.escrow}
-              pending={wallet.pending}
+              pendingSettle={wallet.pendingSettle ?? wallet.pending}
+              afterFeesToday={wallet.afterFeesToday}
+              nextPayoutLabel={wallet.nextPayoutLabel}
+              onWithdrawPress={() =>
+                router.push("/(vendor)/(finance)/withdraw" as never)
+              }
+              onSchedulePress={() =>
+                router.push("/(vendor)/(finance)/payouts" as never)
+              }
             />
 
             {walletErrored ? (
@@ -169,39 +184,6 @@ export default function VendorFinanceScreen() {
                 }
               />
             ) : null}
-
-            <View style={styles.actionsRow}>
-              <Pressable
-                onPress={() =>
-                  router.push("/(vendor)/(finance)/withdraw" as never)
-                }
-                accessibilityRole="button"
-                accessibilityLabel="Withdraw to bank"
-                hitSlop={4}
-                style={({ pressed }) => [
-                  styles.actionPrimary,
-                  pressed && { opacity: 0.85 },
-                ]}
-              >
-                <Ionicons name="arrow-up" size={16} color={theme.fgOnPrimary} />
-                <Text style={styles.actionPrimaryText}>Withdraw</Text>
-              </Pressable>
-              <Pressable
-                onPress={() =>
-                  router.push("/(vendor)/(finance)/earnings" as never)
-                }
-                accessibilityRole="button"
-                accessibilityLabel="Open earnings"
-                hitSlop={4}
-                style={({ pressed }) => [
-                  styles.actionGhost,
-                  pressed && { opacity: 0.85 },
-                ]}
-              >
-                <Ionicons name="stats-chart" size={16} color={theme.fg} />
-                <Text style={styles.actionGhostText}>Earnings</Text>
-              </Pressable>
-            </View>
 
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>Manage</Text>
@@ -251,8 +233,8 @@ export default function VendorFinanceScreen() {
                 </Pressable>
               </View>
               {recent && recent.length > 0 ? (
-                <View style={styles.list}>
-                  {recent.map((tx) => (
+                <VendorCard noPadding>
+                  {recent.map((tx, i, arr) => (
                     <TxRow
                       key={tx.id}
                       description={tx.description}
@@ -263,10 +245,11 @@ export default function VendorFinanceScreen() {
                       amountFormatted={tx.amountFormatted}
                       signed={tx.signed}
                       state={tx.state}
+                      last={i === arr.length - 1}
                       onPress={() => handleTxPress(tx.id)}
                     />
                   ))}
-                </View>
+                </VendorCard>
               ) : (
                 <Text style={styles.emptyText}>
                   No transactions yet. Earnings show up here.
@@ -286,41 +269,6 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
       padding: 20,
       gap: 14,
       paddingBottom: 80,
-    },
-    actionsRow: {
-      flexDirection: "row",
-      gap: 10,
-    },
-    actionPrimary: {
-      flex: 1,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 6,
-      backgroundColor: theme.primary,
-      paddingVertical: 12,
-      borderRadius: theme.radius.pill,
-    },
-    actionPrimaryText: {
-      ...theme.type.body,
-      color: theme.fgOnPrimary,
-      fontWeight: "800",
-    },
-    actionGhost: {
-      flex: 1,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 6,
-      borderWidth: 1,
-      borderColor: theme.border,
-      paddingVertical: 12,
-      borderRadius: theme.radius.pill,
-    },
-    actionGhostText: {
-      ...theme.type.body,
-      color: theme.fg,
-      fontWeight: "700",
     },
     section: {
       gap: 8,

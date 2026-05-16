@@ -59,6 +59,7 @@ export default function VendorSuppliesScreen() {
   const router = useRouter();
   const theme = useTheme();
   const activeStationId = useVendorStationStore((s) => s.activeStationId);
+  const hasStations = useVendorStationStore((s) => s.stations.length > 0);
 
   const [filter, setFilter] = useState<FilterValue>("in-flight");
   const [data, setData] = useState<BulkApiResponse | null>(null);
@@ -68,16 +69,12 @@ export default function VendorSuppliesScreen() {
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   const fetch = useCallback(async () => {
-    if (!activeStationId) {
-      setLoading(false);
-      return;
-    }
     try {
       const params = new URLSearchParams({
-        stationId: activeStationId,
         filter,
         limit: "30",
       });
+      if (activeStationId) params.set("stationId", activeStationId);
       const res = await api.get<BulkApiResponse>(
         `/api/vendor/bulk-purchases?${params.toString()}`,
         { timeoutMs: 12_000 },
@@ -173,7 +170,7 @@ export default function VendorSuppliesScreen() {
             <Skel height={130} radius={16} />
             <Skel height={130} radius={16} />
           </SkelStack>
-        ) : !activeStationId ? (
+        ) : !hasStations ? (
           <VendorEmptyState
             icon="business-outline"
             headline="No station yet"

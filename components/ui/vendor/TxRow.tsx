@@ -24,6 +24,11 @@ export interface TxRowProps {
   signed: "credit" | "debit";
   state?: "pending" | "available";
   onPress?: () => void;
+  /**
+   * When the row sits in a stacked list (Activity card), set true on
+   * the last row so the bottom divider line is suppressed.
+   */
+  last?: boolean;
 }
 
 function iconForKind(kind: string): {
@@ -106,6 +111,7 @@ export default function TxRow({
   signed,
   state,
   onPress,
+  last,
 }: TxRowProps) {
   const theme = useTheme();
   const iconCfg = iconForKind(kind);
@@ -151,14 +157,22 @@ export default function TxRow({
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={a11y}
-        style={({ pressed }) => [styles.row, pressed && { opacity: 0.92 }]}
+        style={({ pressed }) => [
+          styles.row,
+          last ? null : styles.rowDivided,
+          pressed && { opacity: 0.92 },
+        ]}
       >
         {body}
       </Pressable>
     );
   }
   return (
-    <View style={styles.row} accessible accessibilityLabel={a11y}>
+    <View
+      style={[styles.row, last ? null : styles.rowDivided]}
+      accessible
+      accessibilityLabel={a11y}
+    >
       {body}
     </View>
   );
@@ -171,16 +185,17 @@ const makeStyles = (theme: Theme, palette: { bg: string; fg: string }) =>
       alignItems: "center",
       gap: 12,
       paddingHorizontal: 14,
-      paddingVertical: 12,
-      borderRadius: theme.radius.lg,
-      backgroundColor: theme.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.border,
+      paddingVertical: 14,
+      backgroundColor: "transparent",
+    },
+    rowDivided: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.divider,
     },
     iconWrap: {
       width: 36,
       height: 36,
-      borderRadius: 12,
+      borderRadius: 10,
       backgroundColor: palette.bg,
       alignItems: "center",
       justifyContent: "center",

@@ -12,6 +12,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import {
   Skel,
   SkelStack,
+  VendorCard,
   VendorEmptyState,
   VendorPill,
   type PillTone,
@@ -53,6 +54,15 @@ const STATUS_LABEL: Record<PayoutRow["status"], string> = {
   rejected: "Rejected",
   failed: "Failed",
 };
+
+const STATUS_DOT: Record<PayoutRow["status"], "primary" | "success" | "error"> =
+  {
+    pending: "primary",
+    approved: "primary",
+    processing: "primary",
+    rejected: "error",
+    failed: "error",
+  };
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-NG", {
@@ -101,22 +111,27 @@ export default function PayoutsScreen() {
     fetch();
   }, [fetch]);
 
+  // The next scheduled / approved-but-not-paid payout, if any. Drives
+  // the primary-tinted card up top.
+  const nextPayout = data?.payouts.find(
+    (p) => p.status === "approved" || p.status === "pending",
+  );
+
   return (
     <VendorScreenShell
       title="Payouts"
       rightSlot={
         <Pressable
-          onPress={() => router.push("/(vendor)/(finance)/withdraw" as never)}
+          onPress={() => router.push("/(vendor)/(finance)/banks" as never)}
           accessibilityRole="button"
-          accessibilityLabel="New withdraw"
+          accessibilityLabel="Manage banks"
           hitSlop={6}
           style={({ pressed }) => [
-            styles.newBtn,
+            styles.iconBtn,
             pressed && { opacity: 0.85 },
           ]}
         >
-          <Ionicons name="add" size={16} color={theme.fgOnPrimary} />
-          <Text style={styles.newBtnText}>Withdraw</Text>
+          <Ionicons name="card" size={18} color={theme.fg} />
         </Pressable>
       }
     >
@@ -149,6 +164,7 @@ export default function PayoutsScreen() {
           <SkelStack gap={10}>
             <Skel height={86} radius={16} />
             <Skel height={86} radius={16} />
+            <Skel height={86} radius={16} />
           </SkelStack>
         ) : !data || data.payouts.length === 0 ? (
           <VendorEmptyState
@@ -161,51 +177,150 @@ export default function PayoutsScreen() {
             }
           />
         ) : (
-          <View style={styles.list}>
-            {data.payouts.map((p) => (
-              <Pressable
-                key={p.id}
-                onPress={() =>
-                  router.push(`/(vendor)/(finance)/payout/${p.id}` as never)
-                }
-                accessibilityRole="button"
-                accessibilityLabel={`${p.amountFormatted} to ${p.bankName}, ${STATUS_LABEL[p.status]}`}
-                style={({ pressed }) => [
-                  styles.card,
-                  pressed && { opacity: 0.92 },
-                ]}
-              >
-                <View style={styles.iconWrap}>
-                  <Ionicons name="paper-plane" size={18} color={theme.primary} />
+          <>
+            {/* Daily schedule explainer */}
+            <VendorCard>
+              <View style={styles.scheduleRow}>
+                <View style={styles.scheduleIconWrap}>
+                  <Ionicons name="refresh" size={20} color={theme.primary} />
                 </View>
-                <View style={{ flex: 1, gap: 4 }}>
-                  <View style={styles.headerRow}>
-                    <Text style={styles.amount} numberOfLines={1}>
-                      {p.amountFormatted}
-                    </Text>
-                    <VendorPill tone={STATUS_TONE[p.status]} size="sm" dot>
-                      {STATUS_LABEL[p.status]}
-                    </VendorPill>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.scheduleTitle}>Instant payouts</Text>
+                  <Text style={styles.scheduleSub}>
+                    Settled wallet balance lands in your bank within 60 sec.
+                  </Text>
+                </View>
+              </View>
+            </VendorCard>
+
+            {/* Next payout (primary-tinted) */}
+            {nextPayout ? (
+              <VendorCard tone="primary">
+                <View style={styles.scheduleRow}>
+                  <View style={styles.nextIconWrap}>
+                    <Ionicons name="paper-plane" size={18} color="#fff" />
                   </View>
-                  <Text style={styles.sub} numberOfLines={1}>
-                    {p.bankName}
-                    {p.accountNumber ? `  ·  ${p.accountNumber}` : ""}
-                  </Text>
-                  <Text style={styles.date}>
-                    {fmtDate(p.processedAt ?? p.createdAt)}
-                  </Text>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.nextEyebrow}>Next payout</Text>
+                    <Text style={styles.nextAmount} numberOfLines={1}>
+                      {nextPayout.amountFormatted}
+                    </Text>
+                    <Text style={styles.nextSub} numberOfLines={1}>
+                      {STATUS_LABEL[nextPayout.status]} ·{" "}
+                      {nextPayout.bankName}
+                      {nextPayout.accountNumber
+                        ? ` ••${nextPayout.accountNumber.slice(-4)}`
+                        : ""}
+                    </Text>
+                  </View>
                 </View>
-                <Ionicons
-                  name="chevron-forward"
-                  size={18}
-                  color={theme.fgSubtle}
+              </VendorCard>
+            ) : null}
+
+            <Text style={styles.sectionHeader}>History</Text>
+            <VendorCard noPadding>
+              {data.payouts.map((p, i, arr) => (
+                <PayoutListRow
+                  key={p.id}
+                  payout={p}
+                  last={i === arr.length - 1}
+                  onPress={() =>
+                    router.push(
+                      `/(vendor)/(finance)/payout/${p.id}` as never,
+                    )
+                  }
                 />
-              </Pressable>
-            ))}
-          </View>
+              ))}
+            </VendorCard>
+          </>
         )}
       </ScrollView>
     </VendorScreenShell>
+  );
+}
+
+function PayoutListRow({
+  payout,
+  last,
+  onPress,
+}: {
+  payout: PayoutRow;
+  last?: boolean;
+  onPress?: () => void;
+}) {
+  const theme = useTheme();
+  const dotColor =
+    STATUS_DOT[payout.status] === "error"
+      ? theme.error
+      : STATUS_DOT[payout.status] === "success"
+        ? theme.success
+        : theme.primary;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${payout.amountFormatted} to ${payout.bankName}, ${STATUS_LABEL[payout.status]}`}
+      style={({ pressed }) => [
+        {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 12,
+          paddingHorizontal: 14,
+          paddingVertical: 14,
+          borderBottomWidth: last ? 0 : StyleSheet.hairlineWidth,
+          borderBottomColor: theme.divider,
+        },
+        pressed && { opacity: 0.92 },
+      ]}
+    >
+      <View
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 999,
+          backgroundColor: dotColor,
+        }}
+      />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <Text
+            style={{
+              ...theme.type.body,
+              color: theme.fg,
+              fontWeight: "800",
+              flexShrink: 1,
+            }}
+            numberOfLines={1}
+          >
+            {payout.amountFormatted}
+          </Text>
+          <VendorPill tone={STATUS_TONE[payout.status]} size="sm">
+            {STATUS_LABEL[payout.status]}
+          </VendorPill>
+        </View>
+        <Text
+          style={{
+            ...theme.type.bodySm,
+            color: theme.fgMuted,
+            marginTop: 2,
+          }}
+          numberOfLines={1}
+        >
+          {fmtDate(payout.processedAt ?? payout.createdAt)} ·{" "}
+          {payout.bankName}
+          {payout.accountNumber
+            ? ` ••${payout.accountNumber.slice(-4)}`
+            : ""}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={14} color={theme.fgSubtle} />
+    </Pressable>
   );
 }
 
@@ -227,57 +342,71 @@ const makeStyles = (theme: ReturnType<typeof useTheme>) =>
       color: theme.fgMuted,
       fontWeight: "600",
     },
-    list: { gap: 10 },
-    card: {
+    iconBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: theme.bgMuted,
+    },
+    scheduleRow: {
       flexDirection: "row",
       alignItems: "center",
       gap: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 14,
-      borderRadius: theme.radius.lg,
-      backgroundColor: theme.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.border,
     },
-    iconWrap: {
-      width: 36,
-      height: 36,
+    scheduleIconWrap: {
+      width: 44,
+      height: 44,
       borderRadius: 12,
       backgroundColor: theme.primaryTint,
       alignItems: "center",
       justifyContent: "center",
     },
-    headerRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-    },
-    amount: {
+    scheduleTitle: {
       ...theme.type.body,
       color: theme.fg,
       fontWeight: "800",
-      flexShrink: 1,
     },
-    sub: {
+    scheduleSub: {
       ...theme.type.bodySm,
       color: theme.fgMuted,
+      marginTop: 2,
     },
-    date: {
-      ...theme.type.caption,
-      color: theme.fgSubtle,
-    },
-    newBtn: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
+    nextIconWrap: {
+      width: 40,
+      height: 40,
+      borderRadius: 11,
       backgroundColor: theme.primary,
-      paddingHorizontal: 12,
-      paddingVertical: 7,
-      borderRadius: theme.radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
     },
-    newBtnText: {
-      ...theme.type.bodySm,
-      color: theme.fgOnPrimary,
+    nextEyebrow: {
+      fontSize: 11,
       fontWeight: "800",
+      color: theme.primary,
+      letterSpacing: 0.4,
+      textTransform: "uppercase",
+    },
+    nextAmount: {
+      fontSize: 22,
+      fontWeight: "800",
+      color: theme.primary,
+      marginTop: 2,
+    },
+    nextSub: {
+      ...theme.type.bodySm,
+      color: theme.primary,
+      opacity: 0.85,
+      marginTop: 2,
+    },
+    sectionHeader: {
+      ...theme.type.caption,
+      color: theme.fgMuted,
+      fontWeight: "700",
+      letterSpacing: 0.6,
+      textTransform: "uppercase",
+      marginTop: 4,
+      paddingHorizontal: 2,
     },
   });

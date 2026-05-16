@@ -24,6 +24,8 @@ export interface VendorCardProps {
   tone?: "neutral" | "primary" | "success" | "warning" | "error" | "info";
   /** Reduce padding for nested cards. */
   tight?: boolean;
+  /** Remove all internal padding (for list-of-rows where rows pad themselves). */
+  noPadding?: boolean;
   /** Optional border override; defaults to a hairline border. */
   bordered?: boolean;
   onPress?: () => void;
@@ -59,6 +61,7 @@ function toneFor(theme: Theme, tone: NonNullable<VendorCardProps["tone"]>): Tone
 export default function VendorCard({
   tone = "neutral",
   tight = false,
+  noPadding = false,
   bordered = true,
   onPress,
   accessibilityLabel,
@@ -69,8 +72,8 @@ export default function VendorCard({
   const theme = useTheme();
   const palette = toneFor(theme, tone);
   const styles = useMemo(
-    () => makeStyles(theme, palette, tight, bordered),
-    [theme, palette, tight, bordered],
+    () => makeStyles(theme, palette, tight, bordered, noPadding),
+    [theme, palette, tight, bordered, noPadding],
   );
 
   if (onPress) {
@@ -99,13 +102,15 @@ const makeStyles = (
   palette: TonePalette,
   tight: boolean,
   bordered: boolean,
+  noPadding: boolean,
 ) =>
   StyleSheet.create({
     wrap: {
       backgroundColor: palette.bg,
       borderRadius: theme.radius.lg,
-      paddingHorizontal: tight ? 12 : 14,
-      paddingVertical: tight ? 10 : 14,
+      paddingHorizontal: noPadding ? 0 : tight ? 12 : 14,
+      paddingVertical: noPadding ? 0 : tight ? 10 : 14,
+      overflow: "hidden",
       borderWidth: bordered ? StyleSheet.hairlineWidth : 0,
       borderColor: palette.border,
     },

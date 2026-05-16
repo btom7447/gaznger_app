@@ -181,7 +181,9 @@ export default function VendorTodayScreen() {
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   const handleNotifsPress = useCallback(() => {
-    router.push("/(screens)/notification" as never);
+    // Vendor + customer share the same notifications surface — same UI
+    // language, same /api/notifications backend, role-agnostic.
+    router.push("/(screens)/notifications-customer" as never);
   }, [router]);
 
   return (
@@ -261,6 +263,10 @@ export default function VendorTodayScreen() {
                   ordersQueue: data.breakdown.ordersQueue,
                   ordersInFlight: data.breakdown.ordersInFlight,
                   ordersDone: data.breakdown.ordersDone,
+                  eyebrow:
+                    data.perStation.length > 0
+                      ? "All stations · Today"
+                      : "Revenue · Today",
                 }}
                 perStation={data.perStation.map((s) => ({
                   stationId: s.stationId,
@@ -271,7 +277,7 @@ export default function VendorTodayScreen() {
                   ordersQueue: s.ordersQueue,
                   ordersInFlight: s.ordersInFlight,
                   ordersDone: s.ordersDone,
-                  eyebrow: s.stationName,
+                  eyebrow: `${s.stationName} · Today`,
                 }))}
               />
             </View>

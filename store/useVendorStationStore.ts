@@ -28,13 +28,19 @@ export interface VendorStationLite {
 interface VendorStationState {
   /** All stations this vendor owns. Mirrored from /vendor/stations. */
   stations: VendorStationLite[];
-  /** _id of the currently-active station, or null before first selection. */
+  /**
+   * _id of the currently-active station. `null` means "all stations"
+   * — Orders/Supplies/Finance render across every station and the
+   * switcher chip surfaces an "All stations" pill. The user opts into
+   * a single station explicitly via the switcher.
+   */
   activeStationId: string | null;
   /** Hydration flag for callers that need to wait. */
   hasHydrated: boolean;
 
   setStations: (stations: VendorStationLite[]) => void;
-  setActiveStation: (id: string) => void;
+  /** Pass `null` to clear the scope back to "all stations". */
+  setActiveStation: (id: string | null) => void;
   /** Convenience getter. */
   activeStation: () => VendorStationLite | null;
   reset: () => void;
@@ -49,18 +55,24 @@ export const useVendorStationStore = create<VendorStationState>()(
 
       setStations: (stations) =>
         set((s) => {
-          // Auto-select first station on first load. Keep the prior
-          // selection if it's still in the new list (server refresh).
+          // Default scope is "all stations" — keep activeStationId
+          // null on first load. Preserve a prior pick if the station
+          // still exists after a server refresh; otherwise clear back
+          // to all-stations.
           const prior = s.activeStationId;
           const stillExists =
             prior && stations.some((st) => st.id === prior);
-          const nextActive = stillExists
-            ? prior
-            : (stations[0]?.id ?? null);
-          return { stations, activeStationId: nextActive };
+          return {
+            stations,
+            activeStationId: stillExists ? prior : null,
+          };
         }),
 
       setActiveStation: (id) => {
+        if (id === null) {
+          set({ activeStationId: null });
+          return;
+        }
         const exists = get().stations.some((s) => s.id === id);
         if (!exists) return;
         set({ activeStationId: id });
