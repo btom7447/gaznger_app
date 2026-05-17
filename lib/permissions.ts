@@ -37,13 +37,27 @@ function normalise(status: string): PermissionStatus {
 /* ─────────── Location ─────────── */
 
 export async function getLocationStatus(): Promise<PermissionStatus> {
-  const res = await Location.getForegroundPermissionsAsync();
-  return normalise(res.status);
+  try {
+    const res = await Location.getForegroundPermissionsAsync();
+    return normalise(res.status);
+  } catch (err) {
+    // Native throws when the plist key is missing (older builds before
+    // app.json picked up the NSLocation* additions). Treat as denied so
+    // signup / map screens don't crash — the user can grant later from
+    // Settings once a fresh dev client lands.
+    console.warn("[permissions] getLocationStatus failed:", err);
+    return "denied";
+  }
 }
 
 export async function requestLocation(): Promise<PermissionStatus> {
-  const res = await Location.requestForegroundPermissionsAsync();
-  return normalise(res.status);
+  try {
+    const res = await Location.requestForegroundPermissionsAsync();
+    return normalise(res.status);
+  } catch (err) {
+    console.warn("[permissions] requestLocation failed:", err);
+    return "denied";
+  }
 }
 
 /**
@@ -57,10 +71,15 @@ export async function requestLocation(): Promise<PermissionStatus> {
  * an unexpected prompt order.
  */
 export async function requestBackgroundLocation(): Promise<PermissionStatus> {
-  const fg = await Location.getForegroundPermissionsAsync();
-  if (fg.status !== "granted") return "denied";
-  const res = await Location.requestBackgroundPermissionsAsync();
-  return normalise(res.status);
+  try {
+    const fg = await Location.getForegroundPermissionsAsync();
+    if (fg.status !== "granted") return "denied";
+    const res = await Location.requestBackgroundPermissionsAsync();
+    return normalise(res.status);
+  } catch (err) {
+    console.warn("[permissions] requestBackgroundLocation failed:", err);
+    return "denied";
+  }
 }
 
 /* ─────────── Notifications ─────────── */

@@ -137,16 +137,28 @@ export default function PermissionsScreen() {
     // unpredictably. Notifications first (one prompt, fast), then
     // location, then camera. Rider gets background location after
     // foreground is granted.
+    //
+    // Each call is wrapped so a single OS-level failure (missing plist
+    // key on an old build, unsupported device, etc.) never blocks the
+    // signup commit that follows. Users can grant from Settings later.
     const wantsLocation = items.some((i) => i.icon === "location");
     const wantsNotifications = items.some((i) => i.icon === "notifications");
     const wantsCamera = items.some((i) => i.icon === "camera");
 
-    if (wantsNotifications) await requestNotifications();
+    const safe = async <T,>(label: string, fn: () => Promise<T>): Promise<T | null> => {
+      try {
+        return await fn();
+      } catch (err) {
+        console.warn(`[permissions] ${label} failed:`, err);
+        return null;
+      }
+    };
+
+    if (wantsNotifications) await safe("notifications", requestNotifications);
     if (wantsLocation) {
-      const fg = await requestLocation();
+      const fg = await safe("location", requestLocation);
       if (role === "rider" && fg === "granted") {
-        // Two-step: explicit secondary prompt with disclosure copy.
-        const bg = await requestBackgroundLocation();
+        const bg = await safe("background-location", requestBackgroundLocation);
         if (bg !== "granted") {
           toast.info("Background location off", {
             description:
@@ -155,7 +167,7 @@ export default function PermissionsScreen() {
         }
       }
     }
-    if (wantsCamera) await requestCamera();
+    if (wantsCamera) await safe("camera", requestCamera);
   }, [items, role]);
 
   const handleContinue = useCallback(async () => {
