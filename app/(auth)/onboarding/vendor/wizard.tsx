@@ -20,7 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
 import { Theme, useTheme } from "@/constants/theme";
-import { AuthScreenContainer } from "@/components/ui/auth";
+import { AuthScreenContainer, V7Field } from "@/components/ui/auth";
 import {
   AddressSheet,
   type AddressResult,
@@ -69,6 +69,39 @@ interface ResolveResp {
 }
 
 const DEFAULT_HOURS = { open: "06:00", close: "22:00" };
+
+const BANK_SHORT_NAMES: Record<string, string> = {
+  "guaranty trust bank": "GTBank",
+  "access bank": "Access",
+  "zenith bank": "Zenith",
+  "first bank of nigeria": "First Bank",
+  "united bank for africa": "UBA",
+  "ecobank nigeria": "Ecobank",
+  "stanbic ibtc bank": "Stanbic",
+  "polaris bank": "Polaris",
+  "sterling bank": "Sterling",
+  "fidelity bank": "Fidelity",
+  "wema bank": "Wema",
+  "union bank of nigeria": "Union",
+  "kuda microfinance bank": "Kuda",
+  "opay digital services limited (opay)": "OPay",
+  "palmpay": "PalmPay",
+};
+
+function bankShortName(name: string): string {
+  return BANK_SHORT_NAMES[name.toLowerCase()] ?? name;
+}
+
+function bankInitials(name: string): string {
+  const short = bankShortName(name);
+  return short
+    .split(/\s+/)
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
 
 export default function VendorWizardScreen() {
   const theme = useTheme();
@@ -336,6 +369,7 @@ export default function VendorWizardScreen() {
   return (
     <AuthScreenContainer
       contentStyle={{ paddingTop: 0, paddingHorizontal: 0 }}
+      background={theme.bgMuted}
       footer={
         step === 3 ? (
           <View style={{ gap: 8 }}>
@@ -622,32 +656,29 @@ function Step1Business({
         styles={styles}
       />
       <View style={styles.fields}>
-        <Field
+        <V7Field
           label="Owner name"
           required
           value={ownerName}
           onChangeText={setOwnerName}
           placeholder="Your full name"
-          theme={theme}
           autoCapitalize="words"
         />
-        <Field
+        <V7Field
           label="Business name"
           required
           hint="As you'd want it shown to customers."
           value={businessName}
           onChangeText={setBusinessName}
           placeholder="e.g. Abkon Oil Ltd"
-          theme={theme}
           autoCapitalize="words"
         />
-        <Field
+        <V7Field
           label="Business email"
           required
           value={businessEmail}
           onChangeText={setBusinessEmail}
           placeholder="business@example.com"
-          theme={theme}
           keyboardType="email-address"
           autoCapitalize="none"
         />
@@ -708,37 +739,36 @@ function Step2Station({
         styles={styles}
       />
       <View style={styles.fields}>
-        <Field
+        <V7Field
           label="Station name"
           required
           hint="Defaults to your business name if you leave it blank."
           value={stationName}
           onChangeText={setStationName}
           placeholder={businessName || "e.g. Abkon — Lekki"}
-          theme={theme}
           autoCapitalize="words"
         />
 
-        {/* Address picker */}
-        <Pressable
-          onPress={onPickAddress}
-          accessibilityRole="button"
-          accessibilityLabel={
-            stationAddress
-              ? `Station address: ${stationAddress.address}. Tap to change.`
-              : "Pick station address"
-          }
-          style={({ pressed }) => [
-            styles.addressBlock,
-            stationAddress ? styles.addressBlockFilled : null,
-            pressed && { opacity: 0.94 },
-          ]}
-        >
-          <Text style={styles.fieldLabel}>
-            Address{" "}
-            <Text style={{ color: theme.palette.green700 }}>·</Text>
-          </Text>
-          <View style={styles.addressRow}>
+        {/* Address picker — opens AddressSheet for Places autocomplete */}
+        <View>
+          <View style={styles.labelRow}>
+            <Text style={styles.fieldLabel}>Address</Text>
+            <Text style={styles.requiredMark}> ·</Text>
+          </View>
+          <Pressable
+            onPress={onPickAddress}
+            accessibilityRole="button"
+            accessibilityLabel={
+              stationAddress
+                ? `Station address: ${stationAddress.address}. Tap to change.`
+                : "Pick station address"
+            }
+            style={({ pressed }) => [
+              styles.addressField,
+              stationAddress ? styles.addressFieldFilled : null,
+              pressed && { opacity: 0.94 },
+            ]}
+          >
             <Ionicons
               name="location"
               size={18}
@@ -749,42 +779,59 @@ function Step2Station({
                 styles.addressText,
                 !stationAddress && { color: theme.fgMuted },
               ]}
-              numberOfLines={2}
+              numberOfLines={1}
             >
               {stationAddress
                 ? stationAddress.address
-                : "Search & drop a pin"}
+                : "Type to search Google Places"}
             </Text>
             <Ionicons
               name={stationAddress ? "create-outline" : "chevron-forward"}
               size={18}
               color={theme.fgMuted}
             />
-          </View>
-          {stationAddress ? (
-            <Text style={styles.addressMeta} numberOfLines={1}>
-              {stationAddress.lga ? `${stationAddress.lga}, ` : ""}
-              {stationAddress.stateLabel || stationAddress.state}
-            </Text>
-          ) : (
-            <Text style={styles.fieldHint}>
+          </Pressable>
+          {!stationAddress ? (
+            <Text style={styles.fieldHintInline}>
               We use this to match nearby customers.
             </Text>
-          )}
-        </Pressable>
+          ) : null}
+        </View>
+
+        {/* State + LGA — auto-filled from Places, displayed as 2-col grid */}
+        {stationAddress ? (
+          <View style={styles.gridRow}>
+            <View style={styles.gridCol}>
+              <Text style={styles.fieldLabel}>State</Text>
+              <View style={styles.readonlyField}>
+                <Text style={styles.readonlyText} numberOfLines={1}>
+                  {stationAddress.stateLabel || stationAddress.state || "—"}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.gridCol}>
+              <Text style={styles.fieldLabel}>LGA</Text>
+              <View style={styles.readonlyField}>
+                <Text style={styles.readonlyText} numberOfLines={1}>
+                  {stationAddress.lga || "—"}
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
 
         {/* Operating hours */}
         <View>
           <Text style={styles.fieldLabel}>Operating hours</Text>
           <View style={styles.hoursRow}>
-            <TimeField
+            <TimePickerCard
               label="Opens"
               value={openTime}
               onChange={setOpenTime}
               theme={theme}
               styles={styles}
             />
-            <TimeField
+            <TimePickerCard
               label="Closes"
               value={closeTime}
               onChange={setCloseTime}
@@ -845,7 +892,7 @@ function Step2Station({
   );
 }
 
-function TimeField({
+function TimePickerCard({
   label,
   value,
   onChange,
@@ -858,20 +905,36 @@ function TimeField({
   theme: Theme;
   styles: ReturnType<typeof makeStyles>;
 }) {
+  // Tappable card UI per v7 design. We don't yet have a native time
+  // picker dep, so the card focuses an inline TextInput on press — same
+  // visual language as the spec, plus a fallback that works today.
+  const inputRef = React.useRef<TextInput>(null);
   return (
-    <View style={{ flex: 1 }}>
-      <Text style={styles.timeFieldLabel}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChange}
-        placeholder="06:00"
-        placeholderTextColor={theme.fgMuted}
-        style={styles.timeInput}
-        keyboardType="numbers-and-punctuation"
-        maxLength={5}
-        accessibilityLabel={`${label} time`}
-      />
-    </View>
+    <Pressable
+      onPress={() => inputRef.current?.focus()}
+      accessibilityRole="button"
+      accessibilityLabel={`${label} time, ${value}`}
+      style={({ pressed }) => [
+        styles.timeCard,
+        pressed && { opacity: 0.94 },
+      ]}
+    >
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.timeCardLabel}>{label}</Text>
+        <TextInput
+          ref={inputRef}
+          value={value}
+          onChangeText={onChange}
+          placeholder="06:00"
+          placeholderTextColor={theme.fgMuted}
+          style={styles.timeCardValue}
+          keyboardType="numbers-and-punctuation"
+          maxLength={5}
+          accessibilityLabel={`${label} time`}
+        />
+      </View>
+      <Ionicons name="chevron-down" size={16} color={theme.fgMuted} />
+    </Pressable>
   );
 }
 
@@ -917,15 +980,18 @@ function FuelRow({
         </Text>
       </View>
       {selected ? (
-        <TextInput
-          value={price}
-          onChangeText={(t) => onPrice(t.replace(/[^0-9.]/g, ""))}
-          placeholder="0"
-          placeholderTextColor={theme.fgMuted}
-          keyboardType="decimal-pad"
-          style={fuelStyles(theme).priceInput}
-          accessibilityLabel={`${fuel.name} price`}
-        />
+        <View style={fuelStyles(theme).pricePill}>
+          <Text style={fuelStyles(theme).pricePrefix}>₦</Text>
+          <TextInput
+            value={price}
+            onChangeText={(t) => onPrice(t.replace(/[^0-9.]/g, ""))}
+            placeholder="0"
+            placeholderTextColor={theme.fgMuted}
+            keyboardType="decimal-pad"
+            style={fuelStyles(theme).priceInput}
+            accessibilityLabel={`${fuel.name} price`}
+          />
+        </View>
       ) : null}
     </View>
   );
@@ -972,7 +1038,9 @@ function Step3Bank({
             onPress={onOpenPicker}
             disabled={banks === null}
             accessibilityRole="button"
-            accessibilityLabel="Choose bank"
+            accessibilityLabel={
+              pickedBank ? `Bank: ${pickedBank.name}. Tap to change.` : "Choose bank"
+            }
             style={({ pressed }) => [
               styles.bankPicker,
               pressed && { opacity: 0.92 },
@@ -980,28 +1048,39 @@ function Step3Bank({
           >
             {banks === null ? (
               <ActivityIndicator color={theme.primary} />
+            ) : pickedBank ? (
+              <>
+                <View style={styles.bankBrandTile}>
+                  <Text style={styles.bankBrandText}>
+                    {bankInitials(pickedBank.name)}
+                  </Text>
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.bankPickerText} numberOfLines={1}>
+                    {bankShortName(pickedBank.name)}
+                  </Text>
+                  <Text style={styles.bankPickerSub} numberOfLines={1}>
+                    {pickedBank.code} · {pickedBank.name}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-down" size={16} color={theme.fgMuted} />
+              </>
             ) : (
               <>
+                <Ionicons name="search" size={18} color={theme.fgMuted} />
                 <Text
-                  style={[
-                    styles.bankPickerText,
-                    !pickedBank && { color: theme.fgMuted },
-                  ]}
+                  style={[styles.bankPickerText, { color: theme.fgMuted, flex: 1 }]}
                   numberOfLines={1}
                 >
-                  {pickedBank?.name ?? "Pick a bank"}
+                  Pick a bank
                 </Text>
-                <Ionicons
-                  name="chevron-down"
-                  size={18}
-                  color={theme.fgMuted}
-                />
+                <Ionicons name="chevron-down" size={16} color={theme.fgMuted} />
               </>
             )}
           </Pressable>
         </View>
 
-        <Field
+        <V7Field
           label="Account number"
           required
           value={accountNumber}
@@ -1009,9 +1088,13 @@ function Step3Bank({
             setAccountNumber(t.replace(/[^0-9]/g, "").slice(0, 10))
           }
           placeholder="10-digit NUBAN"
-          theme={theme}
           keyboardType="number-pad"
           autoCapitalize="none"
+          hint={
+            !resolvedName && !resolveError && accountNumber.length === 0
+              ? "We'll resolve the account name automatically."
+              : undefined
+          }
         />
 
         {resolving ? (
@@ -1061,103 +1144,6 @@ function Step3Bank({
   );
 }
 
-/* ─────────────── Shared Field ─────────────── */
-
-function Field({
-  label,
-  required,
-  hint,
-  value,
-  onChangeText,
-  placeholder,
-  theme,
-  keyboardType,
-  autoCapitalize,
-}: {
-  label: string;
-  required?: boolean;
-  hint?: string;
-  value: string;
-  onChangeText: (v: string) => void;
-  placeholder?: string;
-  theme: Theme;
-  keyboardType?:
-    | "default"
-    | "email-address"
-    | "phone-pad"
-    | "number-pad"
-    | "decimal-pad"
-    | "numbers-and-punctuation";
-  autoCapitalize?: "none" | "words" | "sentences" | "characters";
-}) {
-  const [focused, setFocused] = useState(false);
-  const s = fieldStyles(theme);
-  return (
-    <View>
-      <Text style={s.label}>
-        {label}
-        {required ? (
-          <Text style={{ color: theme.palette.green700 }}> ·</Text>
-        ) : null}
-      </Text>
-      <View style={[s.field, focused && s.fieldFocused]}>
-        <TextInput
-          value={value}
-          onChangeText={onChangeText}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          placeholder={placeholder}
-          placeholderTextColor={theme.fgMuted}
-          style={s.input}
-          keyboardType={keyboardType}
-          autoCapitalize={autoCapitalize}
-          autoCorrect={autoCapitalize === "none" ? false : true}
-        />
-      </View>
-      {hint ? <Text style={s.hint}>{hint}</Text> : null}
-    </View>
-  );
-}
-
-const fieldStyles = (theme: Theme) =>
-  StyleSheet.create({
-    label: {
-      fontSize: 11,
-      fontWeight: "800",
-      letterSpacing: 0.4,
-      textTransform: "uppercase",
-      color: theme.fgMuted,
-      marginBottom: 6,
-      marginHorizontal: 2,
-    },
-    field: {
-      height: 52,
-      paddingHorizontal: 14,
-      borderRadius: 12,
-      backgroundColor: theme.surface,
-      borderWidth: 1.5,
-      borderColor: theme.divider,
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    fieldFocused: {
-      borderColor: theme.primary,
-    },
-    input: {
-      flex: 1,
-      fontSize: 15,
-      fontWeight: "700",
-      color: theme.fg,
-      paddingVertical: 0,
-    },
-    hint: {
-      fontSize: 11.5,
-      color: theme.fgMuted,
-      marginTop: 6,
-      marginHorizontal: 2,
-    },
-  });
-
 const fuelStyles = (theme: Theme) =>
   StyleSheet.create({
     row: {
@@ -1198,18 +1184,30 @@ const fuelStyles = (theme: Theme) =>
       color: theme.fgMuted,
       marginTop: 2,
     },
-    priceInput: {
+    pricePill: {
       height: 36,
-      minWidth: 80,
+      minWidth: 88,
       paddingHorizontal: 10,
       borderRadius: 10,
-      backgroundColor: theme.bg,
+      backgroundColor: theme.surface,
       borderWidth: 1,
-      borderColor: theme.divider,
+      borderColor: theme.palette.green100,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+    },
+    pricePrefix: {
       fontSize: 14,
       fontWeight: "800",
-      color: theme.fg,
+      color: theme.palette.green700,
+    },
+    priceInput: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: "800",
+      color: theme.palette.green700,
       textAlign: "right",
+      paddingVertical: 0,
     },
   });
 
@@ -1300,55 +1298,94 @@ const makeStyles = (theme: Theme) =>
       marginTop: 8,
       marginHorizontal: 2,
     },
-    addressBlock: {
-      padding: 14,
+    labelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: 6,
+      marginHorizontal: 2,
+    },
+    requiredMark: {
+      fontSize: 11,
+      fontWeight: "800",
+      color: theme.palette.green700,
+    },
+    addressField: {
+      height: 52,
+      paddingHorizontal: 14,
       borderRadius: 12,
       backgroundColor: theme.surface,
       borderWidth: 1.5,
       borderColor: theme.divider,
-    },
-    addressBlockFilled: {
-      borderColor: theme.primary,
-      backgroundColor: theme.primaryTint,
-    },
-    addressRow: {
       flexDirection: "row",
       alignItems: "center",
       gap: 10,
     },
+    addressFieldFilled: {
+      borderColor: theme.primary,
+    },
     addressText: {
       flex: 1,
-      ...theme.type.body,
-      color: theme.fg,
+      fontSize: 15,
       fontWeight: "700",
+      color: theme.fg,
     },
-    addressMeta: {
-      marginTop: 8,
-      ...theme.type.bodySm,
+    fieldHintInline: {
+      marginTop: 6,
+      fontSize: 11.5,
       color: theme.fgMuted,
+      marginHorizontal: 2,
+    },
+    gridRow: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    gridCol: {
+      flex: 1,
+    },
+    readonlyField: {
+      height: 52,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: theme.bgMuted,
+      borderWidth: 1,
+      borderColor: theme.divider,
+      justifyContent: "center",
+    },
+    readonlyText: {
+      fontSize: 15,
+      fontWeight: "700",
+      color: theme.fg,
     },
     hoursRow: {
       flexDirection: "row",
       gap: 10,
+      marginTop: 6,
     },
-    timeFieldLabel: {
-      fontSize: 10.5,
-      fontWeight: "700",
-      color: theme.fgMuted,
-      letterSpacing: 0.4,
-      textTransform: "uppercase",
-      marginBottom: 6,
-    },
-    timeInput: {
+    timeCard: {
+      flex: 1,
       height: 52,
       paddingHorizontal: 14,
       borderRadius: 12,
       backgroundColor: theme.surface,
       borderWidth: 1,
       borderColor: theme.divider,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    timeCardLabel: {
+      fontSize: 10.5,
+      fontWeight: "700",
+      color: theme.fgMuted,
+      letterSpacing: 0.4,
+      textTransform: "uppercase",
+    },
+    timeCardValue: {
       fontSize: 16,
       fontWeight: "800",
       color: theme.fg,
+      paddingVertical: 0,
+      marginTop: 1,
     },
     fuelLoading: {
       height: 80,
@@ -1359,8 +1396,9 @@ const makeStyles = (theme: Theme) =>
       marginTop: 4,
     },
     bankPicker: {
-      height: 56,
+      minHeight: 56,
       paddingHorizontal: 12,
+      paddingVertical: 8,
       borderRadius: 12,
       backgroundColor: theme.surface,
       borderWidth: 1,
@@ -1368,13 +1406,29 @@ const makeStyles = (theme: Theme) =>
       flexDirection: "row",
       alignItems: "center",
       gap: 12,
-      justifyContent: "space-between",
+    },
+    bankBrandTile: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      backgroundColor: theme.palette.green50,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    bankBrandText: {
+      fontSize: 13,
+      fontWeight: "800",
+      color: theme.palette.green700,
     },
     bankPickerText: {
-      flex: 1,
       ...theme.type.body,
       color: theme.fg,
       fontWeight: "800",
+    },
+    bankPickerSub: {
+      fontSize: 12,
+      color: theme.fgMuted,
+      marginTop: 2,
     },
     resolveRow: {
       flexDirection: "row",

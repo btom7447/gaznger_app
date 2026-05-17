@@ -11,7 +11,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { toast } from "sonner-native";
 import { Theme, useTheme } from "@/constants/theme";
-import { AuthScreenContainer } from "@/components/ui/auth";
+import Svg, { Circle, Line, Path, Rect } from "react-native-svg";
+import { AuthScreenContainer, V7Field } from "@/components/ui/auth";
 import { Button } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useSessionStore } from "@/store/useSessionStore";
@@ -177,6 +178,7 @@ export default function RiderWizardScreen() {
   return (
     <AuthScreenContainer
       contentStyle={{ paddingTop: 0, paddingHorizontal: 0 }}
+      background={theme.bgMuted}
       footer={
         step === 3 ? (
           <Button
@@ -392,57 +394,72 @@ function Step1({
         </Pressable>
 
         {hasInvite ? (
-          <View>
-            <Text style={styles.fieldLabel}>
-              Invite code{" "}
-              <Text style={{ color: theme.palette.green700 }}>·</Text>
-            </Text>
-            <View
-              style={[
-                styles.field,
-                inviteError && { borderColor: theme.error },
-              ]}
-            >
-              <TextInput
-                value={inviteCode}
-                onChangeText={(t) => setInviteCode(t.trim())}
-                placeholder="ABKN-XXXX"
-                placeholderTextColor={theme.fgMuted}
-                style={styles.input}
-                autoCapitalize="characters"
-                autoCorrect={false}
-                editable={!inviteFromDeepLink}
-              />
-              {inviteFromDeepLink ? (
-                <View style={styles.fromLinkPill}>
+          <>
+            <V7Field
+              label="Invite code"
+              required
+              value={inviteCode}
+              onChangeText={(t) => setInviteCode(t.trim().toUpperCase())}
+              placeholder="ABKN-XXXX"
+              autoCapitalize="characters"
+              autoCorrect={false}
+              editable={!inviteFromDeepLink}
+              error={inviteError}
+              hint={
+                inviteFromDeepLink && !inviteError
+                  ? "Pre-filled from your invite link. Untick the box above to sign up as freelance instead."
+                  : undefined
+              }
+              suffix={
+                inviteFromDeepLink ? (
+                  <View style={styles.fromLinkPill}>
+                    <Ionicons
+                      name="link"
+                      size={11}
+                      color={theme.palette.green700}
+                    />
+                    <Text style={styles.fromLinkPillText}>From link</Text>
+                  </View>
+                ) : undefined
+              }
+            />
+            {inviteFromDeepLink && !inviteError ? (
+              <View style={styles.vendorPreviewCard}>
+                <View style={styles.vendorPreviewTile}>
                   <Ionicons
-                    name="link"
-                    size={11}
+                    name="business"
+                    size={20}
                     color={theme.palette.green700}
                   />
-                  <Text style={styles.fromLinkPillText}>From link</Text>
                 </View>
-              ) : null}
-            </View>
-            {inviteError ? (
-              <Text style={styles.errorText}>{inviteError}</Text>
-            ) : inviteFromDeepLink ? (
-              <Text style={styles.fieldHint}>
-                Pre-filled from your invite link. Untick the box above to
-                sign up as freelance instead.
-              </Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.vendorPreviewTitle}>
+                    From your invite link
+                  </Text>
+                  <Text style={styles.vendorPreviewSub} numberOfLines={1}>
+                    You'll be assigned to the vendor's home station after
+                    verification.
+                  </Text>
+                </View>
+                <View style={styles.vendorPreviewPill}>
+                  <Text style={styles.vendorPreviewPillText}>Joining</Text>
+                </View>
+              </View>
             ) : null}
-          </View>
+          </>
         ) : (
-          <View style={styles.infoNote}>
-            <Ionicons
-              name="information-circle"
-              size={18}
-              color={theme.info}
-            />
-            <Text style={styles.infoText}>
-              You'll sign up as a freelance rider. You can join a vendor
-              anytime later from your profile.
+          <View style={styles.freelanceCard}>
+            <View style={styles.freelanceTile}>
+              <Ionicons
+                name="information-circle"
+                size={18}
+                color={theme.palette.green700}
+              />
+            </View>
+            <Text style={styles.freelanceText}>
+              You'll sign up as a{" "}
+              <Text style={styles.freelanceStrong}>freelance rider</Text>.
+              You can join a vendor anytime later from your profile.
             </Text>
           </View>
         )}
@@ -477,25 +494,21 @@ function Step2({
         styles={styles}
       />
       <View style={styles.fields}>
-        <Field
+        <V7Field
           label="Display name"
           required
           hint="Shown to customers and your vendor."
           value={displayName}
           onChangeText={setDisplayName}
           placeholder="Your full name"
-          theme={theme}
-          styles={styles}
           autoCapitalize="words"
         />
-        <Field
+        <V7Field
           label="Email"
           hint="Optional — for receipts and tax records."
           value={email}
           onChangeText={setEmail}
           placeholder="you@example.com"
-          theme={theme}
-          styles={styles}
           keyboardType="email-address"
           autoCapitalize="none"
         />
@@ -585,53 +598,45 @@ function Step3({
           </View>
         </View>
 
-        <Field
+        <V7Field
           label="Plate number"
           required
           hint="Letters are auto-uppercased."
           value={plate}
           onChangeText={(t) => setPlate(t.toUpperCase())}
           placeholder="LSD 000 ABC"
-          theme={theme}
-          styles={styles}
           autoCapitalize="characters"
         />
 
         <View style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
-            <Field
+            <V7Field
               label="Brand"
               value={brand}
               onChangeText={setBrand}
               placeholder="e.g. Bajaj"
-              theme={theme}
-              styles={styles}
               autoCapitalize="words"
             />
           </View>
           <View style={{ flex: 1 }}>
-            <Field
+            <V7Field
               label="Year"
               value={year}
               onChangeText={(t) =>
                 setYear(t.replace(/[^0-9]/g, "").slice(0, 4))
               }
               placeholder="2022"
-              theme={theme}
-              styles={styles}
               keyboardType="number-pad"
               autoCapitalize="none"
             />
           </View>
         </View>
 
-        <Field
+        <V7Field
           label="Colour"
           value={colour}
           onChangeText={setColour}
           placeholder="e.g. Red"
-          theme={theme}
-          styles={styles}
           autoCapitalize="words"
         />
 
@@ -658,69 +663,41 @@ function VehicleGlyph({
 }) {
   const color = active ? theme.fg : theme.fgMuted;
   return (
-    <Ionicons
-      name={kind === "bike" ? "bicycle" : kind === "car" ? "car" : "bus"}
-      size={18}
-      color={color}
-    />
-  );
-}
-
-/* ─────────────── Shared Field ─────────────── */
-
-function Field({
-  label,
-  required,
-  hint,
-  value,
-  onChangeText,
-  placeholder,
-  theme,
-  styles,
-  keyboardType,
-  autoCapitalize,
-}: {
-  label: string;
-  required?: boolean;
-  hint?: string;
-  value: string;
-  onChangeText: (v: string) => void;
-  placeholder?: string;
-  theme: Theme;
-  styles: ReturnType<typeof makeStyles>;
-  keyboardType?:
-    | "default"
-    | "email-address"
-    | "phone-pad"
-    | "number-pad"
-    | "decimal-pad";
-  autoCapitalize?: "none" | "words" | "sentences" | "characters";
-}) {
-  const [focused, setFocused] = useState(false);
-  return (
-    <View>
-      <Text style={styles.fieldLabel}>
-        {label}
-        {required ? (
-          <Text style={{ color: theme.palette.green700 }}> ·</Text>
-        ) : null}
-      </Text>
-      <View style={[styles.field, focused && styles.fieldFocused]}>
-        <TextInput
-          value={value}
-          onChangeText={onChangeText}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          placeholder={placeholder}
-          placeholderTextColor={theme.fgMuted}
-          style={styles.input}
-          keyboardType={keyboardType}
-          autoCapitalize={autoCapitalize}
-          autoCorrect={autoCapitalize === "none" ? false : true}
-        />
-      </View>
-      {hint ? <Text style={styles.fieldHint}>{hint}</Text> : null}
-    </View>
+    <Svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {kind === "bike" && (
+        <>
+          <Circle cx={6} cy={17} r={3} />
+          <Circle cx={18} cy={17} r={3} />
+          <Path d="M6 17 L 12 10 L 16 10 L 18 17" />
+          <Line x1={12} y1={7} x2={15} y2={7} />
+        </>
+      )}
+      {kind === "car" && (
+        <>
+          <Path d="M4 15 L 5 11 L 7 9 L 17 9 L 19 11 L 20 15" />
+          <Rect x={3} y={15} width={18} height={4} rx={1} />
+          <Circle cx={7} cy={19} r={1.2} fill={color} stroke="none" />
+          <Circle cx={17} cy={19} r={1.2} fill={color} stroke="none" />
+        </>
+      )}
+      {kind === "truck" && (
+        <>
+          <Rect x={3} y={8} width={11} height={9} rx={1} />
+          <Path d="M14 11 L 18 11 L 20 14 L 20 17 L 14 17" />
+          <Circle cx={7} cy={19} r={1.5} />
+          <Circle cx={17} cy={19} r={1.5} />
+        </>
+      )}
+    </Svg>
   );
 }
 
@@ -892,6 +869,75 @@ const makeStyles = (theme: Theme) =>
       fontSize: 10.5,
       fontWeight: "800",
       color: theme.palette.green700,
+    },
+    freelanceCard: {
+      padding: 14,
+      borderRadius: 14,
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.divider,
+      flexDirection: "row",
+      gap: 12,
+      alignItems: "flex-start",
+    },
+    freelanceTile: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      backgroundColor: theme.palette.green50,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    freelanceText: {
+      flex: 1,
+      ...theme.type.bodySm,
+      color: theme.fgMuted,
+      lineHeight: 20,
+    },
+    freelanceStrong: {
+      color: theme.fg,
+      fontWeight: "800",
+    },
+    vendorPreviewCard: {
+      padding: 14,
+      borderRadius: 14,
+      backgroundColor: theme.primaryTint,
+      borderWidth: 1,
+      borderColor: theme.primary,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+    },
+    vendorPreviewTile: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: theme.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    vendorPreviewTitle: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: theme.palette.green700,
+    },
+    vendorPreviewSub: {
+      fontSize: 12,
+      color: theme.palette.green700,
+      opacity: 0.8,
+      marginTop: 2,
+    },
+    vendorPreviewPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 999,
+      backgroundColor: theme.success,
+    },
+    vendorPreviewPillText: {
+      fontSize: 10.5,
+      fontWeight: "800",
+      color: "#fff",
+      letterSpacing: 0.4,
     },
     infoNote: {
       padding: 14,
