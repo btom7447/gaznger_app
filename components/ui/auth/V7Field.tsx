@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -44,7 +44,7 @@ export interface V7FieldProps {
   secureTextEntry?: boolean;
 }
 
-export default function V7Field({
+function V7FieldImpl({
   label,
   value,
   onChangeText,
@@ -66,13 +66,18 @@ export default function V7Field({
   const s = useMemo(() => makeStyles(theme), [theme]);
   const hasError = !!error;
 
-  // Build the wrapper's dynamic style overlay outside the stylesheet
-  // so the TextInput's `style` reference stays stable across renders.
-  const fieldOverlay = hasError
-    ? s.fieldError
-    : focused
-      ? s.fieldFocused
-      : null;
+  // Memoise the wrapper style array so the TextInput's parent doesn't
+  // get a new reference on every parent re-render — keeps RN from
+  // remounting the input under it (which would close the keyboard).
+  const fieldStyle = useMemo(
+    () => [s.field, hasError ? s.fieldError : focused ? s.fieldFocused : null],
+    [s, hasError, focused],
+  );
+
+  // Stable callbacks — passing fresh closures every render is one of
+  // the main triggers of input-remount/focus-loss on Fabric.
+  const handleFocus = useCallback(() => setFocused(true), []);
+  const handleBlur = useCallback(() => setFocused(false), []);
 
   return (
     <View>
@@ -80,7 +85,7 @@ export default function V7Field({
         <Text style={s.label}>{label}</Text>
         {required ? <Text style={s.required}> ·</Text> : null}
       </View>
-      <View style={[s.field, fieldOverlay]}>
+      <View style={fieldStyle}>
         {leadingIcon ? (
           <Ionicons
             name={leadingIcon}
@@ -92,8 +97,8 @@ export default function V7Field({
         <TextInput
           value={value}
           onChangeText={onChangeText}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           placeholder={placeholder}
           placeholderTextColor={theme.fgMuted}
           style={s.input}
@@ -118,6 +123,13 @@ export default function V7Field({
     </View>
   );
 }
+
+// Memoise so V7Field only re-renders when its OWN props change.
+// Sibling state updates in the parent wizard (e.g. typing into a
+// different field) no longer ripple through and rebuild the TextInput
+// tree — that was the keyboard-flash-then-hide symptom.
+const V7Field = React.memo(V7FieldImpl);
+export default V7Field;
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({

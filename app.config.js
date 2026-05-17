@@ -23,6 +23,20 @@ export default ({ config }) => ({
     ...(config.plugins ?? []),
     "expo-secure-store",
     "expo-web-browser",
+    // expo-location's config plugin handles the iOS NSLocation* keys +
+    // Android ACCESS_*_LOCATION manifest entries automatically. The
+    // strings in app.json's infoPlist take precedence; this just
+    // guarantees the keys are registered even if someone edits the
+    // plist by hand.
+    [
+      "expo-location",
+      {
+        locationAlwaysAndWhenInUsePermission:
+          "Riders use background location while on an active delivery so customers can see live ETA. Location is never tracked outside of an order.",
+        locationWhenInUsePermission:
+          "Gaznger needs your location to match you with nearby stations, route riders to your address, and show you live delivery tracking.",
+      },
+    ],
   ],
   ios: {
     ...config.ios,

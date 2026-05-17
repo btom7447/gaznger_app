@@ -14,7 +14,12 @@
       "bundleIdentifier": "com.gaznger.app",
       "icon": "./assets/images/adaptive-icon.png",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "Gaznger needs your location to match you with nearby stations, route riders to your address, and show you live delivery tracking.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Riders use background location while on an active delivery so customers can see live ETA. Location is never tracked outside of an order.",
+        "NSCameraUsageDescription": "Gaznger needs camera access so you can upload verification documents (ID, licence, plate photos).",
+        "NSPhotoLibraryUsageDescription": "Gaznger needs photo library access so you can pick verification documents from your existing photos.",
+        "NSFaceIDUsageDescription": "Gaznger uses Face ID to unlock the app and authorise sensitive actions like withdrawals."
       }
     },
     "android": {
