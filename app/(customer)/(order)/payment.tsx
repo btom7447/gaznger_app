@@ -332,12 +332,24 @@ export default function PaymentScreen() {
       }
       setPaystackPublicKey(init.publicKey);
 
+      // LOGIC P0-1 — single-flight lock for the Paystack callback
+      // race. onSuccess and onCancel CAN both fire (user cancels
+      // milliseconds after success); without this lock the verify
+      // call could run twice. P0-4 same lock — after a verify throw
+      // we mark the flow settled so the user can retry from a clean
+      // state. Phase 2 will also memoise the Idempotency-Key per
+      // (orderId, op) so server dedup catches anything that slips
+      // through this JS lock.
+      let settled = false;
+
       popup.checkout({
         email: userEmail,
         amount: finalTotal, // SDK takes NGN, not kobo
         reference: init.reference,
         metadata: { orderId, kind: "order_charge" },
         onSuccess: async () => {
+          if (settled) return;
+          settled = true;
           try {
             await api.post(
               "/api/payments/verify",
@@ -347,25 +359,32 @@ export default function PaymentScreen() {
             await redeemPointsIfAny(orderId);
             goReceipt();
           } catch (err: any) {
-            Alert.alert(
-              "Payment verification failed",
-              err?.message ??
-                "We couldn't verify the payment. Please contact support if your card was charged."
-            );
+            // LOGIC P0-4 + EDGE P0-3 — route to the recovery screen
+            // so the user can re-attempt verify with the same
+            // reference instead of being stranded on a "card was
+            // charged but we don't know" Alert.
+            router.replace({
+              pathname: "/(customer)/(order)/confirming" as never,
+              params: { orderId, reference: init.reference },
+            } as never);
           } finally {
             setSubmitting(false);
           }
         },
         onCancel: () => {
+          if (settled) return;
+          settled = true;
           setSubmitting(false);
         },
         onError: (err) => {
+          if (settled) return;
+          settled = true;
           Alert.alert("Payment error", err?.message ?? "Something went wrong.");
           setSubmitting(false);
         },
       });
     },
-    [userEmail, finalTotal, popup, redeemPointsIfAny, goReceipt]
+    [userEmail, finalTotal, popup, redeemPointsIfAny, goReceipt, router]
   );
 
   /** Saved-card flow — single server call, no webview. */
@@ -442,6 +461,33 @@ export default function PaymentScreen() {
             {
               text: "Continue",
               onPress: async () => {
+                // EDGE P0-4 — call the server's dev-mark-paid stub
+                // so the order's paymentStatus actually flips to
+                // "paid" instead of the client jumping to receipt
+                // with the order still UNPAID server-side. Endpoint
+                // is hard-gated to non-production server-side too.
+                try {
+                  await api.post(
+                    "/api/payments/dev-mark-paid",
+                    { orderId },
+                    {
+                      headers: {
+                        "Idempotency-Key": newIdempotencyKey(),
+                      } as any,
+                    },
+                  );
+                } catch (err: any) {
+                  // Best-effort — even if the stub fails (e.g. running
+                  // against a prod-mode server), surface the failure
+                  // rather than silently faking success.
+                  Alert.alert(
+                    "Dev mark-paid failed",
+                    err?.message ??
+                      "Server rejected the dev shortcut. Try card or wallet.",
+                  );
+                  setSubmitting(false);
+                  return;
+                }
                 await redeemPointsIfAny(orderId);
                 goReceipt();
                 setSubmitting(false);

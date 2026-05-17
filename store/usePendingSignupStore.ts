@@ -194,9 +194,13 @@ export const usePendingSignupStore = create<PendingSignupState>()(
       onRehydrateStorage: () => (state) => {
         state && (state.hasHydrated = true);
       },
-      // Don't persist the hydration flag itself — it's runtime-only.
+      // SECURITY A2 / EDGE P1-3 — strip `preparedPin` from the
+      // persisted blob. The PIN must never sit in AsyncStorage at
+      // rest; it's held in memory only between pin-create and
+      // signup-submit. If the user kills the app mid-signup they
+      // re-enter the PIN. Also strip the runtime-only `hasHydrated`.
       partialize: (state) => {
-        const { hasHydrated, ...rest } = state;
+        const { hasHydrated, preparedPin, ...rest } = state;
         return rest as PendingSignupState;
       },
     }

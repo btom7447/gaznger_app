@@ -442,6 +442,16 @@ export default function TrackScreen() {
     socket.on("order:update", onUpdate);
     socket.on("rider:location", onLocation);
     socket.on("route:update", onRouteUpdate);
+
+    // LOGIC P0-2 — after the listeners are attached, fire a fresh
+    // GET. Any status change that landed between the screen's first
+    // GET (in the separate useEffect above) and now would otherwise
+    // be lost. The catch-up GET hydrates state from the current
+    // server truth so the listener picks up only deltas going
+    // forward. Cheap (one orders/:id read) and only fires once per
+    // socket reconnect.
+    refreshOrderStateRef.current();
+
     return () => {
       socket.off("order:update", onUpdate);
       socket.off("rider:location", onLocation);

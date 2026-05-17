@@ -128,12 +128,22 @@ export default function WalletTopUp() {
       );
       setPaystackPublicKey(init.publicKey);
 
+      // LOGIC P0-1 / P0-4 — single-flight lock around the Paystack
+      // callbacks. Same shape as the order-payment flow: any one of
+      // onSuccess / onCancel / onError flips `settled` and the others
+      // become no-ops. Also re-enables the submit button in every
+      // terminal branch (the outer try's finally fires too early
+      // because popup.checkout returns synchronously).
+      let settled = false;
+
       popup.checkout({
         email: userEmail,
         amount,
         reference: init.reference,
         metadata: { kind: "wallet_topup", amountNgn: amount },
         onSuccess: async () => {
+          if (settled) return;
+          settled = true;
           try {
             await api.post(
               "/api/payments/topup/verify",
@@ -144,6 +154,7 @@ export default function WalletTopUp() {
             // Webhook will catch it; just refresh.
           }
           await refreshWallet();
+          setSubmitting(false);
           if (returnTo === "payment") {
             // Hand back to the order Payment step with wallet pre-selected.
             router.replace({
@@ -159,9 +170,14 @@ export default function WalletTopUp() {
           }
         },
         onCancel: () => {
-          // user closed without completing — nothing to clean up server-side.
+          if (settled) return;
+          settled = true;
+          setSubmitting(false);
         },
         onError: (err: unknown) => {
+          if (settled) return;
+          settled = true;
+          setSubmitting(false);
           Alert.alert(
             "Top-up failed",
             String((err as any)?.message ?? "Please try again.")
@@ -169,13 +185,18 @@ export default function WalletTopUp() {
         },
       });
     } catch (err: any) {
+      // Init throw — popup never opened, safe to reset.
+      setSubmitting(false);
       Alert.alert(
         "Couldn't start top-up",
         err?.message ?? "Please try again."
       );
-    } finally {
-      setSubmitting(false);
     }
+    // NOTE: no outer `finally { setSubmitting(false) }`. When init
+    // succeeds, popup.checkout() returns synchronously and the actual
+    // terminal state is reached inside one of the callbacks above.
+    // Resetting submitting here would re-enable the button while the
+    // user is still in the Paystack webview.
   }, [amount, valid, userEmail, popup, refreshWallet, router, returnTo]);
 
   const helperText = !amount

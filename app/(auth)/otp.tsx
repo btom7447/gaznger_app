@@ -9,6 +9,7 @@ import { Button, OtpInput } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { newIdempotencyKey } from "@/lib/idempotency";
 import { getDeviceLabel, getOrCreateDeviceId } from "@/lib/auth";
+import { devLog } from "@/lib/log";
 import { usePendingSignupStore } from "@/store/usePendingSignupStore";
 
 type Purpose = "signup" | "login" | "recovery";
@@ -94,8 +95,8 @@ export default function OtpScreen() {
 
   // Mount / unmount probe.
   useEffect(() => {
-    console.log("[otp] MOUNT");
-    return () => console.log("[otp] UNMOUNT");
+    devLog("[otp] MOUNT");
+    return () => devLog("[otp] UNMOUNT");
   }, []);
 
   // Countdown.
@@ -142,11 +143,11 @@ export default function OtpScreen() {
             "X-Device-Label": getDeviceLabel(),
           },
         });
-        console.log("[otp] step:after-api purpose=" + purpose);
+        devLog("[otp] step:after-api purpose=" + purpose);
         setVerificationToken(res.verificationToken, res.ttl);
-        console.log("[otp] step:after-setVerificationToken");
+        devLog("[otp] step:after-setVerificationToken");
         setPhoneVerified();
-        console.log("[otp] step:after-setPhoneVerified");
+        devLog("[otp] step:after-setPhoneVerified");
 
         if (purpose === "signup") {
           // v7 signup flow: OTP → pin-create → security → permissions →
@@ -157,18 +158,18 @@ export default function OtpScreen() {
           const next = pendingRole
             ? "/(auth)/signup/pin-create"
             : "/(auth)/signup/role";
-          console.log(`[otp] step:before-router.push target=${next}`);
+          devLog(`[otp] step:before-router.push target=${next}`);
           router.push(next as never);
-          console.log(`[otp] step:after-router.push ${next}`);
+          devLog(`[otp] step:after-router.push ${next}`);
           return;
         }
         if (purpose === "recovery") {
-          console.log("[otp] step:before-router.push target=recovery/new-pin");
+          devLog("[otp] step:before-router.push target=recovery/new-pin");
           router.push("/(auth)/recovery/new-pin" as never);
-          console.log("[otp] step:after-router.push recovery/new-pin");
+          devLog("[otp] step:after-router.push recovery/new-pin");
           return;
         }
-        console.log("[otp] step:before-router.push target=unlock/pin");
+        devLog("[otp] step:before-router.push target=unlock/pin");
         // login — verify-otp returned a `verificationToken` we just
         // persisted in the pending-signup store. Route to PIN unlock,
         // which reads that token + the user's PIN and POSTs to
@@ -180,7 +181,7 @@ export default function OtpScreen() {
         // by appending to the stack — different code path, no double
         // render in our testing.
         router.push("/(auth)/unlock/pin" as never);
-        console.log("[otp] step:after-router.push unlock/pin");
+        devLog("[otp] step:after-router.push unlock/pin");
       } catch (err: any) {
         setError(err?.message ?? "That code didn't match. Try again.");
         setDigits("");

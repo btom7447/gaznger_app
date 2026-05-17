@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AppState } from "react-native";
 import { io, Socket } from "socket.io-client";
+import { devLog, devWarn } from "@/lib/log";
 
 const BASE_URL = process.env.EXPO_PUBLIC_BASE_URL ?? "http://localhost:5000";
 
@@ -150,7 +151,7 @@ export function connectSocket(token?: string | null): Socket | null {
   setStatus("reconnecting");
 
   socket.on("connect", () => {
-    console.log("[Socket] connected:", socket?.id);
+    devLog("[Socket] connected:", socket?.id);
     clearOfflineTimer();
     setStatus("live");
     logSocketEvent({ ts: Date.now(), direction: "in", event: "connect" });
@@ -195,13 +196,13 @@ export function connectSocket(token?: string | null): Socket | null {
   });
 
   socket.on("connect_error", (err) => {
-    console.warn("[Socket] connect_error:", err.message);
+    devWarn("[Socket] connect_error:", err.message);
     if (currentStatus === "live") setStatus("reconnecting");
     scheduleOffline();
   });
 
   socket.on("disconnect", (reason) => {
-    console.log("[Socket] disconnected:", reason);
+    devLog("[Socket] disconnected:", reason);
     setStatus("reconnecting");
     scheduleOffline();
     logSocketEvent({

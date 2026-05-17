@@ -5,6 +5,7 @@ import { useTheme } from "@/constants/theme";
 import { useAppFonts } from "@/constants/useFonts";
 import { useSessionStore } from "@/store/useSessionStore";
 import { getBiometricEnabled, setBiometricEnabled } from "@/lib/auth";
+import { devLog } from "@/lib/log";
 import { needsOnboarding, onboardingPathFor } from "@/lib/authRouting";
 
 /**
@@ -69,16 +70,16 @@ export default function SplashBootstrap() {
         // mount the biometric screen and fall straight back here.
         if (biometricEnabled) {
           await setBiometricEnabled(false);
-          console.log("[bootstrap] cleared orphan biometric flag");
+          devLog("[bootstrap] cleared orphan biometric flag");
         }
-        console.log("[bootstrap] → /welcome (no session)");
+        devLog("[bootstrap] → /welcome (no session)");
         router.replace("/(auth)/welcome" as never);
         return;
       }
 
       // Suspended overrides everything.
       if (user.accountStatus === "suspended") {
-        console.log("[bootstrap] → /suspended");
+        devLog("[bootstrap] → /suspended");
         router.replace("/(auth)/states/suspended" as never);
         return;
       }
@@ -86,10 +87,10 @@ export default function SplashBootstrap() {
       // Session exists. If a PIN is configured, gate access on unlock.
       if (user.hasPin) {
         if (biometricEnabled) {
-          console.log("[bootstrap] → /unlock/biometric");
+          devLog("[bootstrap] → /unlock/biometric");
           router.replace("/(auth)/unlock/biometric" as never);
         } else {
-          console.log("[bootstrap] → /unlock/pin");
+          devLog("[bootstrap] → /unlock/pin");
           router.replace("/(auth)/unlock/pin" as never);
         }
         return;
@@ -101,7 +102,7 @@ export default function SplashBootstrap() {
       // them back into the wizard rather than the role home.
       if (needsOnboarding(user)) {
         const path = onboardingPathFor(user.role);
-        console.log(`[bootstrap] → ${path} (onboarding incomplete)`);
+        devLog(`[bootstrap] → ${path} (onboarding incomplete)`);
         router.replace(path as never);
         return;
       }

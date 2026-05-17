@@ -21,6 +21,7 @@ import {
 import { useSessionStore, type SessionUser } from "@/store/useSessionStore";
 import { usePendingSignupStore } from "@/store/usePendingSignupStore";
 import { postAuthPathFor } from "@/lib/authRouting";
+import { devLog } from "@/lib/log";
 
 const PIN_LENGTH = 4;
 const MAX_ATTEMPTS = 5;
@@ -44,7 +45,7 @@ interface LoginResponse {
  * limit (see _server-asks/auth-login.md).
  */
 export default function PinUnlockScreen() {
-  console.log("[unlock/pin] render BEGIN");
+  devLog("[unlock/pin] render BEGIN");
   const theme = useTheme();
   const router = useRouter();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -77,32 +78,32 @@ export default function PinUnlockScreen() {
 
   // Mount / unmount probe.
   useEffect(() => {
-    console.log("[unlock/pin] MOUNT");
-    return () => console.log("[unlock/pin] UNMOUNT");
+    devLog("[unlock/pin] MOUNT");
+    return () => devLog("[unlock/pin] UNMOUNT");
   }, []);
 
   // Probe biometric for the keypad shortcut + tracking.
   useEffect(() => {
-    console.log("[unlock/pin] bio-probe START");
+    devLog("[unlock/pin] bio-probe START");
     let cancelled = false;
     (async () => {
       try {
         const enabled = await getBiometricEnabled();
-        console.log("[unlock/pin] bio-probe enabled=" + enabled);
+        devLog("[unlock/pin] bio-probe enabled=" + enabled);
         if (!enabled) return;
         const { available, type } = await checkBiometricAvailability();
-        console.log(
+        devLog(
           "[unlock/pin] bio-probe avail=" + available + " type=" + type
         );
         if (!cancelled && available) setBioType(type);
       } catch (e: any) {
-        console.log(
+        devLog(
           "[unlock/pin] bio-probe THROW: " + (e?.message ?? String(e))
         );
       }
     })();
     return () => {
-      console.log("[unlock/pin] bio-probe CLEANUP");
+      devLog("[unlock/pin] bio-probe CLEANUP");
       cancelled = true;
     };
   }, []);
@@ -247,7 +248,7 @@ export default function PinUnlockScreen() {
     router.replace("/(auth)/welcome" as never);
   }, [router, sessionLogout]);
 
-  console.log("[unlock/pin] render END (about to return JSX)");
+  devLog("[unlock/pin] render END (about to return JSX)");
   return (
     <AuthScreenContainer
       showBack={false}
