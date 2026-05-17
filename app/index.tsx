@@ -4,19 +4,17 @@ import { useRouter } from "expo-router";
 import { useTheme } from "@/constants/theme";
 import { useAppFonts } from "@/constants/useFonts";
 import { useSessionStore } from "@/store/useSessionStore";
-import {
-  getBiometricEnabled,
-  getHasOnboarded,
-  setBiometricEnabled,
-} from "@/lib/auth";
+import { getBiometricEnabled, setBiometricEnabled } from "@/lib/auth";
 import { needsOnboarding, onboardingPathFor } from "@/lib/authRouting";
 
 /**
  * Splash + bootstrap router. Replaces the legacy 2s-timer +
  * email-auth redirect with the v4 design's branched routing:
  *
- *   First launch (no `gaznger.has-onboarded`)        → /(auth)/onboarding
- *   Returning, no session                            → /(auth)/welcome
+ *   No session (first launch OR returning logged-out)
+ *     → /(auth)/welcome
+ *     (welcome itself decides: pitch carousel on first launch,
+ *      jump-to-CTA on return — flag stored client-side)
  *   Returning, suspended account                     → /(auth)/states/suspended
  *   Returning, session + hasPin + biometric enabled  → /(auth)/unlock/biometric
  *   Returning, session + hasPin                      → /(auth)/unlock/pin
@@ -58,20 +56,13 @@ export default function SplashBootstrap() {
 
     let cancelled = false;
     (async () => {
-      const [hasOnboarded, biometricEnabled] = await Promise.all([
-        getHasOnboarded(),
-        getBiometricEnabled(),
-      ]);
+      const biometricEnabled = await getBiometricEnabled();
       if (cancelled) return;
 
-      // First launch — onboard before anything else.
-      if (!hasOnboarded) {
-        console.log("[bootstrap] → /onboarding");
-        router.replace("/(auth)/onboarding" as never);
-        return;
-      }
-
-      // Returning user, no session.
+      // No session — first-launch + returning logged-out both land on
+      // /welcome; the welcome screen decides whether to show the pitch
+      // carousel (first launch) or jump straight to the CTA slide
+      // (returning users) based on its own `hasOnboarded` flag.
       if (!isLoggedIn || !user) {
         // Clean up an orphan biometric flag — if it's still on but
         // there's no session to unlock to, the next cold start would

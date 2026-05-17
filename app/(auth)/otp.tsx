@@ -65,6 +65,7 @@ export default function OtpScreen() {
     (s) => s.setVerificationToken
   );
   const setPhoneVerified = usePendingSignupStore((s) => s.setPhoneVerified);
+  const pendingRole = usePendingSignupStore((s) => s.role);
 
   const sendOtp = useCallback(async () => {
     if (!phone) return;
@@ -148,9 +149,16 @@ export default function OtpScreen() {
         console.log("[otp] step:after-setPhoneVerified");
 
         if (purpose === "signup") {
-          console.log("[otp] step:before-router.push target=signup/role");
-          router.push("/(auth)/signup/role" as never);
-          console.log("[otp] step:after-router.push signup/role");
+          // v7 signup flow: role is picked BEFORE phone/OTP, so after
+          // OTP succeeds we forward to the role's profile step. Fall
+          // back to the role picker only if the store somehow lost the
+          // role (deep-link / cleared state) so the user isn't stranded.
+          const next = pendingRole
+            ? `/(auth)/signup/profile-${pendingRole}`
+            : "/(auth)/signup/role";
+          console.log(`[otp] step:before-router.push target=${next}`);
+          router.push(next as never);
+          console.log(`[otp] step:after-router.push ${next}`);
           return;
         }
         if (purpose === "recovery") {
@@ -179,7 +187,15 @@ export default function OtpScreen() {
         setVerifying(false);
       }
     },
-    [verifying, phone, purpose, setVerificationToken, setPhoneVerified, router]
+    [
+      verifying,
+      phone,
+      purpose,
+      pendingRole,
+      setVerificationToken,
+      setPhoneVerified,
+      router,
+    ]
   );
 
   const handleChange = (next: string) => {

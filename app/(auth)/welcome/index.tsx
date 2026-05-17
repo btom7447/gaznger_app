@@ -33,11 +33,13 @@ import {
   clearBioCredential,
   getBioCredential,
   getDeviceLabel,
+  getHasOnboarded,
   getOrCreateDeviceId,
   hasBioCredential,
   markBioCredentialPresent,
   preparePinForTransmission,
   setBiometricEnabled,
+  setHasOnboarded,
 } from "@/lib/auth";
 import {
   biometricLabel,
@@ -110,7 +112,26 @@ export default function WelcomeGate() {
   const sessionLogin = useSessionStore((s) => s.login);
 
   const [activeIndex, setActiveIndex] = useState(0);
+  const [gateReady, setGateReady] = useState(false);
   const listRef = useRef<FlatList>(null);
+
+  // Returning users (already past first launch) skip the pitch carousel
+  // and land directly on the CTA slide. We still mount this screen so
+  // Sign in / Sign up / bio remain reachable — just no swiping required.
+  // Hold rendering until the flag resolves so the FlatList mounts with
+  // initialScrollIndex on the correct slide (no flash of slide 0).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const onboarded = await getHasOnboarded();
+      if (!alive) return;
+      if (onboarded) setActiveIndex(3);
+      setGateReady(true);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Bio sign-in surface — only renders on slide 4 when this device has
   // a stashed credential (user enabled biometric in Settings in a prior
@@ -166,6 +187,7 @@ export default function WelcomeGate() {
           },
         },
       );
+      setHasOnboarded(true).catch(() => {});
       sessionLogin(res);
       goAfterLogin(res.user);
     } catch (err: any) {
@@ -202,18 +224,17 @@ export default function WelcomeGate() {
     [],
   );
 
-  const goSignup = useCallback(
-    () => router.push("/(auth)/signup/role" as never),
-    [router],
-  );
-  const goSignin = useCallback(
-    () =>
-      router.push({
-        pathname: "/(auth)/phone" as never,
-        params: { mode: "signin" },
-      } as never),
-    [router],
-  );
+  const goSignup = useCallback(() => {
+    setHasOnboarded(true).catch(() => {});
+    router.push("/(auth)/signup/role" as never);
+  }, [router]);
+  const goSignin = useCallback(() => {
+    setHasOnboarded(true).catch(() => {});
+    router.push({
+      pathname: "/(auth)/phone" as never,
+      params: { mode: "signin" },
+    } as never);
+  }, [router]);
   const goTerms = useCallback(
     () => router.push("/(legal)/terms" as never),
     [router],
@@ -281,6 +302,12 @@ export default function WelcomeGate() {
     [],
   );
 
+  if (!gateReady) {
+    // Tiny solid-color gate — matches root bg so there's no visible
+    // flash before the carousel mounts on the right slide.
+    return <View style={styles.root} />;
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar style={tokens.statusBar} />
@@ -295,6 +322,12 @@ export default function WelcomeGate() {
         onScroll={handleScroll}
         scrollEventThrottle={32}
         bounces={false}
+        getItemLayout={(_, index) => ({
+          length: SCREEN_W,
+          offset: SCREEN_W * index,
+          index,
+        })}
+        initialScrollIndex={activeIndex}
       />
     </View>
   );

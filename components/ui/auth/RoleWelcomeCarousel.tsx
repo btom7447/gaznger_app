@@ -14,6 +14,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Theme, useTheme } from "@/constants/theme";
@@ -131,7 +132,14 @@ export default function RoleWelcomeCarousel({
                     pressed && { opacity: 0.85 },
                   ]}
                 >
-                  <Text style={styles.backBtnText}>←  Back</Text>
+                  <View style={styles.backInner}>
+                    <Ionicons
+                      name="chevron-back"
+                      size={16}
+                      color={tokens.textPrimary}
+                    />
+                    <Text style={styles.backBtnText}>Back</Text>
+                  </View>
                 </Pressable>
                 <View />
               </View>
@@ -283,6 +291,11 @@ const makeStyles = (
     backBtn: {
       paddingHorizontal: 8,
       paddingVertical: 6,
+    },
+    backInner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
     },
     backBtnText: {
       color: tokens.textPrimary,
