@@ -12,11 +12,20 @@ import { AUTH_KEYS } from "@/constants/authStorageKeys";
  * survives app updates but not uninstalls).
  */
 export async function getOrCreateDeviceId(): Promise<string> {
-  const existing = await SecureStore.getItemAsync(AUTH_KEYS.deviceId);
-  if (existing) return existing;
-  const id = Crypto.randomUUID();
-  await SecureStore.setItemAsync(AUTH_KEYS.deviceId, id);
-  return id;
+  try {
+    const existing = await SecureStore.getItemAsync(AUTH_KEYS.deviceId);
+    if (existing) return existing;
+    const id = Crypto.randomUUID();
+    try {
+      await SecureStore.setItemAsync(AUTH_KEYS.deviceId, id);
+    } catch (e: any) {
+      console.log("[auth] setDeviceId failed: " + (e?.message ?? String(e)));
+    }
+    return id;
+  } catch (e: any) {
+    console.log("[auth] getDeviceId failed: " + (e?.message ?? String(e)));
+    return Crypto.randomUUID();
+  }
 }
 
 /**
@@ -35,12 +44,21 @@ export function getDeviceLabel(): string {
  * Checked on bootstrap to decide between Onboarding and Welcome.
  */
 export async function getHasOnboarded(): Promise<boolean> {
-  const v = await SecureStore.getItemAsync(AUTH_KEYS.hasOnboarded);
-  return v === "true";
+  try {
+    const v = await SecureStore.getItemAsync(AUTH_KEYS.hasOnboarded);
+    return v === "true";
+  } catch (e: any) {
+    console.log("[auth] getHasOnboarded failed: " + (e?.message ?? String(e)));
+    return false;
+  }
 }
 
 export async function setHasOnboarded(v: boolean): Promise<void> {
-  await SecureStore.setItemAsync(AUTH_KEYS.hasOnboarded, v ? "true" : "false");
+  try {
+    await SecureStore.setItemAsync(AUTH_KEYS.hasOnboarded, v ? "true" : "false");
+  } catch (e: any) {
+    console.log("[auth] setHasOnboarded failed: " + (e?.message ?? String(e)));
+  }
 }
 
 /**
@@ -49,12 +67,21 @@ export async function setHasOnboarded(v: boolean): Promise<void> {
  * which is the correct security default.
  */
 export async function getBiometricEnabled(): Promise<boolean> {
-  const v = await SecureStore.getItemAsync(AUTH_KEYS.biometricEnabled);
-  return v === "true";
+  try {
+    const v = await SecureStore.getItemAsync(AUTH_KEYS.biometricEnabled);
+    return v === "true";
+  } catch (e: any) {
+    console.log("[auth] getBiometricEnabled failed: " + (e?.message ?? String(e)));
+    return false;
+  }
 }
 
 export async function setBiometricEnabled(v: boolean): Promise<void> {
-  await SecureStore.setItemAsync(AUTH_KEYS.biometricEnabled, v ? "true" : "false");
+  try {
+    await SecureStore.setItemAsync(AUTH_KEYS.biometricEnabled, v ? "true" : "false");
+  } catch (e: any) {
+    console.log("[auth] setBiometricEnabled failed: " + (e?.message ?? String(e)));
+  }
 }
 
 /* ──────────────────────── Biometric login credential ──────────────────────── */
@@ -87,19 +114,23 @@ export interface BioCredential {
 }
 
 export async function setBioCredential(cred: BioCredential): Promise<void> {
-  await SecureStore.setItemAsync(
-    AUTH_KEYS.bioCredential,
-    JSON.stringify(cred),
-    {
-      // OS-side biometric requirement on every read. iOS surfaces
-      // the Face ID / Touch ID sheet automatically when the
-      // protected item is accessed; Android shows the platform
-      // biometric prompt.
-      requireAuthentication: true,
-      authenticationPrompt:
-        "Confirm to enable biometric sign-in on this device",
-    }
-  );
+  try {
+    await SecureStore.setItemAsync(
+      AUTH_KEYS.bioCredential,
+      JSON.stringify(cred),
+      {
+        // OS-side biometric requirement on every read. iOS surfaces
+        // the Face ID / Touch ID sheet automatically when the
+        // protected item is accessed; Android shows the platform
+        // biometric prompt.
+        requireAuthentication: true,
+        authenticationPrompt:
+          "Confirm to enable biometric sign-in on this device",
+      }
+    );
+  } catch (e: any) {
+    console.log("[auth] setBioCredential failed: " + (e?.message ?? String(e)));
+  }
 }
 
 export async function getBioCredential(
@@ -160,15 +191,19 @@ export async function clearBioCredential(): Promise<void> {
  * are per-key.
  */
 export async function markBioCredentialPresent(present: boolean): Promise<void> {
-  if (present) {
-    await SecureStore.setItemAsync(
-      `${AUTH_KEYS.bioCredential}.exists`,
-      "true"
-    );
-  } else {
-    await SecureStore.deleteItemAsync(
-      `${AUTH_KEYS.bioCredential}.exists`
-    ).catch(() => {});
+  try {
+    if (present) {
+      await SecureStore.setItemAsync(
+        `${AUTH_KEYS.bioCredential}.exists`,
+        "true"
+      );
+    } else {
+      await SecureStore.deleteItemAsync(
+        `${AUTH_KEYS.bioCredential}.exists`
+      ).catch(() => {});
+    }
+  } catch (e: any) {
+    console.log("[auth] markBioCredentialPresent failed: " + (e?.message ?? String(e)));
   }
 }
 

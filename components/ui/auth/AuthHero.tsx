@@ -17,17 +17,137 @@ import { Theme } from "@/constants/theme";
  * component boundary.
  */
 
+/**
+ * Theme-aware token bundle for every auth hero surface (welcome,
+ * role welcomes, pending). Single source of truth so the gradient,
+ * circle stroke, body text, eyebrow tint, and CTA colors all flip
+ * together when the user toggles dark/light mode.
+ *
+ * Light mode: white bg, ash circles, near-black text, brand-green CTAs.
+ * Dark mode:  forest gradient, white circles, white text, white CTAs.
+ */
+export interface AuthHeroTokens {
+  /** Stops fed to LinearGradient. Light = 3 white stops, dark = forest. */
+  gradient: [string, string, string];
+  gradientLocations: [number, number, number];
+  /** Circle stroke + base opacity for the top-right + bottom-left arcs. */
+  circleStroke: string;
+  circleTROpacity: number;
+  circleBLOpacity: number;
+  /** Body / heading text on the hero surface. */
+  textPrimary: string;
+  textSecondary: string;
+  /** Eyebrow tint over the hero (uppercase caption). */
+  eyebrow: string;
+  /** Skip button bg + border + text. */
+  skipBg: string;
+  skipBorder: string;
+  skipText: string;
+  /** Status-bar style for the screen. */
+  statusBar: "light" | "dark";
+  /** Page dots. */
+  dotActive: string;
+  dotInactive: string;
+  /** Sign in / Get started — the primary button. */
+  primaryBtnBg: string;
+  primaryBtnText: string;
+  /** Sign up / outline secondary button. */
+  outlineBtnBorder: string;
+  outlineBtnText: string;
+  /** Bio sign-in row (welcome-only, dark style). */
+  bioBtnBg: string;
+  bioBtnBorder: string;
+  bioBtnText: string;
+  /** Wordmark logo asset to use (gaznger-logo.png light vs gaznger_logo.png dark). */
+  logoAsset: number;
+  /** Legal-row text + link colors. */
+  legalText: string;
+  legalLink: string;
+  /** Spot-illustration stroke / soft fill / accent dot. */
+  artStroke: string;
+  artTint: string;
+  artAccent: string;
+}
+
+export function authHeroTokens(theme: Theme): AuthHeroTokens {
+  if (theme.mode === "dark") {
+    return {
+      gradient: [theme.palette.green700, theme.palette.green900, "#08231a"],
+      gradientLocations: [0, 0.65, 1],
+      circleStroke: "#fff",
+      circleTROpacity: 0.32,
+      circleBLOpacity: 0.14,
+      textPrimary: "#fff",
+      textSecondary: "rgba(255,255,255,0.82)",
+      eyebrow: "rgba(255,255,255,0.78)",
+      skipBg: "rgba(255,255,255,0.10)",
+      skipBorder: "rgba(255,255,255,0.18)",
+      skipText: "#fff",
+      statusBar: "light",
+      dotActive: "#fff",
+      dotInactive: "rgba(255,255,255,0.32)",
+      primaryBtnBg: "#fff",
+      primaryBtnText: theme.palette.green700,
+      outlineBtnBorder: "rgba(255,255,255,0.55)",
+      outlineBtnText: "#fff",
+      bioBtnBg: "rgba(255,255,255,0.18)",
+      bioBtnBorder: "rgba(255,255,255,0.32)",
+      bioBtnText: "#fff",
+      logoAsset: require("@/assets/images/gaznger_logo.png"),
+      legalText: "rgba(255,255,255,0.65)",
+      legalLink: "#fff",
+      artStroke: "#fff",
+      artTint: "rgba(255,255,255,0.14)",
+      artAccent: "rgba(255,255,255,0.55)",
+    };
+  }
+  // Light mode — white bg, ash circles, dark text, brand-green CTAs.
+  return {
+    gradient: ["#FFFFFF", "#F6F8F7", "#ECEFEE"],
+    gradientLocations: [0, 0.65, 1],
+    circleStroke: theme.palette.neutral300,
+    circleTROpacity: 0.55,
+    circleBLOpacity: 0.32,
+    textPrimary: theme.palette.neutral900,
+    textSecondary: theme.palette.neutral600,
+    eyebrow: theme.palette.neutral600,
+    skipBg: theme.palette.neutral100,
+    skipBorder: theme.palette.neutral200,
+    skipText: theme.palette.neutral700,
+    statusBar: "dark",
+    dotActive: theme.palette.green700,
+    dotInactive: theme.palette.neutral300,
+    primaryBtnBg: theme.palette.green500,
+    primaryBtnText: "#fff",
+    outlineBtnBorder: theme.palette.green500,
+    outlineBtnText: theme.palette.green700,
+    bioBtnBg: theme.palette.green50,
+    bioBtnBorder: theme.palette.green100,
+    bioBtnText: theme.palette.green700,
+    logoAsset: require("@/assets/images/gaznger-logo.png"),
+    legalText: theme.palette.neutral500,
+    legalLink: theme.palette.green700,
+    artStroke: theme.palette.green700,
+    artTint: theme.palette.green50,
+    artAccent: theme.palette.green500,
+  };
+}
+
 export function ForestHeroBg({ theme }: { theme: Theme }) {
+  const tokens = authHeroTokens(theme);
   return (
     <>
       <LinearGradient
-        colors={[theme.palette.green700, theme.palette.green900, "#08231a"]}
+        colors={tokens.gradient}
         start={{ x: 0.1, y: 0 }}
         end={{ x: 0.9, y: 1 }}
-        locations={[0, 0.65, 1]}
+        locations={tokens.gradientLocations}
         style={StyleSheet.absoluteFill}
       />
-      <View pointerEvents="none" style={styles.circlesTR}>
+      <View
+        pointerEvents="none"
+        style={[styles.circlesTR, { opacity: tokens.circleTROpacity }]}
+      >
         <Svg width={320} height={320} viewBox="0 0 320 320">
           {[180, 142, 108, 76, 48].map((r) => (
             <Circle
@@ -35,7 +155,7 @@ export function ForestHeroBg({ theme }: { theme: Theme }) {
               cx={160}
               cy={160}
               r={r}
-              stroke="#fff"
+              stroke={tokens.circleStroke}
               strokeWidth={1.1}
               fill="none"
               opacity={1 - r / 240}
@@ -43,7 +163,10 @@ export function ForestHeroBg({ theme }: { theme: Theme }) {
           ))}
         </Svg>
       </View>
-      <View pointerEvents="none" style={styles.circlesBL}>
+      <View
+        pointerEvents="none"
+        style={[styles.circlesBL, { opacity: tokens.circleBLOpacity }]}
+      >
         <Svg width={260} height={260} viewBox="0 0 260 260">
           {[120, 92, 66, 42].map((r) => (
             <Circle
@@ -51,7 +174,7 @@ export function ForestHeroBg({ theme }: { theme: Theme }) {
               cx={130}
               cy={130}
               r={r}
-              stroke="#fff"
+              stroke={tokens.circleStroke}
               strokeWidth={1}
               fill="none"
               opacity={0.5}
@@ -80,10 +203,17 @@ export type HeroArtKind =
  *   - fills use white at 0.14–0.28 opacity only (no gradients, no extra colors)
  *   - no glyphs / emoji / text
  */
-export function HeroArt({ kind }: { kind: HeroArtKind }) {
-  const tint = "rgba(255,255,255,0.14)";
-  const accent = "rgba(255,255,255,0.55)";
-  const stroke = "#fff";
+export function HeroArt({
+  kind,
+  theme,
+}: {
+  kind: HeroArtKind;
+  theme: Theme;
+}) {
+  const tokens = authHeroTokens(theme);
+  const tint = tokens.artTint;
+  const accent = tokens.artAccent;
+  const stroke = tokens.artStroke;
   return (
     <Svg
       width={200}
@@ -103,7 +233,7 @@ export function HeroArt({ kind }: { kind: HeroArtKind }) {
           <Line x1={86} y1={152} x2={114} y2={152} />
           <Path
             d="M100 64 C 84 86 80 100 80 112 a20 20 0 0 0 40 0 c 0 -12 -4 -26 -20 -48 z"
-            fill="rgba(255,255,255,0.22)"
+            fill={tint}
           />
           <Path d="M100 64 C 84 86 80 100 80 112 a20 20 0 0 0 40 0 c 0 -12 -4 -26 -20 -48 z" />
           <Circle cx={92} cy={104} r={3} fill={accent} stroke="none" />
@@ -122,7 +252,7 @@ export function HeroArt({ kind }: { kind: HeroArtKind }) {
           <Circle cx={138} cy={148} r={14} />
           <Path d="M70 148 L 96 116 L 122 116 L 138 148" />
           <Path d="M96 116 L 96 96 L 110 96" />
-          <Circle cx={110} cy={86} r={9} fill="rgba(255,255,255,0.28)" />
+          <Circle cx={110} cy={86} r={9} fill={tint} />
           <Circle cx={110} cy={86} r={9} />
           <Path
             d="M168 60 a10 10 0 0 0 -20 0 c 0 8 10 22 10 22 s 10 -14 10 -22z"
@@ -206,8 +336,8 @@ export function HeroArt({ kind }: { kind: HeroArtKind }) {
           <Rect x={34} y={38} width={132} height={92} rx={10} fill={tint} />
           <Rect x={34} y={38} width={132} height={92} rx={10} />
           <Path d="M48 116 Q 80 80 110 92 T 158 60" strokeWidth={2.4} />
-          <Circle cx={80} cy={92} r={4} fill="#fff" stroke="none" />
-          <Circle cx={138} cy={72} r={4} fill="#fff" stroke="none" />
+          <Circle cx={80} cy={92} r={4} fill={accent} stroke="none" />
+          <Circle cx={138} cy={72} r={4} fill={accent} stroke="none" />
           <Circle cx={72} cy={160} r={12} fill={tint} />
           <Circle cx={72} cy={160} r={12} />
           <Circle cx={138} cy={160} r={12} fill={tint} />
@@ -253,9 +383,13 @@ export function HeroArt({ kind }: { kind: HeroArtKind }) {
 export function PageDots({
   active,
   total,
+  activeColor = "#fff",
+  inactiveColor = "rgba(255,255,255,0.32)",
 }: {
   active: number;
   total: number;
+  activeColor?: string;
+  inactiveColor?: string;
 }) {
   return (
     <View
@@ -273,8 +407,7 @@ export function PageDots({
             width: i === active ? 22 : 7,
             height: 7,
             borderRadius: 999,
-            backgroundColor:
-              i === active ? "#fff" : "rgba(255,255,255,0.32)",
+            backgroundColor: i === active ? activeColor : inactiveColor,
           }}
         />
       ))}
@@ -287,12 +420,10 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: -120,
     top: -110,
-    opacity: 0.32,
   },
   circlesBL: {
     position: "absolute",
     left: -110,
     bottom: -120,
-    opacity: 0.14,
   },
 });

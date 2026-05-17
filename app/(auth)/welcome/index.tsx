@@ -8,6 +8,7 @@ import React, {
 import {
   Dimensions,
   FlatList,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -25,6 +26,8 @@ import {
   ForestHeroBg,
   HeroArt,
   PageDots,
+  authHeroTokens,
+  type AuthHeroTokens,
 } from "@/components/ui/auth/AuthHero";
 import {
   clearBioCredential,
@@ -99,9 +102,10 @@ export default function WelcomeGate() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tokens = useMemo(() => authHeroTokens(theme), [theme]);
   const styles = useMemo(
-    () => makeStyles(theme, insets.top, insets.bottom),
-    [theme, insets.top, insets.bottom],
+    () => makeStyles(theme, insets.top, insets.bottom, tokens),
+    [theme, insets.top, insets.bottom, tokens],
   );
   const sessionLogin = useSessionStore((s) => s.login);
 
@@ -227,6 +231,7 @@ export default function WelcomeGate() {
             <CTASlide
               styles={styles}
               theme={theme}
+              tokens={tokens}
               bioReady={bioReady}
               bioBusy={bioBusy}
               bioType={bioType}
@@ -249,6 +254,7 @@ export default function WelcomeGate() {
             onSkip={handleSkip}
             styles={styles}
             theme={theme}
+            tokens={tokens}
           />
         </View>
       );
@@ -256,6 +262,7 @@ export default function WelcomeGate() {
     [
       styles,
       theme,
+      tokens,
       bioReady,
       bioBusy,
       bioType,
@@ -276,7 +283,7 @@ export default function WelcomeGate() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style={tokens.statusBar} />
       <FlatList
         ref={listRef}
         data={data}
@@ -302,6 +309,7 @@ function PitchSlide({
   onSkip,
   styles,
   theme,
+  tokens,
 }: {
   slide: SlideConfig;
   index: number;
@@ -309,6 +317,7 @@ function PitchSlide({
   onSkip: () => void;
   styles: ReturnType<typeof makeStyles>;
   theme: Theme;
+  tokens: AuthHeroTokens;
 }) {
   return (
     <View style={styles.slide}>
@@ -329,7 +338,9 @@ function PitchSlide({
         </Pressable>
       </View>
       <View style={styles.heroBody}>
-        {slide.illustration ? <HeroArt kind={slide.illustration} /> : null}
+        {slide.illustration ? (
+          <HeroArt kind={slide.illustration} theme={theme} />
+        ) : null}
         <Text
           style={styles.heroTitle}
           accessibilityRole="header"
@@ -340,7 +351,12 @@ function PitchSlide({
         <Text style={styles.heroSub}>{slide.sub}</Text>
       </View>
       <View style={styles.slideFooter}>
-        <PageDots active={activeIndex} total={4} />
+        <PageDots
+          active={activeIndex}
+          total={4}
+          activeColor={tokens.dotActive}
+          inactiveColor={tokens.dotInactive}
+        />
       </View>
     </View>
   );
@@ -349,6 +365,7 @@ function PitchSlide({
 function CTASlide({
   styles,
   theme,
+  tokens,
   bioReady,
   bioBusy,
   bioType,
@@ -361,6 +378,7 @@ function CTASlide({
 }: {
   styles: ReturnType<typeof makeStyles>;
   theme: Theme;
+  tokens: AuthHeroTokens;
   bioReady: boolean;
   bioBusy: boolean;
   bioType: BiometricType;
@@ -379,12 +397,12 @@ function CTASlide({
         <View />
       </View>
       <View style={styles.heroBody}>
-        <View style={styles.wordmarkRow}>
-          <View style={styles.wordmarkBadge}>
-            <Text style={styles.wordmarkBadgeText}>G</Text>
-          </View>
-          <Text style={styles.wordmarkText}>Gaznger</Text>
-        </View>
+        <Image
+          source={tokens.logoAsset}
+          style={styles.wordmarkLogo}
+          resizeMode="contain"
+          accessibilityLabel="Gaznger"
+        />
         <Text
           style={styles.heroTitle}
           accessibilityRole="header"
@@ -392,7 +410,7 @@ function CTASlide({
           Fuel, the easy way.
         </Text>
         <Text style={styles.heroSub}>
-          Households, vendors, riders — one app for all of you.
+          Households, vendors, riders — one app for all.
         </Text>
       </View>
       <View style={styles.ctaFooter}>
@@ -407,7 +425,11 @@ function CTASlide({
               (pressed || bioBusy) && { opacity: 0.85 },
             ]}
           >
-            <Ionicons name="finger-print" size={20} color="#fff" />
+            <Ionicons
+              name="finger-print"
+              size={20}
+              color={tokens.bioBtnText}
+            />
             <Text style={styles.bioButtonText}>
               Sign in with {biometricLabel(bioType)}
             </Text>
@@ -435,7 +457,12 @@ function CTASlide({
         >
           <Text style={styles.signupBtnText}>Sign up</Text>
         </Pressable>
-        <PageDots active={activeIndex} total={4} />
+        <PageDots
+          active={activeIndex}
+          total={4}
+          activeColor={tokens.dotActive}
+          inactiveColor={tokens.dotInactive}
+        />
         <View style={styles.legalRow}>
           <Text style={styles.legalText}>By continuing you agree to our </Text>
           <Pressable onPress={onTerms} hitSlop={6}>
@@ -452,11 +479,17 @@ function CTASlide({
   );
 }
 
-const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
+const makeStyles = (
+  theme: Theme,
+  topInset: number,
+  bottomInset: number,
+  tokens: AuthHeroTokens,
+) =>
   StyleSheet.create({
     root: {
       flex: 1,
-      backgroundColor: theme.palette.green800,
+      backgroundColor:
+        theme.mode === "dark" ? theme.palette.green800 : theme.bg,
     },
     slide: {
       width: SCREEN_W,
@@ -471,15 +504,15 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       minHeight: topInset + 44,
     },
     skipBtn: {
-      backgroundColor: "rgba(255,255,255,0.10)",
-      borderColor: "rgba(255,255,255,0.18)",
+      backgroundColor: tokens.skipBg,
+      borderColor: tokens.skipBorder,
       borderWidth: 1,
       borderRadius: 999,
       paddingHorizontal: 14,
       paddingVertical: 6,
     },
     skipText: {
-      color: "#fff",
+      color: tokens.skipText,
       fontSize: 12,
       fontWeight: "700",
     },
@@ -490,7 +523,7 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       justifyContent: "center",
     },
     heroTitle: {
-      color: "#fff",
+      color: tokens.textPrimary,
       fontSize: 28,
       fontWeight: "800",
       letterSpacing: -0.4,
@@ -498,7 +531,7 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       textAlign: "center",
     },
     heroSub: {
-      color: "rgba(255,255,255,0.82)",
+      color: tokens.textSecondary,
       fontSize: 14.5,
       lineHeight: 22,
       textAlign: "center",
@@ -514,31 +547,10 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       paddingBottom: Math.max(bottomInset + 8, 28),
       gap: 10,
     },
-    wordmarkRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      marginBottom: 28,
-    },
-    wordmarkBadge: {
-      width: 44,
-      height: 44,
-      borderRadius: 12,
-      backgroundColor: "#fff",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    wordmarkBadgeText: {
-      color: theme.palette.green700,
-      fontWeight: "900",
-      fontSize: 22,
-      letterSpacing: -0.5,
-    },
-    wordmarkText: {
-      color: "#fff",
-      fontSize: 26,
-      fontWeight: "900",
-      letterSpacing: -0.6,
+    wordmarkLogo: {
+      width: 200,
+      height: 70,
+      marginBottom: 24,
     },
     bioButton: {
       flexDirection: "row",
@@ -547,24 +559,24 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       gap: 10,
       height: 52,
       borderRadius: 999,
-      backgroundColor: "rgba(255,255,255,0.18)",
+      backgroundColor: tokens.bioBtnBg,
       borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.32)",
+      borderColor: tokens.bioBtnBorder,
     },
     bioButtonText: {
-      color: "#fff",
+      color: tokens.bioBtnText,
       fontSize: 15,
       fontWeight: "800",
     },
     signinBtn: {
       height: 52,
       borderRadius: 999,
-      backgroundColor: "#fff",
+      backgroundColor: tokens.primaryBtnBg,
       alignItems: "center",
       justifyContent: "center",
     },
     signinBtnText: {
-      color: theme.palette.green700,
+      color: tokens.primaryBtnText,
       fontSize: 15,
       fontWeight: "800",
     },
@@ -572,13 +584,13 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       height: 52,
       borderRadius: 999,
       borderWidth: 1.5,
-      borderColor: "rgba(255,255,255,0.55)",
+      borderColor: tokens.outlineBtnBorder,
       backgroundColor: "transparent",
       alignItems: "center",
       justifyContent: "center",
     },
     signupBtnText: {
-      color: "#fff",
+      color: tokens.outlineBtnText,
       fontSize: 15,
       fontWeight: "800",
     },
@@ -591,12 +603,12 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       marginTop: 8,
     },
     legalText: {
-      color: "rgba(255,255,255,0.65)",
+      color: tokens.legalText,
       fontSize: 11.5,
       lineHeight: 18,
     },
     legalLink: {
-      color: "#fff",
+      color: tokens.legalLink,
       fontSize: 11.5,
       fontWeight: "700",
       lineHeight: 18,

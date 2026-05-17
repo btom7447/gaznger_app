@@ -37,6 +37,7 @@ export function useAppLockOnResume() {
     const sub = AppState.addEventListener(
       "change",
       async (next: AppStateStatus) => {
+        console.log("[appLockOnResume] AppState=" + next);
         if (next === "background" || next === "inactive") {
           backgroundedAtRef.current = Date.now();
           return;
@@ -63,6 +64,7 @@ export function useAppLockOnResume() {
         }
 
         const bio = await getBiometricEnabled();
+        console.log("[appLockOnResume] redirecting to unlock, bio=" + bio);
         if (bio) {
           router.replace("/(auth)/unlock/biometric" as never);
         } else {

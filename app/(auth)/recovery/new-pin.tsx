@@ -60,7 +60,7 @@ export default function NewPinScreen() {
         toast.error("Reset expired", {
           description: "Try the recovery flow again.",
         });
-        router.replace("/(auth)/recovery/phone" as never);
+        router.push("/(auth)/recovery/phone" as never);
         return;
       }
       setSubmitting(true);

@@ -17,7 +17,13 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Theme, useTheme } from "@/constants/theme";
-import { ForestHeroBg, HeroArt, PageDots } from "./AuthHero";
+import {
+  ForestHeroBg,
+  HeroArt,
+  PageDots,
+  authHeroTokens,
+  type AuthHeroTokens,
+} from "./AuthHero";
 
 const SCREEN_W = Dimensions.get("window").width;
 
@@ -70,9 +76,10 @@ export default function RoleWelcomeCarousel({
 }: Props) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const tokens = useMemo(() => authHeroTokens(theme), [theme]);
   const styles = useMemo(
-    () => makeStyles(theme, insets.top, insets.bottom),
-    [theme, insets.top, insets.bottom],
+    () => makeStyles(theme, insets.top, insets.bottom, tokens),
+    [theme, insets.top, insets.bottom, tokens],
   );
 
   const [activeIndex, setActiveIndex] = useState(0);
@@ -150,7 +157,12 @@ export default function RoleWelcomeCarousel({
                 >
                   <Text style={styles.getStartedText}>{ctaLabel}</Text>
                 </Pressable>
-                <PageDots active={activeIndex} total={4} />
+                <PageDots
+                  active={activeIndex}
+                  total={4}
+                  activeColor={tokens.dotActive}
+                  inactiveColor={tokens.dotInactive}
+                />
               </View>
             </View>
           </View>
@@ -187,7 +199,7 @@ export default function RoleWelcomeCarousel({
               </Pressable>
             </View>
             <View style={styles.heroBody}>
-              <HeroArt kind={item.illustration} />
+              <HeroArt kind={item.illustration} theme={theme} />
               <Text style={styles.eyebrow}>{eyebrow}</Text>
               <Text
                 style={[styles.heroTitle, { marginTop: 8 }]}
@@ -199,7 +211,12 @@ export default function RoleWelcomeCarousel({
               <Text style={styles.heroSub}>{item.sub}</Text>
             </View>
             <View style={styles.slideFooter}>
-              <PageDots active={activeIndex} total={4} />
+              <PageDots
+                active={activeIndex}
+                total={4}
+                activeColor={tokens.dotActive}
+                inactiveColor={tokens.dotInactive}
+              />
             </View>
           </View>
         </View>
@@ -208,6 +225,7 @@ export default function RoleWelcomeCarousel({
     [
       styles,
       theme,
+      tokens,
       handleBack,
       handleSkip,
       onCta,
@@ -221,7 +239,7 @@ export default function RoleWelcomeCarousel({
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style={tokens.statusBar} />
       <FlatList
         ref={listRef}
         data={data}
@@ -238,11 +256,17 @@ export default function RoleWelcomeCarousel({
   );
 }
 
-const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
+const makeStyles = (
+  theme: Theme,
+  topInset: number,
+  bottomInset: number,
+  tokens: AuthHeroTokens,
+) =>
   StyleSheet.create({
     root: {
       flex: 1,
-      backgroundColor: theme.palette.green800,
+      backgroundColor:
+        theme.mode === "dark" ? theme.palette.green800 : theme.bg,
     },
     slide: {
       width: SCREEN_W,
@@ -261,21 +285,21 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       paddingVertical: 6,
     },
     backBtnText: {
-      color: "#fff",
+      color: tokens.textPrimary,
       fontSize: 13,
       fontWeight: "700",
       opacity: 0.85,
     },
     skipBtn: {
-      backgroundColor: "rgba(255,255,255,0.10)",
-      borderColor: "rgba(255,255,255,0.18)",
+      backgroundColor: tokens.skipBg,
+      borderColor: tokens.skipBorder,
       borderWidth: 1,
       borderRadius: 999,
       paddingHorizontal: 14,
       paddingVertical: 6,
     },
     skipText: {
-      color: "#fff",
+      color: tokens.skipText,
       fontSize: 12,
       fontWeight: "700",
     },
@@ -286,14 +310,14 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       justifyContent: "center",
     },
     eyebrow: {
-      color: "rgba(255,255,255,0.78)",
+      color: tokens.eyebrow,
       fontSize: 11,
       fontWeight: "800",
       letterSpacing: 1.4,
       textTransform: "uppercase",
     },
     heroTitle: {
-      color: "#fff",
+      color: tokens.textPrimary,
       fontSize: 28,
       fontWeight: "800",
       letterSpacing: -0.4,
@@ -301,7 +325,7 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       textAlign: "center",
     },
     heroSub: {
-      color: "rgba(255,255,255,0.82)",
+      color: tokens.textSecondary,
       fontSize: 14.5,
       lineHeight: 22,
       textAlign: "center",
@@ -320,12 +344,12 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
     getStartedBtn: {
       height: 52,
       borderRadius: 999,
-      backgroundColor: "#fff",
+      backgroundColor: tokens.primaryBtnBg,
       alignItems: "center",
       justifyContent: "center",
     },
     getStartedText: {
-      color: theme.palette.green700,
+      color: tokens.primaryBtnText,
       fontSize: 15,
       fontWeight: "800",
     },

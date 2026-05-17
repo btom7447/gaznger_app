@@ -3,10 +3,13 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle } from "react-native-svg";
-import { LinearGradient } from "expo-linear-gradient";
 import { Theme, useTheme } from "@/constants/theme";
 import { Button } from "@/components/ui/primitives";
+import {
+  ForestHeroBg,
+  authHeroTokens,
+  type AuthHeroTokens,
+} from "@/components/ui/auth/AuthHero";
 import { getSocket, useSocketStatus } from "@/lib/socket";
 import { useSessionStore } from "@/store/useSessionStore";
 import { beginIntentionalSignOut } from "@/lib/api";
@@ -31,9 +34,10 @@ export default function VerificationPendingScreen() {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tokens = useMemo(() => authHeroTokens(theme), [theme]);
   const styles = useMemo(
-    () => makeStyles(theme, insets.top, insets.bottom),
-    [theme, insets.top, insets.bottom],
+    () => makeStyles(theme, insets.top, insets.bottom, tokens),
+    [theme, insets.top, insets.bottom, tokens],
   );
   const params = useLocalSearchParams<{ role?: Role; submitted?: string }>();
   const role: Role = params.role === "vendor" ? "vendor" : "rider";
@@ -110,22 +114,46 @@ export default function VerificationPendingScreen() {
         <View style={styles.heroCard}>
           <ForestHeroBg theme={theme} />
           <View style={styles.heroTop}>
-            <View style={styles.heroIcon}>
-              <Ionicons name="shield-checkmark" size={26} color="#fff" />
+            <View
+              style={[
+                styles.heroIcon,
+                {
+                  backgroundColor: tokens.skipBg,
+                  borderColor: tokens.skipBorder,
+                },
+              ]}
+            >
+              <Ionicons
+                name="shield-checkmark"
+                size={26}
+                color={tokens.textPrimary}
+              />
             </View>
-            <View style={styles.statusPill}>
+            <View
+              style={[
+                styles.statusPill,
+                {
+                  backgroundColor: tokens.skipBg,
+                  borderColor: tokens.skipBorder,
+                },
+              ]}
+            >
               <View style={styles.statusDot} />
-              <Text style={styles.statusText}>{statusLabel}</Text>
+              <Text style={[styles.statusText, { color: tokens.textPrimary }]}>
+                {statusLabel}
+              </Text>
             </View>
           </View>
           <Text
-            style={styles.heroHeadline}
+            style={[styles.heroHeadline, { color: tokens.textPrimary }]}
             accessibilityRole="header"
             accessibilityLabel={headline}
           >
             {headline}
           </Text>
-          <Text style={styles.heroSub}>{sub}</Text>
+          <Text style={[styles.heroSub, { color: tokens.textSecondary }]}>
+            {sub}
+          </Text>
         </View>
 
         {!submitted ? (
@@ -192,44 +220,6 @@ export default function VerificationPendingScreen() {
 }
 
 /* ─────────────── Pieces ─────────────── */
-
-function ForestHeroBg({ theme }: { theme: Theme }) {
-  return (
-    <>
-      <LinearGradient
-        colors={[theme.palette.green700, theme.palette.green900, "#08231a"]}
-        start={{ x: 0.1, y: 0 }}
-        end={{ x: 0.9, y: 1 }}
-        locations={[0, 0.65, 1]}
-        style={StyleSheet.absoluteFill}
-      />
-      <View
-        pointerEvents="none"
-        style={{
-          position: "absolute",
-          right: -100,
-          top: -90,
-          opacity: 0.28,
-        }}
-      >
-        <Svg width={280} height={280} viewBox="0 0 280 280">
-          {[150, 118, 88, 62, 40].map((r) => (
-            <Circle
-              key={r}
-              cx={140}
-              cy={140}
-              r={r}
-              stroke="#fff"
-              strokeWidth={1.1}
-              fill="none"
-              opacity={1 - r / 200}
-            />
-          ))}
-        </Svg>
-      </View>
-    </>
-  );
-}
 
 function CheckRow({
   ok,
@@ -363,11 +353,17 @@ function SecondaryLink({
   );
 }
 
-const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
+const makeStyles = (
+  theme: Theme,
+  topInset: number,
+  bottomInset: number,
+  tokens: AuthHeroTokens,
+) =>
   StyleSheet.create({
     root: {
       flex: 1,
-      backgroundColor: theme.bg,
+      backgroundColor:
+        theme.mode === "dark" ? theme.palette.green800 : theme.bg,
     },
     scroll: {
       paddingHorizontal: 16,
@@ -391,9 +387,7 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       width: 52,
       height: 52,
       borderRadius: 16,
-      backgroundColor: "rgba(255,255,255,0.14)",
       borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.25)",
       alignItems: "center",
       justifyContent: "center",
     },
@@ -401,9 +395,7 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       flexDirection: "row",
       alignItems: "center",
       gap: 6,
-      backgroundColor: "rgba(255,255,255,0.14)",
       borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.25)",
       paddingHorizontal: 10,
       paddingVertical: 6,
       borderRadius: 999,
@@ -415,14 +407,12 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       backgroundColor: "#FFE08A",
     },
     statusText: {
-      color: "#fff",
       fontSize: 11,
       fontWeight: "800",
       letterSpacing: 0.3,
       textTransform: "uppercase",
     },
     heroHeadline: {
-      color: "#fff",
       fontSize: 26,
       fontWeight: "800",
       letterSpacing: -0.4,
@@ -430,7 +420,6 @@ const makeStyles = (theme: Theme, topInset: number, bottomInset: number) =>
       marginTop: 20,
     },
     heroSub: {
-      color: "rgba(255,255,255,0.85)",
       fontSize: 14,
       lineHeight: 22,
       marginTop: 10,
