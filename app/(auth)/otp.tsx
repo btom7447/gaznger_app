@@ -149,12 +149,13 @@ export default function OtpScreen() {
         console.log("[otp] step:after-setPhoneVerified");
 
         if (purpose === "signup") {
-          // v7 signup flow: role is picked BEFORE phone/OTP, so after
-          // OTP succeeds we forward to the role's profile step. Fall
-          // back to the role picker only if the store somehow lost the
-          // role (deep-link / cleared state) so the user isn't stranded.
+          // v7 signup flow: OTP → pin-create → security → permissions →
+          // onboarding/{role}/wizard. The role-specific wizard at the
+          // end is the v7 "details" step; the legacy /signup/profile-*
+          // screens are dead. Fall back to role picker only if the
+          // store lost the role so the user isn't stranded.
           const next = pendingRole
-            ? `/(auth)/signup/profile-${pendingRole}`
+            ? "/(auth)/signup/pin-create"
             : "/(auth)/signup/role";
           console.log(`[otp] step:before-router.push target=${next}`);
           router.push(next as never);

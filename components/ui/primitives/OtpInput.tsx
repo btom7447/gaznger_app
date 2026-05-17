@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   Animated,
   NativeSyntheticEvent,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -130,10 +131,23 @@ export default function OtpInput({
     );
   });
 
-  // Tap anywhere on the row → focus the hidden input.
+  // Tap anywhere on the row (or any individual cell) → focus the
+  // hidden input. RN's TextInput.focus() reopens the soft keyboard
+  // even if the user dismissed it. Long-press paste also works through
+  // the same input — onChangeText receives the full pasted string and
+  // we strip non-digits + truncate below.
+  const focusInput = useCallback(() => {
+    if (disabled) return;
+    inputRef.current?.focus();
+  }, [disabled]);
+
   return (
-    <View style={styles.row}>
-      <View style={StyleSheet.absoluteFill} pointerEvents="box-none" />
+    <Pressable
+      onPress={focusInput}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? "Enter one-time code"}
+      style={styles.row}
+    >
       {cells}
       <TextInput
         ref={inputRef}
@@ -148,21 +162,14 @@ export default function OtpInput({
         autoComplete="one-time-code"
         importantForAutofill="yes"
         autoFocus
-        // The hidden input is what the user types into. We hide it via
-        // 0 size + transparent so the visible cells are the only thing
-        // the user perceives. Caret/selection don't appear because the
-        // input has no visible size.
+        // The hidden input is what the user types into. 1×1 transparent
+        // (not 0×0) because iOS drops focus on a zero-sized input. Sits
+        // on top of the row so paste/long-press menus anchor cleanly.
         style={styles.hiddenInput}
         caretHidden
-        accessible
-        accessibilityLabel={
-          accessibilityLabel ??
-          `One-time code, ${value.length} of ${length} digits entered`
-        }
-        accessibilityHint="Enter the 6-digit code sent to your phone"
-        accessibilityRole="text"
+        accessible={false}
       />
-    </View>
+    </Pressable>
   );
 }
 
