@@ -179,6 +179,7 @@ export default function RiderWizardScreen() {
     <AuthScreenContainer
       contentStyle={{ paddingTop: 0, paddingHorizontal: 0 }}
       background={theme.bgMuted}
+      scrollable={false}
       footer={
         step === 3 ? (
           <Button
@@ -218,8 +219,10 @@ export default function RiderWizardScreen() {
       />
 
       <ScrollView
+        style={{ flex: 1 }}
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
       >
         {step === 1 ? (

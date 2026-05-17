@@ -370,6 +370,7 @@ export default function VendorWizardScreen() {
     <AuthScreenContainer
       contentStyle={{ paddingTop: 0, paddingHorizontal: 0 }}
       background={theme.bgMuted}
+      scrollable={false}
       footer={
         step === 3 ? (
           <View style={{ gap: 8 }}>
@@ -426,8 +427,10 @@ export default function VendorWizardScreen() {
       />
 
       <ScrollView
+        style={{ flex: 1 }}
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
       >
         {step === 1 ? (

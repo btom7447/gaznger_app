@@ -96,6 +96,7 @@ export default function CustomerDetailsScreen() {
     <AuthScreenContainer
       contentStyle={{ paddingTop: 0, paddingHorizontal: 0 }}
       background={theme.bgMuted}
+      scrollable={false}
       footer={
         <Button
           variant="primary"
@@ -111,9 +112,11 @@ export default function CustomerDetailsScreen() {
       }
     >
       <ScrollView
+        style={{ flex: 1 }}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         <View style={styles.headerBlock}>
           <Text style={styles.eyebrow}>Almost there</Text>
