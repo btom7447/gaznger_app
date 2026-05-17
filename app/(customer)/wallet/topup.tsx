@@ -16,7 +16,7 @@ import { api } from "@/lib/api";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useWalletStore } from "@/store/useWalletStore";
 import { setPaystackPublicKey } from "@/lib/paystackKey";
-import { newIdempotencyKey } from "@/lib/idempotency";
+import { useIdempotencyKey } from "@/lib/idempotency";
 import {
   FloatingCTA,
   ScreenContainer,
@@ -66,6 +66,11 @@ export default function WalletTopUp() {
   const userEmail = useSessionStore((s) => s.user?.email);
   const refreshWallet = useWalletStore((s) => s.refresh);
   const { popup } = usePaystack();
+
+  // SECURITY M2 / EDGE P0-1 — stable key per top-up session so a
+  // retry of initialize OR verify reuses the same key and the
+  // server dedups. Consumed on terminal success.
+  const idem = useIdempotencyKey();
 
   const [amountText, setAmountText] = useState(() => {
     const initial = parseInt(prefill ?? "", 10);
@@ -124,7 +129,11 @@ export default function WalletTopUp() {
       const init = await api.post<InitializeResponse>(
         "/api/payments/topup/initialize",
         { amount },
-        { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+        {
+          headers: {
+            "Idempotency-Key": idem.get(`topup-initialize:${amount}`),
+          } as any,
+        }
       );
       setPaystackPublicKey(init.publicKey);
 
@@ -148,8 +157,16 @@ export default function WalletTopUp() {
             await api.post(
               "/api/payments/topup/verify",
               { reference: init.reference },
-              { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+              {
+                headers: {
+                  "Idempotency-Key": idem.get(
+                    `topup-verify:${init.reference}`,
+                  ),
+                } as any,
+              }
             );
+            idem.consume(`topup-verify:${init.reference}`);
+            idem.consume(`topup-initialize:${amount}`);
           } catch {
             // Webhook will catch it; just refresh.
           }

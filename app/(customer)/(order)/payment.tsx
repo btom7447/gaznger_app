@@ -9,7 +9,7 @@ import { useSessionStore } from "@/store/useSessionStore";
 import { useWalletStore } from "@/store/useWalletStore";
 import { api } from "@/lib/api";
 import { setPaystackPublicKey } from "@/lib/paystackKey";
-import { newIdempotencyKey } from "@/lib/idempotency";
+import { useIdempotencyKey } from "@/lib/idempotency";
 import { requireStepUpAuth } from "@/components/ui/auth";
 import {
   FloatingCTA,
@@ -88,6 +88,13 @@ export default function PaymentScreen() {
   const { step, total } = useFlowProgress("payment");
 
   const { popup } = usePaystack();
+
+  // SECURITY M2 / EDGE P0-1, P0-2, P2-3 — single key per logical
+  // operation (per orderId × op). The hook caches, so a retry of
+  // the same op reuses the same key and the server dedups. Keys
+  // consumed on terminal success so a fresh re-attempt mints a new
+  // one.
+  const idem = useIdempotencyKey();
 
   const station = draft.station;
   const totalKobo = station?.totalKobo ?? 0;
@@ -264,10 +271,28 @@ export default function PaymentScreen() {
           body.cylinderDetails = draft.cylinderDetails;
         }
       }
+      // SECURITY M3 — send a stable Idempotency-Key keyed by the
+      // draft hash so a flaky-network retry of placeOrder dedupes
+      // server-side. Phase 1 server added the middleware in
+      // non-enforcing mode; Phase 3 flips to enforce once every
+      // client build is sending the header.
+      const draftKey = JSON.stringify({
+        s: body.stationId,
+        f: body.fuelTypeId,
+        q: body.quantity,
+        a: body.deliveryAddressId,
+        d: body.deliveryType ?? null,
+      });
       const order = await api.post<{ _id: string; totalPrice: number }>(
         "/api/orders",
-        body
+        body,
+        {
+          headers: {
+            "Idempotency-Key": idem.get(`place-order:${draftKey}`),
+          } as any,
+        }
       );
+      idem.consume(`place-order:${draftKey}`);
       setOrderId(order._id);
       return order._id;
     } catch (err: any) {
@@ -277,7 +302,7 @@ export default function PaymentScreen() {
       );
       return null;
     }
-  }, [draft, station, setOrderId]);
+  }, [draft, station, setOrderId, idem]);
 
   /**
    * Best-effort points redemption. Failures are non-fatal — server is
@@ -287,15 +312,29 @@ export default function PaymentScreen() {
     async (orderId: string) => {
       if (pointsToSpend <= 0) return;
       try {
-        await api.post("/api/points/redeem", {
-          orderId,
-          pointsToRedeem: pointsToSpend,
-        });
+        // BUSINESS P1-1 — server now wraps deduct + order update in a
+        // transaction AND accepts Idempotency-Key. Pass a stable key
+        // per (orderId, points) so a retry doesn't double-deduct.
+        await api.post(
+          "/api/points/redeem",
+          {
+            orderId,
+            pointsToRedeem: pointsToSpend,
+          },
+          {
+            headers: {
+              "Idempotency-Key": idem.get(
+                `points-redeem:${orderId}:${pointsToSpend}`,
+              ),
+            } as any,
+          }
+        );
+        idem.consume(`points-redeem:${orderId}:${pointsToSpend}`);
       } catch {
         // Swallow.
       }
     },
-    [pointsToSpend]
+    [pointsToSpend, idem]
   );
 
   const goReceipt = useCallback(() => {
@@ -316,7 +355,11 @@ export default function PaymentScreen() {
         init = await api.post<InitializeResponse>(
           "/api/payments/initialize",
           { orderId },
-          { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+          {
+            headers: {
+              "Idempotency-Key": idem.get(`payment-initialize:${orderId}`),
+            } as any,
+          }
         );
       } catch (err: any) {
         // Surface a clear, actionable message instead of the raw 500
@@ -354,8 +397,14 @@ export default function PaymentScreen() {
             await api.post(
               "/api/payments/verify",
               { reference: init.reference },
-              { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+              {
+                headers: {
+                  "Idempotency-Key": idem.get(`payment-verify:${init.reference}`),
+                } as any,
+              }
             );
+            idem.consume(`payment-verify:${init.reference}`);
+            idem.consume(`payment-initialize:${orderId}`);
             await redeemPointsIfAny(orderId);
             goReceipt();
           } catch (err: any) {
@@ -394,8 +443,13 @@ export default function PaymentScreen() {
         await api.post(
           "/api/payments/charge-saved",
           { orderId },
-          { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+          {
+            headers: {
+              "Idempotency-Key": idem.get(`charge-saved:${orderId}`),
+            } as any,
+          }
         );
+        idem.consume(`charge-saved:${orderId}`);
         await redeemPointsIfAny(orderId);
         goReceipt();
       } catch (err: any) {
@@ -406,7 +460,7 @@ export default function PaymentScreen() {
         setSubmitting(false);
       }
     },
-    [redeemPointsIfAny, goReceipt]
+    [redeemPointsIfAny, goReceipt, idem]
   );
 
   /** Wallet flow — server debits the wallet, no Paystack. */
@@ -416,8 +470,13 @@ export default function PaymentScreen() {
         await api.post(
           "/api/payments/pay-with-wallet",
           { orderId },
-          { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+          {
+            headers: {
+              "Idempotency-Key": idem.get(`pay-with-wallet:${orderId}`),
+            } as any,
+          }
         );
+        idem.consume(`pay-with-wallet:${orderId}`);
         await redeemPointsIfAny(orderId);
         goReceipt();
       } catch (err: any) {
@@ -428,7 +487,7 @@ export default function PaymentScreen() {
         setSubmitting(false);
       }
     },
-    [redeemPointsIfAny, goReceipt]
+    [redeemPointsIfAny, goReceipt, idem]
   );
 
   /**
@@ -472,10 +531,13 @@ export default function PaymentScreen() {
                     { orderId },
                     {
                       headers: {
-                        "Idempotency-Key": newIdempotencyKey(),
+                        "Idempotency-Key": idem.get(
+                          `dev-mark-paid:${orderId}`,
+                        ),
                       } as any,
                     },
                   );
+                  idem.consume(`dev-mark-paid:${orderId}`);
                 } catch (err: any) {
                   // Best-effort — even if the stub fails (e.g. running
                   // against a prod-mode server), surface the failure

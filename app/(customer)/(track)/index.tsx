@@ -345,6 +345,11 @@ export default function TrackScreen() {
     refreshOrderStateRef.current = refreshOrderState;
   }, [refreshOrderState]);
 
+  // EDGE P1-6 — last-seen Order.version per orderId. Used by the
+  // onUpdate handler below to drop stale events that arrive out of
+  // order during a cancel-vs-accept race.
+  const lastOrderVersionRef = useRef<Map<string, number>>(new Map());
+
 
   /* ───────────────── Socket subscriptions ───────────────── */
   useEffect(() => {
@@ -358,6 +363,7 @@ export default function TrackScreen() {
     const onUpdate = (data: {
       orderId?: string;
       status?: string;
+      version?: number;
       eta?: number;
       rider?: RiderInfo;
       deliveredAt?: string;
@@ -368,6 +374,16 @@ export default function TrackScreen() {
       // Filter: ignore events for other orders once we know our id.
       const oid = effectiveOrderIdRef.current;
       if (oid && data.orderId && String(data.orderId) !== oid) return;
+      // EDGE P1-6 — drop stale events. Server bumps Order.version on
+      // every status write; out-of-order events arrive when a cancel
+      // races an accept. We keep the LAST seen version per order and
+      // discard anything older. Same-version still flows through
+      // (different consumers might care about rider vs eta fields).
+      if (typeof data.version === "number" && oid) {
+        const last = lastOrderVersionRef.current.get(oid) ?? -1;
+        if (data.version < last) return;
+        lastOrderVersionRef.current.set(oid, data.version);
+      }
       if (data.status) {
         setServerStatus(data.status);
         // Server signalled the rider is no longer on this order
