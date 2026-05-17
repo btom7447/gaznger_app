@@ -1,16 +1,16 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
 import { Theme, useTheme } from "@/constants/theme";
-import { AuthScreenContainer, V7Field } from "@/components/ui/auth";
+import { AuthScreenContainer } from "@/components/ui/auth";
 import {
   AddressSheet,
   type AddressResult,
@@ -23,10 +23,14 @@ import { useSessionStore } from "@/store/useSessionStore";
 /**
  * Customer onboarding — v7 unified auth.
  *
- * Single-page form (not a multi-step wizard) per the v7 spec: display
- * name + email + delivery address. All three required. Address is
- * captured via the universal AddressSheet (Places autocomplete + map
- * drop-pin) so the customer's first order has a pre-filled destination.
+ * Single-page form: display name + email + delivery address. All three
+ * required. Address is captured via the universal AddressSheet (Places
+ * autocomplete + map drop-pin) so the customer's first order has a
+ * pre-filled destination.
+ *
+ * Rebuilt 2026-05-17 with inline TextInputs (no extracted V7Field) so
+ * the soft keyboard stays open while typing. Sits directly in
+ * AuthScreenContainer's own ScrollView (no nested scroller).
  *
  * After Finish:
  *   PUT  /auth/me          { displayName, email }
@@ -49,14 +53,6 @@ export default function CustomerDetailsScreen() {
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const addressValid = !!address;
   const canSubmit = nameValid && emailValid && addressValid && !submitting;
-
-  const openAddressPicker = useCallback(() => {
-    sheetRef.current?.open();
-  }, []);
-
-  const handleAddressConfirm = useCallback((result: AddressResult) => {
-    setAddress(result);
-  }, []);
 
   const handleFinish = useCallback(async () => {
     if (!canSubmit || !address) return;
@@ -94,9 +90,8 @@ export default function CustomerDetailsScreen() {
 
   return (
     <AuthScreenContainer
-      contentStyle={{ paddingTop: 0, paddingHorizontal: 0 }}
+      contentStyle={{ paddingTop: 0, paddingHorizontal: 0, gap: 0 }}
       background={theme.bgMuted}
-      scrollable={false}
       footer={
         <Button
           variant="primary"
@@ -111,13 +106,7 @@ export default function CustomerDetailsScreen() {
         </Button>
       }
     >
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-      >
+      <View style={styles.body}>
         <View style={styles.headerBlock}>
           <Text style={styles.eyebrow}>Almost there</Text>
           <Text style={styles.title}>A few quick details</Text>
@@ -127,35 +116,57 @@ export default function CustomerDetailsScreen() {
         </View>
 
         <View style={styles.fields}>
-          <V7Field
-            label="Display name"
-            required
-            hint="Shown to your rider when you order."
-            value={name}
-            onChangeText={setName}
-            placeholder="e.g. Ada Eze"
-            autoCapitalize="words"
-          />
+          <View>
+            <View style={styles.labelRow}>
+              <Text style={styles.fieldLabel}>Display name</Text>
+              <Text style={styles.requiredMark}> ·</Text>
+            </View>
+            <View style={styles.input}>
+              <TextInput
+                value={name}
+                onChangeText={setName}
+                placeholder="e.g. Ada Eze"
+                placeholderTextColor={theme.fgMuted}
+                style={styles.inputText}
+                autoCapitalize="words"
+                selectionColor={theme.primary}
+              />
+            </View>
+            <Text style={styles.fieldHint}>
+              Shown to your rider when you order.
+            </Text>
+          </View>
 
-          <V7Field
-            label="Email"
-            required
-            hint="Receipts and important account updates."
-            value={email}
-            onChangeText={setEmail}
-            placeholder="you@example.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
+          <View>
+            <View style={styles.labelRow}>
+              <Text style={styles.fieldLabel}>Email</Text>
+              <Text style={styles.requiredMark}> ·</Text>
+            </View>
+            <View style={styles.input}>
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                placeholder="you@example.com"
+                placeholderTextColor={theme.fgMuted}
+                style={styles.inputText}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                selectionColor={theme.primary}
+              />
+            </View>
+            <Text style={styles.fieldHint}>
+              Receipts and important account updates.
+            </Text>
+          </View>
 
-          {/* Address picker — tappable trigger styled like V7Field */}
           <View>
             <View style={styles.labelRow}>
               <Text style={styles.fieldLabel}>Delivery address</Text>
               <Text style={styles.requiredMark}> ·</Text>
             </View>
             <Pressable
-              onPress={openAddressPicker}
+              onPress={() => sheetRef.current?.open()}
               accessibilityRole="button"
               accessibilityLabel={
                 address
@@ -180,7 +191,9 @@ export default function CustomerDetailsScreen() {
                 ]}
                 numberOfLines={1}
               >
-                {address ? address.address : "Type to search Google Places"}
+                {address
+                  ? address.address
+                  : "Tap to search Google Places"}
               </Text>
               <Ionicons
                 name={address ? "create-outline" : "chevron-forward"}
@@ -195,7 +208,6 @@ export default function CustomerDetailsScreen() {
             ) : null}
           </View>
 
-          {/* "Home" preview card once address is locked in */}
           {address ? (
             <View style={styles.homePreviewCard}>
               <View style={styles.homePill}>
@@ -220,19 +232,18 @@ export default function CustomerDetailsScreen() {
             </Text>
           </View>
         </View>
-      </ScrollView>
+      </View>
 
-      <AddressSheet ref={sheetRef} onConfirm={handleAddressConfirm} />
+      <AddressSheet ref={sheetRef} onConfirm={setAddress} />
     </AuthScreenContainer>
   );
 }
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
-    scroll: {
+    body: {
       paddingHorizontal: 16,
       paddingTop: 4,
-      paddingBottom: 140,
     },
     headerBlock: {
       paddingHorizontal: 4,
@@ -281,6 +292,23 @@ const makeStyles = (theme: Theme) =>
       fontSize: 11,
       fontWeight: "800",
       color: theme.palette.green700,
+    },
+    input: {
+      height: 52,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: theme.surface,
+      borderWidth: 1.5,
+      borderColor: theme.divider,
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    inputText: {
+      flex: 1,
+      fontSize: 15,
+      fontWeight: "700",
+      color: theme.fg,
+      paddingVertical: 0,
     },
     addressField: {
       height: 52,

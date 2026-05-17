@@ -22,5 +22,3 @@ export { default as BiometricSheet } from "./BiometricSheet";
 export { default as EdgeStateScreen } from "./EdgeStateScreen";
 export type { EdgeTone } from "./EdgeStateScreen";
 export { StepUpAuthHost, requireStepUpAuth, requireStepUpPin } from "./StepUpAuth";
-export { default as V7Field } from "./V7Field";
-export type { V7FieldProps } from "./V7Field";

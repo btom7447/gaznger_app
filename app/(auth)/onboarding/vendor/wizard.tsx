@@ -10,7 +10,6 @@ import {
   FlatList,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -20,7 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { toast } from "sonner-native";
 import { Theme, useTheme } from "@/constants/theme";
-import { AuthScreenContainer, V7Field } from "@/components/ui/auth";
+import { AuthScreenContainer } from "@/components/ui/auth";
 import {
   AddressSheet,
   type AddressResult,
@@ -37,15 +36,18 @@ import { useSessionStore } from "@/store/useSessionStore";
  *   Step 2 — First station (name + address picker + state + lga + hours + fuels[])
  *   Step 3 — Bank         (skippable — pick bank, NUBAN, auto-resolve name)
  *
- * Finish routes to /(auth)/verification/pending?role=vendor. KYC docs
- * happen later from the pending screen via /verification/vendor.
+ * Rebuilt 2026-05-17 with all TextInputs INLINE (no extracted V7Field /
+ * sub-step components). The previous structure of three sub-components
+ * each rendering V7Field caused TextInput to lose focus on every
+ * keystroke under Fabric. Inline TextInputs sit directly in the
+ * AuthScreenContainer's own ScrollView (no nested scrollers) — mirrors
+ * the working pattern from `/auth/phone.tsx`.
  *
- * Server calls:
+ * Server calls (unchanged):
  *   Step 1 Continue → PUT /auth/me { displayName, email, vendorBusinessName }
  *   Step 2 Continue → POST /api/vendor/stations { name, address, state, lga,
  *                       location, operatingHours, fuels: [{ fuel, pricePerUnit, available }] }
  *   Step 3 Finish   → POST /api/vendor/banks/saved { bankName, bankCode, accountNumber, stationId }
- *                     (skippable)
  */
 
 interface PaystackBank {
@@ -211,8 +213,6 @@ export default function VendorWizardScreen() {
     };
   }, [pickedBank, accountNumber]);
 
-  // Defaults derived from Step 1 — station name falls back to business
-  // name when empty.
   const effectiveStationName = stationName.trim() || businessName.trim();
 
   const step1Valid =
@@ -257,7 +257,6 @@ export default function VendorWizardScreen() {
         email: data.email ?? "",
         vendorBusinessName: data.vendorBusinessName,
       });
-      // Default station name to business name on first entry to Step 2.
       if (!stationName.trim()) setStationName(businessName.trim());
       setStep(2);
     } catch (err: any) {
@@ -368,9 +367,10 @@ export default function VendorWizardScreen() {
 
   return (
     <AuthScreenContainer
-      contentStyle={{ paddingTop: 0, paddingHorizontal: 0 }}
+      contentStyle={{ paddingTop: 0, paddingHorizontal: 0, gap: 0 }}
       background={theme.bgMuted}
-      scrollable={false}
+      showBack={false}
+      showHelp={false}
       footer={
         step === 3 ? (
           <View style={{ gap: 8 }}>
@@ -407,10 +407,7 @@ export default function VendorWizardScreen() {
             full
             onPress={step === 1 ? handleStep1Continue : handleStep2Continue}
             loading={submitting}
-            disabled={
-              submitting ||
-              (step === 1 ? !step1Valid : !step2Valid)
-            }
+            disabled={submitting || (step === 1 ? !step1Valid : !step2Valid)}
             accessibilityLabel="Continue"
           >
             {submitting ? "Saving…" : "Continue"}
@@ -418,68 +415,511 @@ export default function VendorWizardScreen() {
         )
       }
     >
-      <WizardHeader
-        step={step}
-        total={3}
-        onBack={handleBack}
-        theme={theme}
-        styles={styles}
-      />
+      {/* Header lives inside the scrollable area so the chevron + progress
+          ride alongside the form content. */}
+      <View style={styles.wizardHeader}>
+        <Pressable
+          onPress={handleBack}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          hitSlop={6}
+          style={({ pressed }) => [
+            styles.headerBackBtn,
+            pressed && { opacity: 0.85 },
+          ]}
+        >
+          <Ionicons name="chevron-back" size={22} color={theme.fg} />
+        </Pressable>
+        <View style={styles.progressTrack}>
+          {[1, 2, 3].map((i) => (
+            <View
+              key={i}
+              style={[
+                styles.progressSeg,
+                i <= step && styles.progressSegActive,
+              ]}
+            />
+          ))}
+        </View>
+        <Text style={styles.progressCount}>{step}/3</Text>
+      </View>
 
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        showsVerticalScrollIndicator={false}
-      >
-        {step === 1 ? (
-          <Step1Business
-            ownerName={ownerName}
-            businessName={businessName}
-            businessEmail={businessEmail}
-            setOwnerName={setOwnerName}
-            setBusinessName={setBusinessName}
-            setBusinessEmail={setBusinessEmail}
-            theme={theme}
-            styles={styles}
-          />
-        ) : null}
+      {/* Step 1 — Business */}
+      {step === 1 ? (
+        <View style={styles.stepWrap}>
+          <View style={styles.stepHeading}>
+            <Text style={styles.stepEyebrow}>Step 1 of 3 · Business</Text>
+            <Text style={styles.stepTitle}>Tell us about your business</Text>
+            <Text style={styles.stepSub}>
+              The basics — we'll ask for CAC and NMDPRA documents at the
+              verification step.
+            </Text>
+          </View>
+          <View style={styles.fields}>
+            <View>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>Owner name</Text>
+                <Text style={styles.requiredMark}> ·</Text>
+              </View>
+              <View style={styles.input}>
+                <TextInput
+                  value={ownerName}
+                  onChangeText={setOwnerName}
+                  placeholder="Your full name"
+                  placeholderTextColor={theme.fgMuted}
+                  style={styles.inputText}
+                  autoCapitalize="words"
+                  selectionColor={theme.primary}
+                />
+              </View>
+            </View>
 
-        {step === 2 ? (
-          <Step2Station
-            stationName={stationName}
-            stationAddress={stationAddress}
-            openTime={openTime}
-            closeTime={closeTime}
-            fuelTypes={fuelTypes}
-            pickedFuels={pickedFuels}
-            businessName={businessName}
-            setStationName={setStationName}
-            setOpenTime={setOpenTime}
-            setCloseTime={setCloseTime}
-            setPickedFuels={setPickedFuels}
-            onPickAddress={() => addressSheetRef.current?.open()}
-            theme={theme}
-            styles={styles}
-          />
-        ) : null}
+            <View>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>Business name</Text>
+                <Text style={styles.requiredMark}> ·</Text>
+              </View>
+              <View style={styles.input}>
+                <TextInput
+                  value={businessName}
+                  onChangeText={setBusinessName}
+                  placeholder="e.g. Abkon Oil Ltd"
+                  placeholderTextColor={theme.fgMuted}
+                  style={styles.inputText}
+                  autoCapitalize="words"
+                  selectionColor={theme.primary}
+                />
+              </View>
+              <Text style={styles.fieldHint}>
+                As you'd want it shown to customers.
+              </Text>
+            </View>
 
-        {step === 3 ? (
-          <Step3Bank
-            banks={banks}
-            pickedBank={pickedBank}
-            accountNumber={accountNumber}
-            resolving={resolving}
-            resolvedName={resolvedName}
-            resolveError={resolveError}
-            setAccountNumber={setAccountNumber}
-            onOpenPicker={() => setPickerOpen(true)}
-            theme={theme}
-            styles={styles}
-          />
-        ) : null}
-      </ScrollView>
+            <View>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>Business email</Text>
+                <Text style={styles.requiredMark}> ·</Text>
+              </View>
+              <View style={styles.input}>
+                <TextInput
+                  value={businessEmail}
+                  onChangeText={setBusinessEmail}
+                  placeholder="business@example.com"
+                  placeholderTextColor={theme.fgMuted}
+                  style={styles.inputText}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  selectionColor={theme.primary}
+                />
+              </View>
+            </View>
+
+            <View style={styles.infoNote}>
+              <Ionicons
+                name="information-circle"
+                size={18}
+                color={theme.info}
+              />
+              <Text style={styles.infoText}>
+                You'll set up your first station next. Stations, fuels, and
+                bank can all be edited later.
+              </Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
+      {/* Step 2 — First station */}
+      {step === 2 ? (
+        <View style={styles.stepWrap}>
+          <View style={styles.stepHeading}>
+            <Text style={styles.stepEyebrow}>
+              Step 2 of 3 · First station
+            </Text>
+            <Text style={styles.stepTitle}>Add your first station</Text>
+            <Text style={styles.stepSub}>
+              So your Today screen has something to show when you sign in.
+            </Text>
+          </View>
+          <View style={styles.fields}>
+            <View>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>Station name</Text>
+                <Text style={styles.requiredMark}> ·</Text>
+              </View>
+              <View style={styles.input}>
+                <TextInput
+                  value={stationName}
+                  onChangeText={setStationName}
+                  placeholder={businessName || "e.g. Abkon — Lekki"}
+                  placeholderTextColor={theme.fgMuted}
+                  style={styles.inputText}
+                  autoCapitalize="words"
+                  selectionColor={theme.primary}
+                />
+              </View>
+              <Text style={styles.fieldHint}>
+                Defaults to your business name if you leave it blank.
+              </Text>
+            </View>
+
+            {/* Address — opens AddressSheet */}
+            <View>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>Address</Text>
+                <Text style={styles.requiredMark}> ·</Text>
+              </View>
+              <Pressable
+                onPress={() => addressSheetRef.current?.open()}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  stationAddress
+                    ? `Station address: ${stationAddress.address}. Tap to change.`
+                    : "Pick station address"
+                }
+                style={({ pressed }) => [
+                  styles.addressField,
+                  stationAddress ? styles.addressFieldFilled : null,
+                  pressed && { opacity: 0.94 },
+                ]}
+              >
+                <Ionicons
+                  name="location"
+                  size={18}
+                  color={stationAddress ? theme.primary : theme.fgMuted}
+                />
+                <Text
+                  style={[
+                    styles.addressText,
+                    !stationAddress && { color: theme.fgMuted },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {stationAddress
+                    ? stationAddress.address
+                    : "Tap to search Google Places"}
+                </Text>
+                <Ionicons
+                  name={stationAddress ? "create-outline" : "chevron-forward"}
+                  size={18}
+                  color={theme.fgMuted}
+                />
+              </Pressable>
+              {!stationAddress ? (
+                <Text style={styles.fieldHint}>
+                  We use this to match nearby customers.
+                </Text>
+              ) : null}
+            </View>
+
+            {stationAddress ? (
+              <View style={styles.gridRow}>
+                <View style={styles.gridCol}>
+                  <Text style={styles.fieldLabel}>State</Text>
+                  <View style={styles.readonlyField}>
+                    <Text style={styles.readonlyText} numberOfLines={1}>
+                      {stationAddress.stateLabel || stationAddress.state || "—"}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.gridCol}>
+                  <Text style={styles.fieldLabel}>LGA</Text>
+                  <View style={styles.readonlyField}>
+                    <Text style={styles.readonlyText} numberOfLines={1}>
+                      {stationAddress.lga || "—"}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ) : null}
+
+            <View>
+              <Text style={styles.fieldLabel}>Operating hours</Text>
+              <View style={styles.hoursRow}>
+                <View style={styles.timeCard}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.timeCardLabel}>Opens</Text>
+                    <TextInput
+                      value={openTime}
+                      onChangeText={setOpenTime}
+                      placeholder="06:00"
+                      placeholderTextColor={theme.fgMuted}
+                      style={styles.timeCardValue}
+                      keyboardType="numbers-and-punctuation"
+                      maxLength={5}
+                      accessibilityLabel="Opens time"
+                      selectionColor={theme.primary}
+                    />
+                  </View>
+                  <Ionicons
+                    name="chevron-down"
+                    size={16}
+                    color={theme.fgMuted}
+                  />
+                </View>
+                <View style={styles.timeCard}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.timeCardLabel}>Closes</Text>
+                    <TextInput
+                      value={closeTime}
+                      onChangeText={setCloseTime}
+                      placeholder="22:00"
+                      placeholderTextColor={theme.fgMuted}
+                      style={styles.timeCardValue}
+                      keyboardType="numbers-and-punctuation"
+                      maxLength={5}
+                      accessibilityLabel="Closes time"
+                      selectionColor={theme.primary}
+                    />
+                  </View>
+                  <Ionicons
+                    name="chevron-down"
+                    size={16}
+                    color={theme.fgMuted}
+                  />
+                </View>
+              </View>
+            </View>
+
+            <View>
+              <Text style={styles.fieldLabel}>Fuels you sell</Text>
+              {fuelTypes.length === 0 ? (
+                <View style={styles.fuelLoading}>
+                  <ActivityIndicator color={theme.primary} />
+                </View>
+              ) : (
+                <View style={styles.fuelList}>
+                  {fuelTypes.map((f) => {
+                    const state = pickedFuels[f._id] ?? {
+                      selected: false,
+                      price: "",
+                    };
+                    return (
+                      <View
+                        key={f._id}
+                        style={[
+                          styles.fuelRow,
+                          state.selected && styles.fuelRowActive,
+                        ]}
+                      >
+                        <Pressable
+                          onPress={() =>
+                            setPickedFuels({
+                              ...pickedFuels,
+                              [f._id]: {
+                                selected: !state.selected,
+                                price: state.price,
+                              },
+                            })
+                          }
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: state.selected }}
+                          accessibilityLabel={`Toggle ${f.name}`}
+                          hitSlop={6}
+                          style={[
+                            styles.fuelCheck,
+                            state.selected && styles.fuelCheckActive,
+                          ]}
+                        >
+                          {state.selected ? (
+                            <Ionicons
+                              name="checkmark"
+                              size={14}
+                              color="#fff"
+                            />
+                          ) : null}
+                        </Pressable>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={styles.fuelName}>{f.name}</Text>
+                          <Text style={styles.fuelUnit}>
+                            ₦/{f.unit ?? "L"} · starter price
+                          </Text>
+                        </View>
+                        {state.selected ? (
+                          <View style={styles.pricePill}>
+                            <Text style={styles.pricePrefix}>₦</Text>
+                            <TextInput
+                              value={state.price}
+                              onChangeText={(t) =>
+                                setPickedFuels({
+                                  ...pickedFuels,
+                                  [f._id]: {
+                                    selected: true,
+                                    price: t.replace(/[^0-9.]/g, ""),
+                                  },
+                                })
+                              }
+                              placeholder="0"
+                              placeholderTextColor={theme.fgMuted}
+                              keyboardType="decimal-pad"
+                              style={styles.priceInput}
+                              accessibilityLabel={`${f.name} price`}
+                              selectionColor={theme.primary}
+                            />
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+              <Text style={styles.fieldHint}>
+                Customers see these prices on the order screen. You can
+                change them anytime from Catalog.
+              </Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
+      {/* Step 3 — Bank */}
+      {step === 3 ? (
+        <View style={styles.stepWrap}>
+          <View style={styles.stepHeading}>
+            <Text style={styles.stepEyebrow}>Step 3 of 3 · Bank</Text>
+            <Text style={styles.stepTitle}>
+              Where should we send your money?
+            </Text>
+            <Text style={styles.stepSub}>
+              Daily settlements land here. You can skip this and add it later.
+            </Text>
+          </View>
+          <View style={styles.fields}>
+            <View>
+              <Text style={styles.fieldLabel}>Bank</Text>
+              <Pressable
+                onPress={() => setPickerOpen(true)}
+                disabled={banks === null}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  pickedBank
+                    ? `Bank: ${pickedBank.name}. Tap to change.`
+                    : "Choose bank"
+                }
+                style={({ pressed }) => [
+                  styles.bankPicker,
+                  pressed && { opacity: 0.92 },
+                ]}
+              >
+                {banks === null ? (
+                  <ActivityIndicator color={theme.primary} />
+                ) : pickedBank ? (
+                  <>
+                    <View style={styles.bankBrandTile}>
+                      <Text style={styles.bankBrandText}>
+                        {bankInitials(pickedBank.name)}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.bankPickerText} numberOfLines={1}>
+                        {bankShortName(pickedBank.name)}
+                      </Text>
+                      <Text style={styles.bankPickerSub} numberOfLines={1}>
+                        {pickedBank.code} · {pickedBank.name}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="chevron-down"
+                      size={16}
+                      color={theme.fgMuted}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Ionicons
+                      name="search"
+                      size={18}
+                      color={theme.fgMuted}
+                    />
+                    <Text
+                      style={[
+                        styles.bankPickerText,
+                        { color: theme.fgMuted, flex: 1 },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      Pick a bank
+                    </Text>
+                    <Ionicons
+                      name="chevron-down"
+                      size={16}
+                      color={theme.fgMuted}
+                    />
+                  </>
+                )}
+              </Pressable>
+            </View>
+
+            <View>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>Account number</Text>
+                <Text style={styles.requiredMark}> ·</Text>
+              </View>
+              <View style={styles.input}>
+                <TextInput
+                  value={accountNumber}
+                  onChangeText={(t) =>
+                    setAccountNumber(t.replace(/[^0-9]/g, "").slice(0, 10))
+                  }
+                  placeholder="10-digit NUBAN"
+                  placeholderTextColor={theme.fgMuted}
+                  style={styles.inputText}
+                  keyboardType="number-pad"
+                  autoCapitalize="none"
+                  maxLength={10}
+                  selectionColor={theme.primary}
+                />
+              </View>
+              {!resolvedName &&
+              !resolveError &&
+              accountNumber.length === 0 ? (
+                <Text style={styles.fieldHint}>
+                  We'll resolve the account name automatically.
+                </Text>
+              ) : null}
+            </View>
+
+            {resolving ? (
+              <View style={styles.resolveRow}>
+                <ActivityIndicator size="small" color={theme.primary} />
+                <Text style={styles.resolveText}>Verifying…</Text>
+              </View>
+            ) : resolvedName ? (
+              <View style={styles.resolveOk}>
+                <View style={styles.resolveCheck}>
+                  <Ionicons name="checkmark" size={18} color="#fff" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.resolveLabel}>Account name</Text>
+                  <Text style={styles.resolveName} numberOfLines={1}>
+                    {resolvedName.toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+            ) : resolveError ? (
+              <Text style={styles.resolveError}>{resolveError}</Text>
+            ) : accountNumber.length > 0 && accountNumber.length < 10 ? (
+              <Text style={styles.fieldHint}>
+                {10 - accountNumber.length} more digit
+                {10 - accountNumber.length === 1 ? "" : "s"}
+              </Text>
+            ) : null}
+
+            <View style={styles.infoNote}>
+              <Ionicons
+                name="shield-checkmark"
+                size={18}
+                color={theme.info}
+              />
+              <Text style={styles.infoText}>
+                We never store card details. Settlements use Paystack and
+                only require your bank + NUBAN.
+              </Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       <AddressSheet
         ref={addressSheetRef}
@@ -492,7 +932,6 @@ export default function VendorWizardScreen() {
         }}
       />
 
-      {/* Bank picker modal */}
       <Modal
         visible={pickerOpen}
         animationType="slide"
@@ -521,6 +960,7 @@ export default function VendorWizardScreen() {
               onChangeText={setPickerQuery}
               autoCorrect={false}
               autoCapitalize="none"
+              selectionColor={theme.primary}
             />
             <FlatList
               data={filteredBanks}
@@ -544,7 +984,11 @@ export default function VendorWizardScreen() {
                     {item.name}
                   </Text>
                   {pickedBank?.code === item.code ? (
-                    <Ionicons name="checkmark" size={18} color={theme.primary} />
+                    <Ionicons
+                      name="checkmark"
+                      size={18}
+                      color={theme.primary}
+                    />
                   ) : null}
                 </Pressable>
               )}
@@ -559,661 +1003,6 @@ export default function VendorWizardScreen() {
   );
 }
 
-/* ─────────────── Wizard chrome ─────────────── */
-
-function WizardHeader({
-  step,
-  total,
-  onBack,
-  theme,
-  styles,
-}: {
-  step: number;
-  total: number;
-  onBack: () => void;
-  theme: Theme;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View style={styles.wizardHeader}>
-      <Pressable
-        onPress={onBack}
-        accessibilityRole="button"
-        accessibilityLabel="Back"
-        hitSlop={6}
-        style={({ pressed }) => [
-          styles.headerBackBtn,
-          pressed && { opacity: 0.85 },
-        ]}
-      >
-        <Ionicons name="chevron-back" size={22} color={theme.fg} />
-      </Pressable>
-      <View style={styles.progressTrack}>
-        {Array.from({ length: total }).map((_, i) => (
-          <View
-            key={i}
-            style={[
-              styles.progressSeg,
-              i < step && styles.progressSegActive,
-            ]}
-          />
-        ))}
-      </View>
-      <Text style={styles.progressCount}>
-        {step}/{total}
-      </Text>
-    </View>
-  );
-}
-
-function StepHeading({
-  eyebrow,
-  title,
-  sub,
-  theme,
-  styles,
-}: {
-  eyebrow: string;
-  title: string;
-  sub: string;
-  theme: Theme;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View style={styles.stepHeading}>
-      <Text style={styles.stepEyebrow}>{eyebrow}</Text>
-      <Text style={styles.stepTitle}>{title}</Text>
-      <Text style={styles.stepSub}>{sub}</Text>
-    </View>
-  );
-}
-
-/* ─────────────── Step 1 ─────────────── */
-
-function Step1Business({
-  ownerName,
-  businessName,
-  businessEmail,
-  setOwnerName,
-  setBusinessName,
-  setBusinessEmail,
-  theme,
-  styles,
-}: {
-  ownerName: string;
-  businessName: string;
-  businessEmail: string;
-  setOwnerName: (v: string) => void;
-  setBusinessName: (v: string) => void;
-  setBusinessEmail: (v: string) => void;
-  theme: Theme;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View>
-      <StepHeading
-        eyebrow="Step 1 of 3 · Business"
-        title="Tell us about your business"
-        sub="The basics — we'll ask for CAC and NMDPRA documents at the verification step."
-        theme={theme}
-        styles={styles}
-      />
-      <View style={styles.fields}>
-        <V7Field
-          label="Owner name"
-          required
-          value={ownerName}
-          onChangeText={setOwnerName}
-          placeholder="Your full name"
-          autoCapitalize="words"
-        />
-        <V7Field
-          label="Business name"
-          required
-          hint="As you'd want it shown to customers."
-          value={businessName}
-          onChangeText={setBusinessName}
-          placeholder="e.g. Abkon Oil Ltd"
-          autoCapitalize="words"
-        />
-        <V7Field
-          label="Business email"
-          required
-          value={businessEmail}
-          onChangeText={setBusinessEmail}
-          placeholder="business@example.com"
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-        <View style={styles.infoNote}>
-          <Ionicons name="information-circle" size={18} color={theme.info} />
-          <Text style={styles.infoText}>
-            You'll set up your first station next. Stations, fuels, and bank
-            can all be edited later.
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-/* ─────────────── Step 2 ─────────────── */
-
-function Step2Station({
-  stationName,
-  stationAddress,
-  openTime,
-  closeTime,
-  fuelTypes,
-  pickedFuels,
-  businessName,
-  setStationName,
-  setOpenTime,
-  setCloseTime,
-  setPickedFuels,
-  onPickAddress,
-  theme,
-  styles,
-}: {
-  stationName: string;
-  stationAddress: AddressResult | null;
-  openTime: string;
-  closeTime: string;
-  fuelTypes: FuelTypeRow[];
-  pickedFuels: Record<string, { selected: boolean; price: string }>;
-  businessName: string;
-  setStationName: (v: string) => void;
-  setOpenTime: (v: string) => void;
-  setCloseTime: (v: string) => void;
-  setPickedFuels: (
-    next: Record<string, { selected: boolean; price: string }>,
-  ) => void;
-  onPickAddress: () => void;
-  theme: Theme;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View>
-      <StepHeading
-        eyebrow="Step 2 of 3 · First station"
-        title="Add your first station"
-        sub="So your Today screen has something to show when you sign in."
-        theme={theme}
-        styles={styles}
-      />
-      <View style={styles.fields}>
-        <V7Field
-          label="Station name"
-          required
-          hint="Defaults to your business name if you leave it blank."
-          value={stationName}
-          onChangeText={setStationName}
-          placeholder={businessName || "e.g. Abkon — Lekki"}
-          autoCapitalize="words"
-        />
-
-        {/* Address picker — opens AddressSheet for Places autocomplete */}
-        <View>
-          <View style={styles.labelRow}>
-            <Text style={styles.fieldLabel}>Address</Text>
-            <Text style={styles.requiredMark}> ·</Text>
-          </View>
-          <Pressable
-            onPress={onPickAddress}
-            accessibilityRole="button"
-            accessibilityLabel={
-              stationAddress
-                ? `Station address: ${stationAddress.address}. Tap to change.`
-                : "Pick station address"
-            }
-            style={({ pressed }) => [
-              styles.addressField,
-              stationAddress ? styles.addressFieldFilled : null,
-              pressed && { opacity: 0.94 },
-            ]}
-          >
-            <Ionicons
-              name="location"
-              size={18}
-              color={stationAddress ? theme.primary : theme.fgMuted}
-            />
-            <Text
-              style={[
-                styles.addressText,
-                !stationAddress && { color: theme.fgMuted },
-              ]}
-              numberOfLines={1}
-            >
-              {stationAddress
-                ? stationAddress.address
-                : "Type to search Google Places"}
-            </Text>
-            <Ionicons
-              name={stationAddress ? "create-outline" : "chevron-forward"}
-              size={18}
-              color={theme.fgMuted}
-            />
-          </Pressable>
-          {!stationAddress ? (
-            <Text style={styles.fieldHintInline}>
-              We use this to match nearby customers.
-            </Text>
-          ) : null}
-        </View>
-
-        {/* State + LGA — auto-filled from Places, displayed as 2-col grid */}
-        {stationAddress ? (
-          <View style={styles.gridRow}>
-            <View style={styles.gridCol}>
-              <Text style={styles.fieldLabel}>State</Text>
-              <View style={styles.readonlyField}>
-                <Text style={styles.readonlyText} numberOfLines={1}>
-                  {stationAddress.stateLabel || stationAddress.state || "—"}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.gridCol}>
-              <Text style={styles.fieldLabel}>LGA</Text>
-              <View style={styles.readonlyField}>
-                <Text style={styles.readonlyText} numberOfLines={1}>
-                  {stationAddress.lga || "—"}
-                </Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
-
-        {/* Operating hours */}
-        <View>
-          <Text style={styles.fieldLabel}>Operating hours</Text>
-          <View style={styles.hoursRow}>
-            <TimePickerCard
-              label="Opens"
-              value={openTime}
-              onChange={setOpenTime}
-              theme={theme}
-              styles={styles}
-            />
-            <TimePickerCard
-              label="Closes"
-              value={closeTime}
-              onChange={setCloseTime}
-              theme={theme}
-              styles={styles}
-            />
-          </View>
-        </View>
-
-        {/* Fuels */}
-        <View>
-          <Text style={styles.fieldLabel}>Fuels you sell</Text>
-          {fuelTypes.length === 0 ? (
-            <View style={styles.fuelLoading}>
-              <ActivityIndicator color={theme.primary} />
-            </View>
-          ) : (
-            <View style={styles.fuelList}>
-              {fuelTypes.map((f) => {
-                const state = pickedFuels[f._id] ?? {
-                  selected: false,
-                  price: "",
-                };
-                return (
-                  <FuelRow
-                    key={f._id}
-                    fuel={f}
-                    selected={state.selected}
-                    price={state.price}
-                    onToggle={() =>
-                      setPickedFuels({
-                        ...pickedFuels,
-                        [f._id]: {
-                          selected: !state.selected,
-                          price: state.price,
-                        },
-                      })
-                    }
-                    onPrice={(p) =>
-                      setPickedFuels({
-                        ...pickedFuels,
-                        [f._id]: { selected: true, price: p },
-                      })
-                    }
-                    theme={theme}
-                  />
-                );
-              })}
-            </View>
-          )}
-          <Text style={styles.fieldHint}>
-            Customers see these prices on the order screen. You can change
-            them anytime from Catalog.
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-function TimePickerCard({
-  label,
-  value,
-  onChange,
-  theme,
-  styles,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  theme: Theme;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  // Tappable card UI per v7 design. We don't yet have a native time
-  // picker dep, so the card focuses an inline TextInput on press — same
-  // visual language as the spec, plus a fallback that works today.
-  const inputRef = React.useRef<TextInput>(null);
-  return (
-    <Pressable
-      onPress={() => inputRef.current?.focus()}
-      accessibilityRole="button"
-      accessibilityLabel={`${label} time, ${value}`}
-      style={({ pressed }) => [
-        styles.timeCard,
-        pressed && { opacity: 0.94 },
-      ]}
-    >
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.timeCardLabel}>{label}</Text>
-        <TextInput
-          ref={inputRef}
-          value={value}
-          onChangeText={onChange}
-          placeholder="06:00"
-          placeholderTextColor={theme.fgMuted}
-          style={styles.timeCardValue}
-          keyboardType="numbers-and-punctuation"
-          maxLength={5}
-          accessibilityLabel={`${label} time`}
-        />
-      </View>
-      <Ionicons name="chevron-down" size={16} color={theme.fgMuted} />
-    </Pressable>
-  );
-}
-
-function FuelRow({
-  fuel,
-  selected,
-  price,
-  onToggle,
-  onPrice,
-  theme,
-}: {
-  fuel: FuelTypeRow;
-  selected: boolean;
-  price: string;
-  onToggle: () => void;
-  onPrice: (v: string) => void;
-  theme: Theme;
-}) {
-  return (
-    <View
-      style={[
-        fuelStyles(theme).row,
-        selected && fuelStyles(theme).rowActive,
-      ]}
-    >
-      <Pressable
-        onPress={onToggle}
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: selected }}
-        accessibilityLabel={`Toggle ${fuel.name}`}
-        hitSlop={6}
-        style={[
-          fuelStyles(theme).check,
-          selected && fuelStyles(theme).checkActive,
-        ]}
-      >
-        {selected ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
-      </Pressable>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={fuelStyles(theme).name}>{fuel.name}</Text>
-        <Text style={fuelStyles(theme).unit}>
-          ₦/{fuel.unit ?? "L"} · starter price
-        </Text>
-      </View>
-      {selected ? (
-        <View style={fuelStyles(theme).pricePill}>
-          <Text style={fuelStyles(theme).pricePrefix}>₦</Text>
-          <TextInput
-            value={price}
-            onChangeText={(t) => onPrice(t.replace(/[^0-9.]/g, ""))}
-            placeholder="0"
-            placeholderTextColor={theme.fgMuted}
-            keyboardType="decimal-pad"
-            style={fuelStyles(theme).priceInput}
-            accessibilityLabel={`${fuel.name} price`}
-          />
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-/* ─────────────── Step 3 ─────────────── */
-
-function Step3Bank({
-  banks,
-  pickedBank,
-  accountNumber,
-  resolving,
-  resolvedName,
-  resolveError,
-  setAccountNumber,
-  onOpenPicker,
-  theme,
-  styles,
-}: {
-  banks: PaystackBank[] | null;
-  pickedBank: PaystackBank | null;
-  accountNumber: string;
-  resolving: boolean;
-  resolvedName: string | null;
-  resolveError: string | null;
-  setAccountNumber: (v: string) => void;
-  onOpenPicker: () => void;
-  theme: Theme;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View>
-      <StepHeading
-        eyebrow="Step 3 of 3 · Bank"
-        title="Where should we send your money?"
-        sub="Daily settlements land here. You can skip this and add it later."
-        theme={theme}
-        styles={styles}
-      />
-      <View style={styles.fields}>
-        <View>
-          <Text style={styles.fieldLabel}>Bank</Text>
-          <Pressable
-            onPress={onOpenPicker}
-            disabled={banks === null}
-            accessibilityRole="button"
-            accessibilityLabel={
-              pickedBank ? `Bank: ${pickedBank.name}. Tap to change.` : "Choose bank"
-            }
-            style={({ pressed }) => [
-              styles.bankPicker,
-              pressed && { opacity: 0.92 },
-            ]}
-          >
-            {banks === null ? (
-              <ActivityIndicator color={theme.primary} />
-            ) : pickedBank ? (
-              <>
-                <View style={styles.bankBrandTile}>
-                  <Text style={styles.bankBrandText}>
-                    {bankInitials(pickedBank.name)}
-                  </Text>
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.bankPickerText} numberOfLines={1}>
-                    {bankShortName(pickedBank.name)}
-                  </Text>
-                  <Text style={styles.bankPickerSub} numberOfLines={1}>
-                    {pickedBank.code} · {pickedBank.name}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-down" size={16} color={theme.fgMuted} />
-              </>
-            ) : (
-              <>
-                <Ionicons name="search" size={18} color={theme.fgMuted} />
-                <Text
-                  style={[styles.bankPickerText, { color: theme.fgMuted, flex: 1 }]}
-                  numberOfLines={1}
-                >
-                  Pick a bank
-                </Text>
-                <Ionicons name="chevron-down" size={16} color={theme.fgMuted} />
-              </>
-            )}
-          </Pressable>
-        </View>
-
-        <V7Field
-          label="Account number"
-          required
-          value={accountNumber}
-          onChangeText={(t) =>
-            setAccountNumber(t.replace(/[^0-9]/g, "").slice(0, 10))
-          }
-          placeholder="10-digit NUBAN"
-          keyboardType="number-pad"
-          autoCapitalize="none"
-          hint={
-            !resolvedName && !resolveError && accountNumber.length === 0
-              ? "We'll resolve the account name automatically."
-              : undefined
-          }
-        />
-
-        {resolving ? (
-          <View style={styles.resolveRow}>
-            <ActivityIndicator size="small" color={theme.primary} />
-            <Text style={styles.resolveText}>Verifying…</Text>
-          </View>
-        ) : resolvedName ? (
-          <View style={styles.resolveOk}>
-            <View
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 999,
-                backgroundColor: theme.success,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Ionicons name="checkmark" size={18} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.resolveLabel}>Account name</Text>
-              <Text style={styles.resolveName} numberOfLines={1}>
-                {resolvedName.toUpperCase()}
-              </Text>
-            </View>
-          </View>
-        ) : resolveError ? (
-          <Text style={styles.resolveError}>{resolveError}</Text>
-        ) : accountNumber.length > 0 && accountNumber.length < 10 ? (
-          <Text style={styles.fieldHint}>
-            {10 - accountNumber.length} more digit
-            {10 - accountNumber.length === 1 ? "" : "s"}
-          </Text>
-        ) : null}
-
-        <View style={styles.infoNote}>
-          <Ionicons name="shield-checkmark" size={18} color={theme.info} />
-          <Text style={styles.infoText}>
-            We never store card details. Settlements use Paystack and only
-            require your bank + NUBAN.
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-const fuelStyles = (theme: Theme) =>
-  StyleSheet.create({
-    row: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
-      padding: 12,
-      borderRadius: 14,
-      backgroundColor: theme.surface,
-      borderWidth: 1.5,
-      borderColor: theme.divider,
-      marginBottom: 8,
-    },
-    rowActive: {
-      backgroundColor: theme.primaryTint,
-      borderColor: theme.primary,
-    },
-    check: {
-      width: 22,
-      height: 22,
-      borderRadius: 6,
-      borderWidth: 1.8,
-      borderColor: theme.divider,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    checkActive: {
-      backgroundColor: theme.primary,
-      borderColor: theme.primary,
-    },
-    name: {
-      ...theme.type.body,
-      color: theme.fg,
-      fontWeight: "800",
-    },
-    unit: {
-      ...theme.type.bodySm,
-      color: theme.fgMuted,
-      marginTop: 2,
-    },
-    pricePill: {
-      height: 36,
-      minWidth: 88,
-      paddingHorizontal: 10,
-      borderRadius: 10,
-      backgroundColor: theme.surface,
-      borderWidth: 1,
-      borderColor: theme.palette.green100,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-    },
-    pricePrefix: {
-      fontSize: 14,
-      fontWeight: "800",
-      color: theme.palette.green700,
-    },
-    priceInput: {
-      flex: 1,
-      fontSize: 14,
-      fontWeight: "800",
-      color: theme.palette.green700,
-      textAlign: "right",
-      paddingVertical: 0,
-    },
-  });
-
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     wizardHeader: {
@@ -1222,7 +1011,7 @@ const makeStyles = (theme: Theme) =>
       gap: 10,
       paddingHorizontal: 20,
       paddingTop: 8,
-      paddingBottom: 12,
+      paddingBottom: 16,
     },
     headerBackBtn: {
       width: 36,
@@ -1230,7 +1019,7 @@ const makeStyles = (theme: Theme) =>
       borderRadius: 18,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: theme.bgMuted,
+      backgroundColor: theme.surface,
     },
     progressTrack: {
       flex: 1,
@@ -1253,9 +1042,8 @@ const makeStyles = (theme: Theme) =>
       minWidth: 32,
       textAlign: "right",
     },
-    scroll: {
+    stepWrap: {
       paddingHorizontal: 16,
-      paddingBottom: 140,
     },
     stepHeading: {
       paddingHorizontal: 4,
@@ -1286,31 +1074,46 @@ const makeStyles = (theme: Theme) =>
     fields: {
       gap: 12,
     },
-    fieldLabel: {
-      fontSize: 11,
-      fontWeight: "800",
-      letterSpacing: 0.4,
-      textTransform: "uppercase",
-      color: theme.fgMuted,
-      marginBottom: 6,
-      marginHorizontal: 2,
-    },
-    fieldHint: {
-      fontSize: 11.5,
-      color: theme.fgMuted,
-      marginTop: 8,
-      marginHorizontal: 2,
-    },
     labelRow: {
       flexDirection: "row",
       alignItems: "center",
       marginBottom: 6,
       marginHorizontal: 2,
     },
+    fieldLabel: {
+      fontSize: 11,
+      fontWeight: "800",
+      letterSpacing: 0.4,
+      textTransform: "uppercase",
+      color: theme.fgMuted,
+    },
     requiredMark: {
       fontSize: 11,
       fontWeight: "800",
       color: theme.palette.green700,
+    },
+    input: {
+      height: 52,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: theme.surface,
+      borderWidth: 1.5,
+      borderColor: theme.divider,
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    inputText: {
+      flex: 1,
+      fontSize: 15,
+      fontWeight: "700",
+      color: theme.fg,
+      paddingVertical: 0,
+    },
+    fieldHint: {
+      marginTop: 6,
+      fontSize: 11.5,
+      color: theme.fgMuted,
+      marginHorizontal: 2,
     },
     addressField: {
       height: 52,
@@ -1332,12 +1135,6 @@ const makeStyles = (theme: Theme) =>
       fontWeight: "700",
       color: theme.fg,
     },
-    fieldHintInline: {
-      marginTop: 6,
-      fontSize: 11.5,
-      color: theme.fgMuted,
-      marginHorizontal: 2,
-    },
     gridRow: {
       flexDirection: "row",
       gap: 10,
@@ -1353,6 +1150,7 @@ const makeStyles = (theme: Theme) =>
       borderWidth: 1,
       borderColor: theme.divider,
       justifyContent: "center",
+      marginTop: 6,
     },
     readonlyText: {
       fontSize: 15,
@@ -1396,7 +1194,70 @@ const makeStyles = (theme: Theme) =>
       justifyContent: "center",
     },
     fuelList: {
-      marginTop: 4,
+      marginTop: 8,
+      gap: 8,
+    },
+    fuelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      padding: 12,
+      borderRadius: 14,
+      backgroundColor: theme.surface,
+      borderWidth: 1.5,
+      borderColor: theme.divider,
+    },
+    fuelRowActive: {
+      backgroundColor: theme.palette.green50,
+      borderColor: theme.primary,
+    },
+    fuelCheck: {
+      width: 22,
+      height: 22,
+      borderRadius: 6,
+      borderWidth: 1.8,
+      borderColor: theme.divider,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    fuelCheckActive: {
+      backgroundColor: theme.primary,
+      borderColor: theme.primary,
+    },
+    fuelName: {
+      ...theme.type.body,
+      color: theme.fg,
+      fontWeight: "800",
+    },
+    fuelUnit: {
+      ...theme.type.bodySm,
+      color: theme.fgMuted,
+      marginTop: 2,
+    },
+    pricePill: {
+      height: 36,
+      minWidth: 88,
+      paddingHorizontal: 10,
+      borderRadius: 10,
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.palette.green100,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+    },
+    pricePrefix: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: theme.palette.green700,
+    },
+    priceInput: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: "800",
+      color: theme.palette.green700,
+      textAlign: "right",
+      paddingVertical: 0,
     },
     bankPicker: {
       minHeight: 56,
@@ -1409,6 +1270,7 @@ const makeStyles = (theme: Theme) =>
       flexDirection: "row",
       alignItems: "center",
       gap: 12,
+      marginTop: 6,
     },
     bankBrandTile: {
       width: 36,
@@ -1453,6 +1315,14 @@ const makeStyles = (theme: Theme) =>
       backgroundColor: theme.successTint,
       borderWidth: 1,
       borderColor: theme.success + "33",
+    },
+    resolveCheck: {
+      width: 32,
+      height: 32,
+      borderRadius: 999,
+      backgroundColor: theme.success,
+      alignItems: "center",
+      justifyContent: "center",
     },
     resolveLabel: {
       fontSize: 11,

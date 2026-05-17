@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -12,7 +11,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { toast } from "sonner-native";
 import { Theme, useTheme } from "@/constants/theme";
 import Svg, { Circle, Line, Path, Rect } from "react-native-svg";
-import { AuthScreenContainer, V7Field } from "@/components/ui/auth";
+import { AuthScreenContainer } from "@/components/ui/auth";
 import { Button } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useSessionStore } from "@/store/useSessionStore";
@@ -24,10 +23,10 @@ import { useSessionStore } from "@/store/useSessionStore";
  *   Step 2 — Profile      (display name required + email optional)
  *   Step 3 — Vehicle      (type + plate required, brand/colour/year opt)
  *
- * Deep-link param `?inviteCode=XXXX` auto-ticks the checkbox and
- * pre-fills the code. Step 1 Continue redeems the invite when ticked,
- * then advances.
+ * Rebuilt 2026-05-17 with inline TextInputs (no extracted V7Field /
+ * sub-step components) so the soft keyboard stays open while typing.
  *
+ * Server calls:
  *   Step 1 Continue → (if invite) POST /auth/redeem-invite { code }
  *   Step 2 Continue → PUT /auth/me { displayName, email? }
  *   Step 3 Finish   → POST /api/rider/setup { vehicleType, vehiclePlate, ... }
@@ -36,13 +35,7 @@ import { useSessionStore } from "@/store/useSessionStore";
 
 type VehicleType = "motorcycle" | "car" | "truck";
 
-interface VehicleConfig {
-  id: VehicleType;
-  label: string;
-  glyph: "bike" | "car" | "truck";
-}
-
-const VEHICLES: VehicleConfig[] = [
+const VEHICLES: { id: VehicleType; label: string; glyph: "bike" | "car" | "truck" }[] = [
   { id: "motorcycle", label: "Motorbike", glyph: "bike" },
   { id: "car", label: "Car", glyph: "car" },
   { id: "truck", label: "Truck", glyph: "truck" },
@@ -58,10 +51,11 @@ export default function RiderWizardScreen() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [submitting, setSubmitting] = useState(false);
 
-  // Step 1 — Affiliation
-  // Auto-tick + lock the code when arrived from a deep-link.
   const deepLinkCode = useMemo(
-    () => (typeof params.inviteCode === "string" ? params.inviteCode.trim() : ""),
+    () =>
+      typeof params.inviteCode === "string"
+        ? params.inviteCode.trim()
+        : "",
     [params.inviteCode],
   );
   const [hasInvite, setHasInvite] = useState(!!deepLinkCode);
@@ -69,11 +63,9 @@ export default function RiderWizardScreen() {
   const [inviteError, setInviteError] = useState<string | null>(null);
   const inviteFromDeepLink = !!deepLinkCode;
 
-  // Step 2 — Profile
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
 
-  // Step 3 — Vehicle
   const [vehicleType, setVehicleType] = useState<VehicleType>("motorcycle");
   const [plate, setPlate] = useState("");
   const [brand, setBrand] = useState("");
@@ -177,9 +169,10 @@ export default function RiderWizardScreen() {
 
   return (
     <AuthScreenContainer
-      contentStyle={{ paddingTop: 0, paddingHorizontal: 0 }}
+      contentStyle={{ paddingTop: 0, paddingHorizontal: 0, gap: 0 }}
       background={theme.bgMuted}
-      scrollable={false}
+      showBack={false}
+      showHelp={false}
       footer={
         step === 3 ? (
           <Button
@@ -200,10 +193,7 @@ export default function RiderWizardScreen() {
             full
             onPress={step === 1 ? handleStep1Continue : handleStep2Continue}
             loading={submitting}
-            disabled={
-              submitting ||
-              (step === 1 ? !step1Valid : !step2Valid)
-            }
+            disabled={submitting || (step === 1 ? !step1Valid : !step2Valid)}
             accessibilityLabel="Continue"
           >
             {submitting ? "Saving…" : "Continue"}
@@ -211,447 +201,381 @@ export default function RiderWizardScreen() {
         )
       }
     >
-      <WizardHeader
-        step={step}
-        onBack={handleBack}
-        theme={theme}
-        styles={styles}
-      />
-
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        showsVerticalScrollIndicator={false}
-      >
-        {step === 1 ? (
-          <Step1
-            hasInvite={hasInvite}
-            inviteCode={inviteCode}
-            inviteError={inviteError}
-            inviteFromDeepLink={inviteFromDeepLink}
-            setHasInvite={setHasInvite}
-            setInviteCode={setInviteCode}
-            theme={theme}
-            styles={styles}
-          />
-        ) : null}
-
-        {step === 2 ? (
-          <Step2
-            displayName={displayName}
-            email={email}
-            setDisplayName={setDisplayName}
-            setEmail={setEmail}
-            theme={theme}
-            styles={styles}
-          />
-        ) : null}
-
-        {step === 3 ? (
-          <Step3
-            vehicleType={vehicleType}
-            plate={plate}
-            brand={brand}
-            colour={colour}
-            year={year}
-            setVehicleType={setVehicleType}
-            setPlate={setPlate}
-            setBrand={setBrand}
-            setColour={setColour}
-            setYear={setYear}
-            theme={theme}
-            styles={styles}
-          />
-        ) : null}
-      </ScrollView>
-    </AuthScreenContainer>
-  );
-}
-
-/* ─────────────── Wizard chrome ─────────────── */
-
-function WizardHeader({
-  step,
-  onBack,
-  theme,
-  styles,
-}: {
-  step: number;
-  onBack: () => void;
-  theme: Theme;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View style={styles.wizardHeader}>
-      <Pressable
-        onPress={onBack}
-        accessibilityRole="button"
-        accessibilityLabel="Back"
-        hitSlop={6}
-        style={({ pressed }) => [
-          styles.headerBackBtn,
-          pressed && { opacity: 0.85 },
-        ]}
-      >
-        <Ionicons name="chevron-back" size={22} color={theme.fg} />
-      </Pressable>
-      <View style={styles.progressTrack}>
-        {[1, 2, 3].map((i) => (
-          <View
-            key={i}
-            style={[
-              styles.progressSeg,
-              i <= step && styles.progressSegActive,
-            ]}
-          />
-        ))}
-      </View>
-      <Text style={styles.progressCount}>{step}/3</Text>
-    </View>
-  );
-}
-
-function StepHeading({
-  eyebrow,
-  title,
-  sub,
-  styles,
-}: {
-  eyebrow: string;
-  title: string;
-  sub: string;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View style={styles.stepHeading}>
-      <Text style={styles.stepEyebrow}>{eyebrow}</Text>
-      <Text style={styles.stepTitle}>{title}</Text>
-      <Text style={styles.stepSub}>{sub}</Text>
-    </View>
-  );
-}
-
-/* ─────────────── Step 1 ─────────────── */
-
-function Step1({
-  hasInvite,
-  inviteCode,
-  inviteError,
-  inviteFromDeepLink,
-  setHasInvite,
-  setInviteCode,
-  theme,
-  styles,
-}: {
-  hasInvite: boolean;
-  inviteCode: string;
-  inviteError: string | null;
-  inviteFromDeepLink: boolean;
-  setHasInvite: (v: boolean) => void;
-  setInviteCode: (v: string) => void;
-  theme: Theme;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View>
-      <StepHeading
-        eyebrow="Step 1 of 3 · Affiliation"
-        title="Riding for a vendor?"
-        sub="Affiliated riders get priority orders from their station. Freelance riders can pick from any nearby station."
-        styles={styles}
-      />
-      <View style={styles.fields}>
+      <View style={styles.wizardHeader}>
         <Pressable
-          onPress={inviteFromDeepLink ? undefined : () => setHasInvite(!hasInvite)}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: hasInvite }}
-          accessibilityLabel="I have a vendor invite code"
-          style={[
-            styles.checkboxRow,
-            hasInvite && styles.checkboxRowActive,
-            inviteFromDeepLink && { opacity: 0.95 },
+          onPress={handleBack}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          hitSlop={6}
+          style={({ pressed }) => [
+            styles.headerBackBtn,
+            pressed && { opacity: 0.85 },
           ]}
         >
-          <View
-            style={[
-              styles.checkBox,
-              hasInvite && styles.checkBoxActive,
-            ]}
-          >
-            {hasInvite ? (
-              <Ionicons name="checkmark" size={14} color="#fff" />
-            ) : null}
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.checkboxTitle}>
-              I have a vendor invite code
-            </Text>
-            <Text style={styles.checkboxSub}>
-              {hasInvite
-                ? "You'll be linked to the vendor's station after verification."
-                : "Leave this unchecked to ride freelance — you can still join a vendor later."}
-            </Text>
-          </View>
+          <Ionicons name="chevron-back" size={22} color={theme.fg} />
         </Pressable>
-
-        {hasInvite ? (
-          <>
-            <V7Field
-              label="Invite code"
-              required
-              value={inviteCode}
-              onChangeText={(t) => setInviteCode(t.trim().toUpperCase())}
-              placeholder="ABKN-XXXX"
-              autoCapitalize="characters"
-              autoCorrect={false}
-              editable={!inviteFromDeepLink}
-              error={inviteError}
-              hint={
-                inviteFromDeepLink && !inviteError
-                  ? "Pre-filled from your invite link. Untick the box above to sign up as freelance instead."
-                  : undefined
-              }
-              suffix={
-                inviteFromDeepLink ? (
-                  <View style={styles.fromLinkPill}>
-                    <Ionicons
-                      name="link"
-                      size={11}
-                      color={theme.palette.green700}
-                    />
-                    <Text style={styles.fromLinkPillText}>From link</Text>
-                  </View>
-                ) : undefined
-              }
+        <View style={styles.progressTrack}>
+          {[1, 2, 3].map((i) => (
+            <View
+              key={i}
+              style={[
+                styles.progressSeg,
+                i <= step && styles.progressSegActive,
+              ]}
             />
-            {inviteFromDeepLink && !inviteError ? (
-              <View style={styles.vendorPreviewCard}>
-                <View style={styles.vendorPreviewTile}>
+          ))}
+        </View>
+        <Text style={styles.progressCount}>{step}/3</Text>
+      </View>
+
+      {/* Step 1 — Affiliation */}
+      {step === 1 ? (
+        <View style={styles.stepWrap}>
+          <View style={styles.stepHeading}>
+            <Text style={styles.stepEyebrow}>
+              Step 1 of 3 · Affiliation
+            </Text>
+            <Text style={styles.stepTitle}>Riding for a vendor?</Text>
+            <Text style={styles.stepSub}>
+              Affiliated riders get priority orders from their station.
+              Freelance riders can pick from any nearby station.
+            </Text>
+          </View>
+          <View style={styles.fields}>
+            <Pressable
+              onPress={
+                inviteFromDeepLink ? undefined : () => setHasInvite(!hasInvite)
+              }
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: hasInvite }}
+              accessibilityLabel="I have a vendor invite code"
+              style={[
+                styles.checkboxRow,
+                hasInvite && styles.checkboxRowActive,
+                inviteFromDeepLink && { opacity: 0.95 },
+              ]}
+            >
+              <View
+                style={[
+                  styles.checkBox,
+                  hasInvite && styles.checkBoxActive,
+                ]}
+              >
+                {hasInvite ? (
+                  <Ionicons name="checkmark" size={14} color="#fff" />
+                ) : null}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.checkboxTitle}>
+                  I have a vendor invite code
+                </Text>
+                <Text style={styles.checkboxSub}>
+                  {hasInvite
+                    ? "You'll be linked to the vendor's station after verification."
+                    : "Leave this unchecked to ride freelance — you can still join a vendor later."}
+                </Text>
+              </View>
+            </Pressable>
+
+            {hasInvite ? (
+              <>
+                <View>
+                  <View style={styles.labelRow}>
+                    <Text style={styles.fieldLabel}>Invite code</Text>
+                    <Text style={styles.requiredMark}> ·</Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.input,
+                      inviteError && { borderColor: theme.error },
+                    ]}
+                  >
+                    <TextInput
+                      value={inviteCode}
+                      onChangeText={(t) => setInviteCode(t.trim().toUpperCase())}
+                      placeholder="ABKN-XXXX"
+                      placeholderTextColor={theme.fgMuted}
+                      style={styles.inputText}
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      editable={!inviteFromDeepLink}
+                      selectionColor={theme.primary}
+                    />
+                    {inviteFromDeepLink ? (
+                      <View style={styles.fromLinkPill}>
+                        <Ionicons
+                          name="link"
+                          size={11}
+                          color={theme.palette.green700}
+                        />
+                        <Text style={styles.fromLinkPillText}>From link</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  {inviteError ? (
+                    <View style={styles.errorRow}>
+                      <Ionicons
+                        name="warning"
+                        size={14}
+                        color={theme.error}
+                      />
+                      <Text style={styles.errorText}>{inviteError}</Text>
+                    </View>
+                  ) : inviteFromDeepLink ? (
+                    <Text style={styles.fieldHint}>
+                      Pre-filled from your invite link. Untick the box above
+                      to sign up as freelance instead.
+                    </Text>
+                  ) : null}
+                </View>
+
+                {inviteFromDeepLink && !inviteError ? (
+                  <View style={styles.vendorPreviewCard}>
+                    <View style={styles.vendorPreviewTile}>
+                      <Ionicons
+                        name="business"
+                        size={20}
+                        color={theme.palette.green700}
+                      />
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.vendorPreviewTitle}>
+                        From your invite link
+                      </Text>
+                      <Text
+                        style={styles.vendorPreviewSub}
+                        numberOfLines={2}
+                      >
+                        You'll be assigned to the vendor's home station
+                        after verification.
+                      </Text>
+                    </View>
+                    <View style={styles.vendorPreviewPill}>
+                      <Text style={styles.vendorPreviewPillText}>Joining</Text>
+                    </View>
+                  </View>
+                ) : null}
+              </>
+            ) : (
+              <View style={styles.freelanceCard}>
+                <View style={styles.freelanceTile}>
                   <Ionicons
-                    name="business"
-                    size={20}
+                    name="information-circle"
+                    size={18}
                     color={theme.palette.green700}
                   />
                 </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.vendorPreviewTitle}>
-                    From your invite link
-                  </Text>
-                  <Text style={styles.vendorPreviewSub} numberOfLines={1}>
-                    You'll be assigned to the vendor's home station after
-                    verification.
-                  </Text>
-                </View>
-                <View style={styles.vendorPreviewPill}>
-                  <Text style={styles.vendorPreviewPillText}>Joining</Text>
-                </View>
+                <Text style={styles.freelanceText}>
+                  You'll sign up as a{" "}
+                  <Text style={styles.freelanceStrong}>freelance rider</Text>.
+                  You can join a vendor anytime later from your profile.
+                </Text>
               </View>
-            ) : null}
-          </>
-        ) : (
-          <View style={styles.freelanceCard}>
-            <View style={styles.freelanceTile}>
+            )}
+          </View>
+        </View>
+      ) : null}
+
+      {/* Step 2 — Profile */}
+      {step === 2 ? (
+        <View style={styles.stepWrap}>
+          <View style={styles.stepHeading}>
+            <Text style={styles.stepEyebrow}>
+              Step 2 of 3 · Profile
+            </Text>
+            <Text style={styles.stepTitle}>A few quick details</Text>
+            <Text style={styles.stepSub}>
+              So we can address you correctly and reach you for payouts.
+            </Text>
+          </View>
+          <View style={styles.fields}>
+            <View>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>Display name</Text>
+                <Text style={styles.requiredMark}> ·</Text>
+              </View>
+              <View style={styles.input}>
+                <TextInput
+                  value={displayName}
+                  onChangeText={setDisplayName}
+                  placeholder="Your full name"
+                  placeholderTextColor={theme.fgMuted}
+                  style={styles.inputText}
+                  autoCapitalize="words"
+                  selectionColor={theme.primary}
+                />
+              </View>
+              <Text style={styles.fieldHint}>
+                Shown to customers and your vendor.
+              </Text>
+            </View>
+            <View>
+              <Text style={styles.fieldLabel}>Email</Text>
+              <View style={styles.input}>
+                <TextInput
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="you@example.com"
+                  placeholderTextColor={theme.fgMuted}
+                  style={styles.inputText}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  selectionColor={theme.primary}
+                />
+              </View>
+              <Text style={styles.fieldHint}>
+                Optional — for receipts and tax records.
+              </Text>
+            </View>
+            <View style={styles.infoNote}>
               <Ionicons
                 name="information-circle"
                 size={18}
-                color={theme.palette.green700}
+                color={theme.info}
               />
+              <Text style={styles.infoText}>
+                We'll ask for your NIN, driver's licence, and bike papers at
+                the verification step — not now.
+              </Text>
             </View>
-            <Text style={styles.freelanceText}>
-              You'll sign up as a{" "}
-              <Text style={styles.freelanceStrong}>freelance rider</Text>.
-              You can join a vendor anytime later from your profile.
+          </View>
+        </View>
+      ) : null}
+
+      {/* Step 3 — Vehicle */}
+      {step === 3 ? (
+        <View style={styles.stepWrap}>
+          <View style={styles.stepHeading}>
+            <Text style={styles.stepEyebrow}>Step 3 of 3 · Vehicle</Text>
+            <Text style={styles.stepTitle}>Your delivery vehicle</Text>
+            <Text style={styles.stepSub}>
+              So we route the right size of orders to you.
             </Text>
           </View>
-        )}
-      </View>
-    </View>
-  );
-}
+          <View style={styles.fields}>
+            <View>
+              <Text style={styles.fieldLabel}>Vehicle type</Text>
+              <View style={styles.segmented}>
+                {VEHICLES.map((v) => {
+                  const active = vehicleType === v.id;
+                  return (
+                    <Pressable
+                      key={v.id}
+                      onPress={() => setVehicleType(v.id)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={v.label}
+                      style={[
+                        styles.segmentBtn,
+                        active && styles.segmentBtnActive,
+                      ]}
+                    >
+                      <VehicleGlyph
+                        kind={v.glyph}
+                        theme={theme}
+                        active={active}
+                      />
+                      <Text
+                        style={[
+                          styles.segmentText,
+                          active && styles.segmentTextActive,
+                        ]}
+                      >
+                        {v.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
 
-/* ─────────────── Step 2 ─────────────── */
+            <View>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>Plate number</Text>
+                <Text style={styles.requiredMark}> ·</Text>
+              </View>
+              <View style={styles.input}>
+                <TextInput
+                  value={plate}
+                  onChangeText={(t) => setPlate(t.toUpperCase())}
+                  placeholder="LSD 000 ABC"
+                  placeholderTextColor={theme.fgMuted}
+                  style={styles.inputText}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  selectionColor={theme.primary}
+                />
+              </View>
+              <Text style={styles.fieldHint}>
+                Letters are auto-uppercased.
+              </Text>
+            </View>
 
-function Step2({
-  displayName,
-  email,
-  setDisplayName,
-  setEmail,
-  theme,
-  styles,
-}: {
-  displayName: string;
-  email: string;
-  setDisplayName: (v: string) => void;
-  setEmail: (v: string) => void;
-  theme: Theme;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View>
-      <StepHeading
-        eyebrow="Step 2 of 3 · Profile"
-        title="A few quick details"
-        sub="So we can address you correctly and reach you for payouts."
-        styles={styles}
-      />
-      <View style={styles.fields}>
-        <V7Field
-          label="Display name"
-          required
-          hint="Shown to customers and your vendor."
-          value={displayName}
-          onChangeText={setDisplayName}
-          placeholder="Your full name"
-          autoCapitalize="words"
-        />
-        <V7Field
-          label="Email"
-          hint="Optional — for receipts and tax records."
-          value={email}
-          onChangeText={setEmail}
-          placeholder="you@example.com"
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-        <View style={styles.infoNote}>
-          <Ionicons
-            name="information-circle"
-            size={18}
-            color={theme.info}
-          />
-          <Text style={styles.infoText}>
-            We'll ask for your NIN, driver's licence, and bike papers at
-            the verification step — not now.
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
-}
+            <View style={styles.gridRow}>
+              <View style={styles.gridCol}>
+                <Text style={styles.fieldLabel}>Brand</Text>
+                <View style={styles.input}>
+                  <TextInput
+                    value={brand}
+                    onChangeText={setBrand}
+                    placeholder="e.g. Bajaj"
+                    placeholderTextColor={theme.fgMuted}
+                    style={styles.inputText}
+                    autoCapitalize="words"
+                    selectionColor={theme.primary}
+                  />
+                </View>
+              </View>
+              <View style={styles.gridCol}>
+                <Text style={styles.fieldLabel}>Year</Text>
+                <View style={styles.input}>
+                  <TextInput
+                    value={year}
+                    onChangeText={(t) =>
+                      setYear(t.replace(/[^0-9]/g, "").slice(0, 4))
+                    }
+                    placeholder="2022"
+                    placeholderTextColor={theme.fgMuted}
+                    style={styles.inputText}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    selectionColor={theme.primary}
+                  />
+                </View>
+              </View>
+            </View>
 
-/* ─────────────── Step 3 ─────────────── */
+            <View>
+              <Text style={styles.fieldLabel}>Colour</Text>
+              <View style={styles.input}>
+                <TextInput
+                  value={colour}
+                  onChangeText={setColour}
+                  placeholder="e.g. Red"
+                  placeholderTextColor={theme.fgMuted}
+                  style={styles.inputText}
+                  autoCapitalize="words"
+                  selectionColor={theme.primary}
+                />
+              </View>
+            </View>
 
-function Step3({
-  vehicleType,
-  plate,
-  brand,
-  colour,
-  year,
-  setVehicleType,
-  setPlate,
-  setBrand,
-  setColour,
-  setYear,
-  theme,
-  styles,
-}: {
-  vehicleType: VehicleType;
-  plate: string;
-  brand: string;
-  colour: string;
-  year: string;
-  setVehicleType: (v: VehicleType) => void;
-  setPlate: (v: string) => void;
-  setBrand: (v: string) => void;
-  setColour: (v: string) => void;
-  setYear: (v: string) => void;
-  theme: Theme;
-  styles: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View>
-      <StepHeading
-        eyebrow="Step 3 of 3 · Vehicle"
-        title="Your delivery vehicle"
-        sub="So we route the right size of orders to you."
-        styles={styles}
-      />
-      <View style={styles.fields}>
-        <View>
-          <Text style={styles.fieldLabel}>Vehicle type</Text>
-          <View style={styles.segmented}>
-            {VEHICLES.map((v) => {
-              const active = vehicleType === v.id;
-              return (
-                <Pressable
-                  key={v.id}
-                  onPress={() => setVehicleType(v.id)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={v.label}
-                  style={[
-                    styles.segmentBtn,
-                    active && styles.segmentBtnActive,
-                  ]}
-                >
-                  <VehicleGlyph kind={v.glyph} theme={theme} active={active} />
-                  <Text
-                    style={[
-                      styles.segmentText,
-                      active && styles.segmentTextActive,
-                    ]}
-                  >
-                    {v.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+            <View style={styles.infoNote}>
+              <Ionicons
+                name="shield-checkmark"
+                size={18}
+                color={theme.info}
+              />
+              <Text style={styles.infoText}>
+                Plate, brand, and year are double-checked against your
+                photos during verification.
+              </Text>
+            </View>
           </View>
         </View>
-
-        <V7Field
-          label="Plate number"
-          required
-          hint="Letters are auto-uppercased."
-          value={plate}
-          onChangeText={(t) => setPlate(t.toUpperCase())}
-          placeholder="LSD 000 ABC"
-          autoCapitalize="characters"
-        />
-
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <View style={{ flex: 1 }}>
-            <V7Field
-              label="Brand"
-              value={brand}
-              onChangeText={setBrand}
-              placeholder="e.g. Bajaj"
-              autoCapitalize="words"
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <V7Field
-              label="Year"
-              value={year}
-              onChangeText={(t) =>
-                setYear(t.replace(/[^0-9]/g, "").slice(0, 4))
-              }
-              placeholder="2022"
-              keyboardType="number-pad"
-              autoCapitalize="none"
-            />
-          </View>
-        </View>
-
-        <V7Field
-          label="Colour"
-          value={colour}
-          onChangeText={setColour}
-          placeholder="e.g. Red"
-          autoCapitalize="words"
-        />
-
-        <View style={styles.infoNote}>
-          <Ionicons name="shield-checkmark" size={18} color={theme.info} />
-          <Text style={styles.infoText}>
-            Plate, brand, and year are double-checked against your photos
-            during verification.
-          </Text>
-        </View>
-      </View>
-    </View>
+      ) : null}
+    </AuthScreenContainer>
   );
 }
 
@@ -704,8 +628,6 @@ function VehicleGlyph({
   );
 }
 
-/* ─────────────── Styles ─────────────── */
-
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     wizardHeader: {
@@ -714,7 +636,7 @@ const makeStyles = (theme: Theme) =>
       gap: 10,
       paddingHorizontal: 20,
       paddingTop: 8,
-      paddingBottom: 12,
+      paddingBottom: 16,
     },
     headerBackBtn: {
       width: 36,
@@ -722,7 +644,7 @@ const makeStyles = (theme: Theme) =>
       borderRadius: 18,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: theme.bgMuted,
+      backgroundColor: theme.surface,
     },
     progressTrack: {
       flex: 1,
@@ -745,9 +667,8 @@ const makeStyles = (theme: Theme) =>
       minWidth: 32,
       textAlign: "right",
     },
-    scroll: {
+    stepWrap: {
       paddingHorizontal: 16,
-      paddingBottom: 140,
     },
     stepHeading: {
       paddingHorizontal: 4,
@@ -778,6 +699,12 @@ const makeStyles = (theme: Theme) =>
     fields: {
       gap: 12,
     },
+    labelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: 6,
+      marginHorizontal: 2,
+    },
     fieldLabel: {
       fontSize: 11,
       fontWeight: "800",
@@ -787,7 +714,12 @@ const makeStyles = (theme: Theme) =>
       marginBottom: 6,
       marginHorizontal: 2,
     },
-    field: {
+    requiredMark: {
+      fontSize: 11,
+      fontWeight: "800",
+      color: theme.palette.green700,
+    },
+    input: {
       height: 52,
       paddingHorizontal: 14,
       borderRadius: 12,
@@ -798,10 +730,7 @@ const makeStyles = (theme: Theme) =>
       alignItems: "center",
       gap: 10,
     },
-    fieldFocused: {
-      borderColor: theme.primary,
-    },
-    input: {
+    inputText: {
       flex: 1,
       fontSize: 15,
       fontWeight: "700",
@@ -809,8 +738,15 @@ const makeStyles = (theme: Theme) =>
       paddingVertical: 0,
     },
     fieldHint: {
+      marginTop: 6,
       fontSize: 11.5,
       color: theme.fgMuted,
+      marginHorizontal: 2,
+    },
+    errorRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
       marginTop: 6,
       marginHorizontal: 2,
     },
@@ -818,8 +754,14 @@ const makeStyles = (theme: Theme) =>
       fontSize: 12,
       color: theme.error,
       fontWeight: "700",
-      marginTop: 6,
-      marginHorizontal: 2,
+      flex: 1,
+    },
+    gridRow: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    gridCol: {
+      flex: 1,
     },
     checkboxRow: {
       flexDirection: "row",
@@ -964,6 +906,7 @@ const makeStyles = (theme: Theme) =>
       padding: 4,
       borderRadius: 14,
       backgroundColor: theme.bgMuted,
+      marginTop: 6,
     },
     segmentBtn: {
       flex: 1,
