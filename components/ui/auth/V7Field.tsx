@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -17,6 +17,14 @@ import { useTheme, type Theme } from "@/constants/theme";
  * divider border, brand-green focus border + soft green glow, optional
  * leading icon, optional suffix slot, error state with warn icon, hint
  * below.
+ *
+ * IMPORTANT: the stylesheet is built once per theme (memoised) — focus
+ * + error states are applied as additional style objects on top. An
+ * earlier version rebuilt the whole stylesheet on every focus/blur,
+ * which made the TextInput's `style` prop reference-unequal each
+ * render. RN's underlying NativeViewHierarchyManager treats that as a
+ * style change that can drop the soft keyboard. Keep the stylesheet
+ * stable to keep focus stable.
  */
 export interface V7FieldProps {
   label: string;
@@ -55,7 +63,16 @@ export default function V7Field({
 }: V7FieldProps) {
   const theme = useTheme();
   const [focused, setFocused] = useState(false);
-  const s = makeStyles(theme, focused, !!error);
+  const s = useMemo(() => makeStyles(theme), [theme]);
+  const hasError = !!error;
+
+  // Build the wrapper's dynamic style overlay outside the stylesheet
+  // so the TextInput's `style` reference stays stable across renders.
+  const fieldOverlay = hasError
+    ? s.fieldError
+    : focused
+      ? s.fieldFocused
+      : null;
 
   return (
     <View>
@@ -63,13 +80,13 @@ export default function V7Field({
         <Text style={s.label}>{label}</Text>
         {required ? <Text style={s.required}> ·</Text> : null}
       </View>
-      <View style={s.field}>
+      <View style={[s.field, fieldOverlay]}>
         {leadingIcon ? (
           <Ionicons
             name={leadingIcon}
             size={18}
             color={theme.fgMuted}
-            style={{ marginRight: 8 }}
+            style={s.leadingIcon}
           />
         ) : null}
         <TextInput
@@ -102,7 +119,7 @@ export default function V7Field({
   );
 }
 
-const makeStyles = (theme: Theme, focused: boolean, hasError: boolean) =>
+const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     labelRow: {
       flexDirection: "row",
@@ -128,23 +145,22 @@ const makeStyles = (theme: Theme, focused: boolean, hasError: boolean) =>
       borderRadius: 12,
       backgroundColor: theme.surface,
       borderWidth: 1.5,
-      borderColor: hasError
-        ? theme.error
-        : focused
-          ? theme.primary
-          : theme.divider,
+      borderColor: theme.divider,
       flexDirection: "row",
       alignItems: "center",
-      // Soft green focus glow — RN has no box-shadow on Android, but
-      // iOS picks this up. Cheap polish; degrades gracefully.
-      ...(focused && !hasError
-        ? {
-            shadowColor: theme.primary,
-            shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 0.18,
-            shadowRadius: 6,
-          }
-        : {}),
+    },
+    fieldFocused: {
+      borderColor: theme.primary,
+      shadowColor: theme.primary,
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.18,
+      shadowRadius: 6,
+    },
+    fieldError: {
+      borderColor: theme.error,
+    },
+    leadingIcon: {
+      marginRight: 8,
     },
     input: {
       flex: 1,
