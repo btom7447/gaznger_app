@@ -286,18 +286,25 @@ export default function PaymentScreen() {
     }
   }, [user?.preferences?.autoRedeemPoints, pointsBalance, lockedTotalNaira]);
 
-  // Auto-select wallet exactly once on return from a successful top-up
-  // (`?select=wallet`). Guarded by a ref so re-renders or back-and-
-  // forward re-mounts don't keep clobbering a manual reselection.
-  const hasAutoSelectedRef = useRef(false);
+  // LOGIC P1-2 — Auto-select wallet exactly once on return from a
+  // successful top-up (`?select=wallet`). Flag lives on the order
+  // draft (useOrderStore) instead of a per-instance ref, so a
+  // back-and-forward remount of Payment after manual reselection
+  // doesn't clobber the user's choice.
+  const autoSelectedPostTopup = useOrderStore(
+    (s) => s.order.autoSelectedPostTopup,
+  );
+  const setAutoSelectedPostTopup = useOrderStore(
+    (s) => s.setAutoSelectedPostTopup,
+  );
   useEffect(() => {
-    if (hasAutoSelectedRef.current) return;
+    if (autoSelectedPostTopup) return;
     if (select === "wallet" && methods.find((m) => m.id === "wallet")) {
       setSelectedId("wallet");
       setPaymentMethod("wallet");
-      hasAutoSelectedRef.current = true;
+      setAutoSelectedPostTopup(true);
     }
-  }, [select, methods, setPaymentMethod]);
+  }, [select, methods, setPaymentMethod, autoSelectedPostTopup, setAutoSelectedPostTopup]);
 
   const selected = methods.find((m) => m.id === selectedId) ?? null;
   const insufficient = selected?.kind === "wallet" && selected.insufficient;

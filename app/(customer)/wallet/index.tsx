@@ -49,11 +49,20 @@ export default function WalletHome() {
   const loadMoreTransactions = useWalletStore((s) => s.loadMoreTransactions);
   const resetTransactions = useWalletStore((s) => s.resetTransactions);
 
+  // WS_VS_API P2 #5 — skip the focus-effect refetch when the wallet
+  // store was updated within the last 2s. A socket push or a
+  // pull-to-refresh that just landed makes the focus refetch
+  // redundant (and resets the tx cursor, losing scroll position
+  // for users who came back to the screen).
+  const lastUpdatedAt = useWalletStore((s) => s.lastUpdatedAt);
   useFocusEffect(
     useCallback(() => {
-      refresh();
-      loadMoreTransactions();
-    }, [refresh, loadMoreTransactions])
+      const fresh = Date.now() - lastUpdatedAt < 2_000;
+      if (!fresh) {
+        refresh();
+        loadMoreTransactions();
+      }
+    }, [refresh, loadMoreTransactions, lastUpdatedAt])
   );
 
   // Pull-to-refresh resets the cursor so the next loadMoreTransactions

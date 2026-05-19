@@ -74,6 +74,12 @@ interface TrackingSheetContentProps {
   trackPhase: TrackPhase;
   orderId: string;
   etaMinutes?: number | null;
+  /**
+   * EDGE P2-8 — true when displayEta is a haversine fallback, not
+   * from the routed polyline. Consumers prefix "Approx" on the
+   * displayed value so the precision claim matches the data.
+   */
+  etaIsApprox?: boolean;
   qty: number;
   unit: string;
   fuelLabel: string;
@@ -121,6 +127,7 @@ export default function TrackingSheetContent({
   trackPhase,
   orderId,
   etaMinutes,
+  etaIsApprox,
   qty,
   unit,
   fuelLabel,
@@ -228,7 +235,7 @@ export default function TrackingSheetContent({
               {trackPhase === "almost-there"
                 ? "< 1 min"
                 : etaMinutes != null
-                ? `${etaMinutes} min`
+                ? `${etaIsApprox ? "~" : ""}${etaMinutes} min`
                 : "—"}
             </Text>
           </View>

@@ -87,7 +87,11 @@ const COLD_START_TOLERANCE_MS = 15_000;
 // "Signed out" toast — confusing and wrong. The sign-out handler
 // raises this for a few seconds; while it's up, 401s are swallowed.
 let intentionalSignOutUntil = 0;
-export function beginIntentionalSignOut(holdMs = 4000) {
+// EDGE P2-2 — default hold window widened from 4s to 8s. Slow
+// requests at 5s+ used to surface "Session expired" right after
+// "Signed out", which felt like a bug. Callers can still pass a
+// custom window when they know in-flight latency.
+export function beginIntentionalSignOut(holdMs = 8000) {
   intentionalSignOutUntil = Date.now() + holdMs;
 }
 
@@ -109,12 +113,14 @@ function fireSessionExpired() {
   if (Date.now() < intentionalSignOutUntil) return;
   if (sessionExpiredFired) return;
   sessionExpiredFired = true;
-  const phone = useSessionStore.getState().user?.phone;
+  const user = useSessionStore.getState().user;
+  const phone = user?.phone;
   const sinceBoot = Date.now() - apiBootedAt;
-  // During the cold-start window route to PIN unlock instead of
-  // welcome/phone. PIN unlock can re-mint via /auth/login with the
-  // cached PIN — no full OTP round-trip needed.
-  if (sinceBoot < COLD_START_TOLERANCE_MS) {
+  // EDGE P1-11 — only route to PIN unlock during cold-start when the
+  // user actually HAS a PIN set. First-time-launch users with a
+  // stale token but no cached PIN would otherwise land on an
+  // unsatisfiable unlock screen. Fall through to welcome instead.
+  if (sinceBoot < COLD_START_TOLERANCE_MS && user?.hasPin) {
     router.replace("/(auth)/unlock/pin" as never);
     setTimeout(() => {
       sessionExpiredFired = false;

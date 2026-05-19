@@ -3,6 +3,12 @@ import { toast } from "sonner-native";
 import { api } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 
+// LOGIC P1-3 — module-level unsubscribe ref. Without it, multiple
+// attachSocket calls across login/out cycles stack listeners and
+// every wallet:update mutates state N times. With this ref, a
+// second attach is a no-op and a detach reliably tears down.
+let walletSocketUnsub: (() => void) | null = null;
+
 /**
  * Wallet store. Single source of truth for available + pending balances
  * and the most-recent transactions. The server pushes `wallet:update`
@@ -61,6 +67,13 @@ interface WalletState {
    */
   txExhausted: boolean;
   isLoadingTx: boolean;
+  /**
+   * WS_VS_API P2 #5 — timestamp of the most recent wallet:update
+   * socket payload (or last successful refresh()). Wallet screen
+   * uses this to skip the focus-effect refetch when the data is
+   * fresh (< 2s).
+   */
+  lastUpdatedAt: number;
 
   refresh: () => Promise<void>;
   loadMoreTransactions: () => Promise<void>;
@@ -84,6 +97,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   txCursor: null,
   txExhausted: false,
   isLoadingTx: false,
+  lastUpdatedAt: 0,
 
   refresh: async () => {
     set({ isLoading: true });
@@ -98,6 +112,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
         pending: data.pending,
         currency: data.currency ?? "NGN",
         isHydrated: true,
+        lastUpdatedAt: Date.now(),
       });
     } catch {
       // Non-fatal — keep prior values
@@ -141,10 +156,21 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   attachSocket: () => {
+    // LOGIC P1-3 — idempotent attach. Detach any prior subscription
+    // before attaching new handlers, so a re-attach after token
+    // refresh / login flip doesn't stack listeners.
+    if (walletSocketUnsub) {
+      walletSocketUnsub();
+      walletSocketUnsub = null;
+    }
     const s = getSocket();
     if (!s) return () => {};
     const handler = (data: { available: number; pending: number }) => {
-      set({ available: data.available, pending: data.pending });
+      set({
+        available: data.available,
+        pending: data.pending,
+        lastUpdatedAt: Date.now(),
+      });
       // Reset transaction cursor so the wallet screen pulls fresh on next view.
       set({ transactions: [], txCursor: null, txExhausted: false });
     };
@@ -162,10 +188,13 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     };
     s.on("wallet:update", handler);
     s.on("payment:failed", failedHandler);
-    return () => {
+    const teardown = () => {
       s.off("wallet:update", handler);
       s.off("payment:failed", failedHandler);
+      walletSocketUnsub = null;
     };
+    walletSocketUnsub = teardown;
+    return teardown;
   },
 
   applyDelta: (deltaAvailable, deltaPending = 0) => {

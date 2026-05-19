@@ -71,12 +71,24 @@ export default function OtpScreen() {
   const sendOtp = useCallback(async () => {
     if (!phone) return;
     try {
-      await api.post<SendOtpResponse>(
+      const res = await api.post<SendOtpResponse>(
         "/auth/send-otp",
         { phone, purpose },
         { headers: { "Idempotency-Key": newIdempotencyKey() } }
       );
-      setSecondsLeft(RESEND_COOLDOWN_S);
+      // EDGE P2-9 — honour the server's resendAvailableAt rather
+      // than a hardcoded 60s. If the server is in a longer cool-down
+      // (e.g. after multiple rate-limited attempts) we wait it out
+      // instead of spamming 429s.
+      if (res?.resendAvailableAt) {
+        const secs = Math.max(
+          0,
+          Math.ceil((new Date(res.resendAvailableAt).getTime() - Date.now()) / 1000),
+        );
+        setSecondsLeft(secs > 0 ? secs : RESEND_COOLDOWN_S);
+      } else {
+        setSecondsLeft(RESEND_COOLDOWN_S);
+      }
     } catch (err: any) {
       // Server might 409 (signup, already exists) or 404 (recovery).
       // Surface the message verbatim, no generic strings.

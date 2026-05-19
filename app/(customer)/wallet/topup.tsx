@@ -114,7 +114,10 @@ export default function WalletTopUp() {
 
   const onTypeDigits = useCallback((v: string) => {
     setAnimDuration(160);
-    setAmountText(v.replace(/[^0-9]/g, "").slice(0, 7));
+    // EDGE P2-5 — cap typed digits to 6 (₦999,999); MAX_TOPUP is
+    // ₦500,000 so this prevents the user from staring at an
+    // "exceeds maximum" red state when they accidentally type a 7th.
+    setAmountText(v.replace(/[^0-9]/g, "").slice(0, 6));
   }, []);
 
   const handleTopUp = useCallback(async () => {
