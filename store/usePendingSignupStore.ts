@@ -138,6 +138,38 @@ const emptyState: Pick<
   startedAt: undefined,
 };
 
+/**
+ * EDGE P3-2 — NFC normalise + strip zero-width / control chars from
+ * every string field in a profile patch. Run at the boundary
+ * (setter) instead of N times at consumers.
+ *
+ * Strips:
+ *   - U+200B..U+200D ZWSP / ZWNJ / ZWJ
+ *   - U+FEFF BOM
+ *   - C0 / C1 control chars (0x00-0x1F, 0x7F-0x9F)
+ *
+ * Doesn't trim — leading/trailing whitespace is meaningful for some
+ * fields (multi-name "Mary Jane "), and consumers already `.trim()`
+ * before submit.
+ */
+function sanitiseStringFields<T extends Record<string, unknown>>(obj: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === "string") {
+      out[k] = v
+        .normalize("NFC")
+        // Strip zero-widths
+        .replace(/[​-‍﻿]/g, "")
+        // Strip C0/C1 control chars (keep \n \t \r in case any field
+        // legitimately needs them — none do today, but cheap insurance)
+        .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F-\x9F]/g, "");
+    } else {
+      out[k] = v;
+    }
+  }
+  return out as T;
+}
+
 export const usePendingSignupStore = create<PendingSignupState>()(
   persist(
     (set, get) => ({
@@ -164,7 +196,15 @@ export const usePendingSignupStore = create<PendingSignupState>()(
         set((s) => ({
           profile: {
             ...s.profile,
-            [role]: { ...(s.profile[role] ?? {}), ...patch },
+            // EDGE P3-2 — NFC normalize string fields + strip
+            // zero-width + control chars before persisting. Catches
+            // paste-bombs from iOS Notes, malicious clipboard
+            // injections, and accidental ZWJ that bounces from
+            // server-side validators that don't NFC-normalize first.
+            [role]: {
+              ...(s.profile[role] ?? {}),
+              ...sanitiseStringFields(patch),
+            },
           },
         })),
 

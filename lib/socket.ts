@@ -3,7 +3,16 @@ import { AppState } from "react-native";
 import { io, Socket } from "socket.io-client";
 import { devLog, devWarn } from "@/lib/log";
 
-const BASE_URL = process.env.EXPO_PUBLIC_BASE_URL ?? "http://localhost:5000";
+// SECURITY A4 — mirror the api.ts production guard. The throw in
+// api.ts fires first at module-init, but if socket.ts is imported
+// without api.ts we still want to fail fast on misconfig.
+const RAW_BASE_URL = process.env.EXPO_PUBLIC_BASE_URL;
+const BASE_URL = RAW_BASE_URL ?? "http://localhost:5000";
+if (!__DEV__ && (!RAW_BASE_URL || !RAW_BASE_URL.startsWith("https://"))) {
+  throw new Error(
+    "SECURITY A4: EXPO_PUBLIC_BASE_URL must be HTTPS in production.",
+  );
+}
 
 let socket: Socket | null = null;
 

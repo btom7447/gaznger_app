@@ -45,19 +45,21 @@ export default function ProfileRiderScreen() {
 
   const valid =
     fullName.trim().length >= 3 &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) &&
     plate.trim().length >= 4;
 
   const handleContinue = useCallback(() => {
     if (!valid) {
-      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
         setEmailErr("That doesn't look like a valid email.");
       }
       return;
     }
     patchProfile("rider", {
       fullName: fullName.trim(),
-      email: email.trim(),
+      // SECURITY I2 — lowercase to keep server-side email index unique
+      // case-insensitively.
+      email: email.trim().toLowerCase(),
       plate: plate.trim().toUpperCase(),
       vehicleType,
     });

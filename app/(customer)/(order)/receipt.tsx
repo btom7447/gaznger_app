@@ -81,11 +81,15 @@ export default function ReceiptScreen() {
   // wallet / transfer / new-card. Replaces the previous "GTB •••• 4892"
   // hard-code that showed regardless of what the user actually paid with.
   const methodSubLabel = paymentMethodLabel(draft.paymentMethodId, user);
+  // EDGE P3-5 — explicit Lagos timezone (NG = UTC+1, no DST) so a
+  // late-night 23:59 WAT order doesn't render as "yesterday" if
+  // the device locale defaults to UTC.
   const timeStr = useMemo(
     () =>
       new Date().toLocaleTimeString("en-NG", {
         hour: "numeric",
         minute: "2-digit",
+        timeZone: "Africa/Lagos",
       }),
     []
   );

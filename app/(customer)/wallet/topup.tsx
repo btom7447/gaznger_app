@@ -73,8 +73,14 @@ export default function WalletTopUp() {
   const idem = useIdempotencyKey();
 
   const [amountText, setAmountText] = useState(() => {
+    // SECURITY X5 — clamp deep-link prefill to the same MAX as the
+    // typed input (₦500,000). Without this, a `gaznger://wallet/
+    // topup?prefill=500000000` deep link could prefill 500M and
+    // the user might tap Pay before noticing.
     const initial = parseInt(prefill ?? "", 10);
-    return Number.isFinite(initial) && initial > 0 ? String(initial) : "";
+    if (!Number.isFinite(initial) || initial <= 0) return "";
+    const clamped = Math.min(initial, MAX_TOPUP);
+    return String(clamped);
   });
   const [submitting, setSubmitting] = useState(false);
   // Tracks whether the most recent value change came from a preset tap

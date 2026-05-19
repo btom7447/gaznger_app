@@ -4,7 +4,25 @@ import { toast } from "sonner-native";
 import { useSessionStore } from "@/store/useSessionStore";
 import { pinnedFetch } from "@/lib/pinnedFetch";
 
-const BASE_URL = process.env.EXPO_PUBLIC_BASE_URL ?? "http://localhost:5000";
+// SECURITY A4 — fail fast on misconfigured BASE_URL in production
+// builds. Silent fallback to localhost:5000 would have any prod
+// install hammer dev environments, which is both a privacy leak
+// (PII traveling to a dev server) and an availability bug. Dev +
+// EAS preview keep the localhost default so local dev still works.
+const RAW_BASE_URL = process.env.EXPO_PUBLIC_BASE_URL;
+const BASE_URL = RAW_BASE_URL ?? "http://localhost:5000";
+if (!__DEV__) {
+  if (!RAW_BASE_URL) {
+    throw new Error(
+      "SECURITY A4: EXPO_PUBLIC_BASE_URL is required in production builds.",
+    );
+  }
+  if (!RAW_BASE_URL.startsWith("https://")) {
+    throw new Error(
+      `SECURITY A4: EXPO_PUBLIC_BASE_URL must be HTTPS in production (got "${RAW_BASE_URL}").`,
+    );
+  }
+}
 
 /**
  * Compare two semver-ish version strings (e.g. "2.5.1" vs "2.4.0"). Returns

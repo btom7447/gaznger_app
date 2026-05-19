@@ -116,7 +116,7 @@ export default function RiderWizardScreen() {
         email?: string;
       }>("/auth/me", {
         displayName: displayName.trim(),
-        ...(email.trim() ? { email: email.trim() } : {}),
+        ...(email.trim() ? { email: email.trim().toLowerCase() } : {}),
       });
       updateUser({
         displayName: data.displayName,

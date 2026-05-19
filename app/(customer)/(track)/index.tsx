@@ -545,8 +545,15 @@ export default function TrackScreen() {
       serverStatus === "rated" ||
       serverStatus === "closed" ||
       serverStatus.startsWith("cancelled");
-    if (isTerminal) resetOrder();
-  }, [serverStatus, resetOrder]);
+    // EDGE P3-3 — only reset when the terminal status matches the
+    // order we're actually displaying. socket onUpdate already
+    // filters by orderId, but defensive: a stale state in
+    // serverStatus combined with a fast cross-order navigation
+    // could otherwise wipe a fresh draft.
+    if (isTerminal && effectiveOrderId && draft.orderId === effectiveOrderId) {
+      resetOrder();
+    }
+  }, [serverStatus, resetOrder, effectiveOrderId, draft.orderId]);
 
   /**
    * Phase-driven routed polyline. Two distinct legs depending on
