@@ -7,11 +7,19 @@
  * on every socket reconnect or AppState foreground (whichever fires
  * first).
  *
- * Scope: rider-only for now. The customer side already converges
- * fast via the reconnect catch-up GET; the rider's CTA taps are the
- * actions that absolutely must not be lost (a "Mark at station"
- * lost while in a basement is the difference between the rider
- * getting paid for that step or not).
+ * Scope: rider-only by design (audit EDGE P2-6 reviewed + resolved).
+ * Customer money calls (place order, top-up verify, points redeem)
+ * are intentionally NOT queued because:
+ *   1. They run in the foreground with the user staring at a CTA;
+ *      a network failure surfaces as a retry-able Alert, not a
+ *      silently-lost action.
+ *   2. They all carry Idempotency-Key (Phase 2 audit fix) so manual
+ *      retry is server-deduped.
+ *   3. The user can always re-attempt from the same screen — unlike
+ *      a rider mid-route who needs the queue to capture taps that
+ *      happen with no network.
+ * If we later add background customer mutations (e.g. auto-rate on
+ * delivery confirm, scheduled top-ups), revisit this scope.
  *
  * Design choices:
  *   - Append-only log; entries are processed in FIFO order.

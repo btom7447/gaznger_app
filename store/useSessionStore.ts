@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { secureStorage } from "./secureStorage";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
+import { resetAuthGates } from "@/lib/api";
 
 export type UserRole = "customer" | "vendor" | "rider" | "admin";
 
@@ -128,6 +129,11 @@ export const useSessionStore = create<SessionState>()(
       hasHydrated: false,
 
       login: ({ user, accessToken, refreshToken }) => {
+        // LOGIC P0-3 — clear session-expired + intentional-signout
+        // gates BEFORE setting tokens. Without this, a rapid
+        // logout→login cycle can leave the gates raised and any 401
+        // during the window is silently swallowed.
+        resetAuthGates();
         set({ user, accessToken, refreshToken, isLoggedIn: true });
         // Connect socket after tokens are flushed to store
         setTimeout(() => connectSocket(accessToken), 0);

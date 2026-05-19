@@ -50,7 +50,9 @@ export default function CustomerDetailsScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const nameValid = name.trim().length >= 2;
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  // EDGE P3-4 — TLD must be at least 2 chars to weed out
+  // `name@host` paste mistakes that bounce from Paystack receipts.
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
   const addressValid = !!address;
   const canSubmit = nameValid && emailValid && addressValid && !submitting;
 
@@ -63,7 +65,7 @@ export default function CustomerDetailsScreen() {
         email?: string;
       }>("/auth/me", {
         displayName: name.trim(),
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
       });
       updateUser({
         displayName: profile.displayName,

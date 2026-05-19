@@ -94,6 +94,13 @@ export interface OrderDraft {
   station?: LockedStation;
   /** Selected payment method id (saved card/wallet/etc). */
   paymentMethodId?: string;
+  /**
+   * LOGIC P1-2 — true after the post-topup auto-select (?select=wallet)
+   * fires once for the current draft. Survives remount of the Payment
+   * screen so a back/forward navigation doesn't clobber a manual
+   * reselection. Cleared on resetOrder.
+   */
+  autoSelectedPostTopup?: boolean;
   /** Server-issued order id once Payment posts successfully. */
   orderId?: string;
 
@@ -200,6 +207,8 @@ interface OrderState {
   /** Lock the price at the Stations screen. Computes totalKobo from qty × perUnitKobo. */
   lockStation: (input: Omit<LockedStation, "totalKobo" | "lockedAt">) => void;
   setPaymentMethod: (id: string) => void;
+  /** Mark the auto-select-after-topup gate (LOGIC P1-2). */
+  setAutoSelectedPostTopup: (v: boolean) => void;
   /** Set after server returns orderId on Payment success. */
   setOrderId: (id: string) => void;
   /**
@@ -453,6 +462,8 @@ export const useOrderStore = create<OrderState>()(
 
       setPaymentMethod: (id) =>
         set((state) => ({ order: { ...state.order, paymentMethodId: id } })),
+      setAutoSelectedPostTopup: (v) =>
+        set((state) => ({ order: { ...state.order, autoSelectedPostTopup: v } })),
 
       setOrderId: (id) =>
         set((state) => ({ order: { ...state.order, orderId: id } })),

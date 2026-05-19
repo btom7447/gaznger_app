@@ -28,11 +28,11 @@ export default function ProfileCustomerScreen() {
   const valid =
     firstName.trim().length >= 2 &&
     lastName.trim().length >= 2 &&
-    (!email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+    (!email || /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email));
 
   const handleContinue = useCallback(() => {
     if (!valid) {
-      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
         setEmailErr("That doesn't look like a valid email.");
       }
       return;
@@ -40,7 +40,9 @@ export default function ProfileCustomerScreen() {
     patchProfile("customer", {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
-      email: email.trim() || undefined,
+      // SECURITY I2 — lowercase to prevent Foo@Bar.com vs foo@bar.com
+      // creating distinct user records server-side.
+      email: email.trim().toLowerCase() || undefined,
     });
     setLastStep("/(auth)/signup/pin-create");
     router.push("/(auth)/signup/pin-create" as never);

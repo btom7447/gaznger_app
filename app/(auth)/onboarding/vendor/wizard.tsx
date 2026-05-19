@@ -218,7 +218,7 @@ export default function VendorWizardScreen() {
   const step1Valid =
     ownerName.trim().length >= 2 &&
     businessName.trim().length >= 2 &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(businessEmail.trim());
+    /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(businessEmail.trim());
 
   const fuelsSelected = useMemo(
     () =>
@@ -249,7 +249,7 @@ export default function VendorWizardScreen() {
         vendorBusinessName?: string;
       }>("/auth/me", {
         displayName: ownerName.trim(),
-        email: businessEmail.trim(),
+        email: businessEmail.trim().toLowerCase(),
         vendorBusinessName: businessName.trim(),
       });
       updateUser({

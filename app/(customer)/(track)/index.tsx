@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Easing, Linking, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Animated, AppState, Easing, Linking, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { toast } from "sonner-native";
 import MapView, { Circle, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
@@ -203,6 +203,13 @@ export default function TrackScreen() {
     return { latitude: 6.5244, longitude: 3.3792 };
   }, [serverDeliveryCoord, draft.deliveryCoords]);
 
+  // LOGIC P2-1 — true once we have a real destination (from
+  // store OR server fetch). Used to gate map render so the user
+  // doesn't briefly see a Lagos pin while we hydrate.
+  const destinationKnown =
+    !!serverDeliveryCoord ||
+    !!(draft.deliveryCoords?.lat && draft.deliveryCoords?.lng);
+
   /* ───────────────── Initial fetch + reconnect catch-up ─────────────────
    * Pull the order doc on mount so we have the rider profile + actual
    * server status before any socket events arrive. ALSO re-fetch on
@@ -305,18 +312,38 @@ export default function TrackScreen() {
     };
   }, []);
 
-  // 4-second poll while the order is active — guarantees the screen
-  // catches up even when socket events are missed (navigation drops,
-  // Expo Go bridge suspensions, reconnect race). Stops once the order
-  // reaches a terminal status (delivered/cancelled) or the component
-  // unmounts. Socket events remain the primary path; this is the net.
+  // EDGE P1-5 — 4-second poll while the order is active AND the app is
+  // foregrounded. Stops when terminal status reached, component
+  // unmounts, OR app backgrounds (backgrounded interval would queue
+  // requests for when we come back; reconnect catch-up + socket
+  // events cover the gap). WS_VS_API P2 #4 widens to 30s if socket
+  // is live (sockets are the primary path; the poll is a safety net).
   useEffect(() => {
     if (!effectiveOrderId) return;
     const TERMINAL = ["delivered", "rated", "closed"];
     if (TERMINAL.includes(serverStatus) || serverStatus.startsWith("cancelled")) return;
-    const id = setInterval(() => refreshOrderStateRef.current(), 4000);
-    return () => clearInterval(id);
-  }, [effectiveOrderId, serverStatus]);
+    let id: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (id) return;
+      const cadenceMs = socketStatus === "live" ? 30_000 : 4_000;
+      id = setInterval(() => refreshOrderStateRef.current(), cadenceMs);
+    };
+    const stop = () => {
+      if (id) {
+        clearInterval(id);
+        id = null;
+      }
+    };
+    if (AppState.currentState === "active") start();
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") start();
+      else stop();
+    });
+    return () => {
+      sub.remove();
+      stop();
+    };
+  }, [effectiveOrderId, serverStatus, socketStatus]);
 
   // Reconnect catch-up — every time the socket comes back live after
   // a drop, re-fetch in case order:update events fired while we were
@@ -345,6 +372,11 @@ export default function TrackScreen() {
     refreshOrderStateRef.current = refreshOrderState;
   }, [refreshOrderState]);
 
+  // EDGE P1-6 — last-seen Order.version per orderId. Used by the
+  // onUpdate handler below to drop stale events that arrive out of
+  // order during a cancel-vs-accept race.
+  const lastOrderVersionRef = useRef<Map<string, number>>(new Map());
+
 
   /* ───────────────── Socket subscriptions ───────────────── */
   useEffect(() => {
@@ -358,6 +390,7 @@ export default function TrackScreen() {
     const onUpdate = (data: {
       orderId?: string;
       status?: string;
+      version?: number;
       eta?: number;
       rider?: RiderInfo;
       deliveredAt?: string;
@@ -368,6 +401,16 @@ export default function TrackScreen() {
       // Filter: ignore events for other orders once we know our id.
       const oid = effectiveOrderIdRef.current;
       if (oid && data.orderId && String(data.orderId) !== oid) return;
+      // EDGE P1-6 — drop stale events. Server bumps Order.version on
+      // every status write; out-of-order events arrive when a cancel
+      // races an accept. We keep the LAST seen version per order and
+      // discard anything older. Same-version still flows through
+      // (different consumers might care about rider vs eta fields).
+      if (typeof data.version === "number" && oid) {
+        const last = lastOrderVersionRef.current.get(oid) ?? -1;
+        if (data.version < last) return;
+        lastOrderVersionRef.current.set(oid, data.version);
+      }
       if (data.status) {
         setServerStatus(data.status);
         // Server signalled the rider is no longer on this order
@@ -442,6 +485,16 @@ export default function TrackScreen() {
     socket.on("order:update", onUpdate);
     socket.on("rider:location", onLocation);
     socket.on("route:update", onRouteUpdate);
+
+    // LOGIC P0-2 — after the listeners are attached, fire a fresh
+    // GET. Any status change that landed between the screen's first
+    // GET (in the separate useEffect above) and now would otherwise
+    // be lost. The catch-up GET hydrates state from the current
+    // server truth so the listener picks up only deltas going
+    // forward. Cheap (one orders/:id read) and only fires once per
+    // socket reconnect.
+    refreshOrderStateRef.current();
+
     return () => {
       socket.off("order:update", onUpdate);
       socket.off("rider:location", onLocation);
@@ -492,8 +545,15 @@ export default function TrackScreen() {
       serverStatus === "rated" ||
       serverStatus === "closed" ||
       serverStatus.startsWith("cancelled");
-    if (isTerminal) resetOrder();
-  }, [serverStatus, resetOrder]);
+    // EDGE P3-3 — only reset when the terminal status matches the
+    // order we're actually displaying. socket onUpdate already
+    // filters by orderId, but defensive: a stale state in
+    // serverStatus combined with a fast cross-order navigation
+    // could otherwise wipe a fresh draft.
+    if (isTerminal && effectiveOrderId && draft.orderId === effectiveOrderId) {
+      resetOrder();
+    }
+  }, [serverStatus, resetOrder, effectiveOrderId, draft.orderId]);
 
   /**
    * Phase-driven routed polyline. Two distinct legs depending on
@@ -568,7 +628,11 @@ export default function TrackScreen() {
     };
 
     fetchRoute();
-    timer = setInterval(fetchRoute, ROUTE_REFETCH_MS);
+    // WS_VS_API P1 #3 — removed the every-5-min refetch interval.
+    // The server emits `route:update` on every recompute, and the
+    // socket listener at the top of this screen consumes those.
+    // Initial fetch above covers cold start; reconnect catch-up
+    // covers gaps. The interval was redundant ~12 fetches/hr.
     return () => {
       cancelled = true;
       if (timer) clearInterval(timer);
@@ -632,6 +696,12 @@ export default function TrackScreen() {
     }
     return eta;
   }, [routeMeta?.durationSeconds, eta]);
+
+  // EDGE P2-8 — flag whether the displayed ETA is from the real
+  // routed polyline or a haversine fallback. Consumers (the bottom
+  // sheet) prefix the ETA label with "Approx" when fallback so the
+  // precision matches the data.
+  const etaIsApprox = routeMeta?.durationSeconds == null || routeMeta.durationSeconds <= 0;
 
   const trackPhase: TrackPhase = useMemo(
     () =>
@@ -869,6 +939,11 @@ export default function TrackScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: theme.bg }]}>
+      {/* LOGIC P2-1 — don't render the MapView until we have a real
+          destination. Showing the Lagos fallback for a frame is
+          misleading + visually janky. The container's bgColor
+          covers the gap (≤ 1s on warm draft, ≤ 3s on deep-link). */}
+      {destinationKnown ? (
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFill}
@@ -958,6 +1033,7 @@ export default function TrackScreen() {
           />
         ) : null}
       </MapView>
+      ) : null}
 
       {/* Connection strips — NetInfo first (no internet), then
           SocketStrip (internet but socket unhealthy). They surface
@@ -1049,6 +1125,7 @@ export default function TrackScreen() {
             trackPhase={trackPhase}
             orderId={effectiveOrderId ?? "—"}
             etaMinutes={displayEta}
+            etaIsApprox={etaIsApprox}
             qty={draft.qty ?? 0}
             unit={draft.unit ?? "L"}
             fuelLabel={draft.fuelTypeId ?? ""}

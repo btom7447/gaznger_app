@@ -1,8 +1,18 @@
 import { useEffect, useState } from "react";
 import { AppState } from "react-native";
 import { io, Socket } from "socket.io-client";
+import { devLog, devWarn } from "@/lib/log";
 
-const BASE_URL = process.env.EXPO_PUBLIC_BASE_URL ?? "http://localhost:5000";
+// SECURITY A4 — mirror the api.ts production guard. The throw in
+// api.ts fires first at module-init, but if socket.ts is imported
+// without api.ts we still want to fail fast on misconfig.
+const RAW_BASE_URL = process.env.EXPO_PUBLIC_BASE_URL;
+const BASE_URL = RAW_BASE_URL ?? "http://localhost:5000";
+if (!__DEV__ && (!RAW_BASE_URL || !RAW_BASE_URL.startsWith("https://"))) {
+  throw new Error(
+    "SECURITY A4: EXPO_PUBLIC_BASE_URL must be HTTPS in production.",
+  );
+}
 
 let socket: Socket | null = null;
 
@@ -139,18 +149,26 @@ export function connectSocket(token?: string | null): Socket | null {
     socket.disconnect();
   }
 
+  // EDGE P1-9 — infinite reconnect with exponential backoff capped
+  // at 30s. Previous 10-attempt cap gave up after ~20s of bad
+  // network, leaving the socket permanently dead until app
+  // backgrounds. Infinite reconnect + capped delay is the modern
+  // default; LiveBadge surfaces "offline" via reconnect_failed if
+  // the manager ever gives up (it won't with attempts=Infinity, but
+  // the listener is there for safety).
   socket = io(BASE_URL, {
     auth: { token },
     transports: ["websocket"],
     reconnection: true,
     reconnectionDelay: 2000,
-    reconnectionAttempts: 10,
+    reconnectionDelayMax: 30_000,
+    reconnectionAttempts: Infinity,
   });
 
   setStatus("reconnecting");
 
   socket.on("connect", () => {
-    console.log("[Socket] connected:", socket?.id);
+    devLog("[Socket] connected:", socket?.id);
     clearOfflineTimer();
     setStatus("live");
     logSocketEvent({ ts: Date.now(), direction: "in", event: "connect" });
@@ -195,13 +213,13 @@ export function connectSocket(token?: string | null): Socket | null {
   });
 
   socket.on("connect_error", (err) => {
-    console.warn("[Socket] connect_error:", err.message);
+    devWarn("[Socket] connect_error:", err.message);
     if (currentStatus === "live") setStatus("reconnecting");
     scheduleOffline();
   });
 
   socket.on("disconnect", (reason) => {
-    console.log("[Socket] disconnected:", reason);
+    devLog("[Socket] disconnected:", reason);
     setStatus("reconnecting");
     scheduleOffline();
     logSocketEvent({
@@ -210,6 +228,15 @@ export function connectSocket(token?: string | null): Socket | null {
       event: "disconnect",
       payload: { reason },
     });
+  });
+
+  // LOGIC P2-2 — flip to "offline" when the reconnect manager
+  // genuinely gives up (after EDGE P1-9 raised the cap, this means
+  // a sustained outage). Without this, LiveBadge stays on
+  // "reconnecting" forever which mis-cues the user.
+  socket.io.on("reconnect_failed", () => {
+    devWarn("[Socket] reconnect_failed — giving up");
+    setStatus("offline");
   });
 
   return socket;

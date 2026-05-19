@@ -1,9 +1,10 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Theme, useTheme } from "@/constants/theme";
 import { Button } from "@/components/ui/primitives";
+import { clearEdgeStateLock } from "@/lib/api";
 
 export type EdgeTone = "error" | "neutral" | "warning" | "primary";
 
@@ -58,6 +59,14 @@ export default function EdgeStateScreen({
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(theme), [theme]);
+
+  // EDGE P0-5 — release the route-edge-state dedupe lock on mount
+  // so a subsequent 426/503 burst routes again instead of being
+  // silently swallowed. Previously the lock reset on a 1500ms timer
+  // regardless of mount.
+  useEffect(() => {
+    clearEdgeStateLock();
+  }, []);
 
   const toneMap: Record<
     EdgeTone,

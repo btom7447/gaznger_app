@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/vendor";
 import { useTheme } from "@/constants/theme";
 import { api } from "@/lib/api";
+import { useIdempotencyKey } from "@/lib/idempotency";
 
 interface WalletResp {
   available: number;
@@ -58,17 +59,15 @@ interface BankAccountRow {
  */
 
 const QUICK_PICKS = [50_000, 100_000, 250_000];
-const INSTANT_FEE_RATE = 0.005; // 0.5% — server is authoritative
-const INSTANT_FEE_MIN = 100;
 
 function fmtNaira(n: number): string {
   return `₦${Math.round(n).toLocaleString("en-NG")}`;
 }
 
-function instantFeeFor(amount: number): number {
-  if (amount <= 0) return 0;
-  return Math.max(INSTANT_FEE_MIN, Math.round(amount * INSTANT_FEE_RATE));
-}
+// EDGE P1-8 — INSTANT_FEE_RATE no longer mirrored client-side. The
+// fee comes from GET /api/vendor/withdraw/preview (added Phase 2A
+// server) so client + server can't drift. We keep a 0 fallback for
+// the initial render while the preview is in flight.
 
 export default function WithdrawScreen() {
   const router = useRouter();
@@ -114,12 +113,49 @@ export default function WithdrawScreen() {
     return Number.isFinite(n) && n > 0 ? n : 0;
   }, [amount]);
 
-  const fee = instantFeeFor(amountNum);
-  const totalDebit = amountNum + fee;
+  // EDGE P1-8 — fee + totalDebit come from server preview, not a
+  // client-side mirror. Debounced 250ms so each keystroke doesn't
+  // ping the server.
+  const [preview, setPreview] = useState<{
+    fee: number;
+    totalDebit: number;
+  } | null>(null);
+  useEffect(() => {
+    if (amountNum <= 0) {
+      setPreview(null);
+      return;
+    }
+    let cancelled = false;
+    const id = setTimeout(async () => {
+      try {
+        const res = await api.get<{ fee: number; totalDebit: number }>(
+          `/api/vendor/withdraw/preview?amount=${amountNum}`,
+          { timeoutMs: 5_000 },
+        );
+        if (!cancelled) setPreview({ fee: res.fee, totalDebit: res.totalDebit });
+      } catch {
+        // Leave preview at last-known on failure; user can still submit
+        // and the server will return the same number as the source of
+        // truth.
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [amountNum]);
+
+  const fee = preview?.fee ?? 0;
+  const totalDebit = preview?.totalDebit ?? amountNum;
   const insufficient = totalDebit > (wallet?.available ?? 0);
   const pickedBank = banks?.find((b) => b._id === pickedBankId) ?? null;
   const canSubmit =
     !!pickedBankId && amountNum > 0 && !insufficient && !submitting;
+
+  // EDGE P1-7 / SECURITY M2 — stable Idempotency-Key for the
+  // withdraw POST so a flaky-network retry doesn't trigger a second
+  // payout. Keyed by (amount, bank).
+  const idem = useIdempotencyKey();
 
   const handleQuickPick = useCallback(
     (v: number) => {
@@ -133,19 +169,28 @@ export default function WithdrawScreen() {
 
   const handleMax = useCallback(() => {
     if (!wallet) return;
-    // Reserve a buffer for fee so totalDebit stays ≤ available.
-    const maxAmount = Math.max(0, wallet.available - INSTANT_FEE_MIN);
+    // EDGE P1-8 — reserve the live preview's fee (or 100 fallback
+    // for the initial render before the preview lands) so
+    // totalDebit stays ≤ available.
+    const feeReserve = preview?.fee ?? 100;
+    const maxAmount = Math.max(0, wallet.available - feeReserve);
     setAmount(String(maxAmount));
-  }, [wallet]);
+  }, [wallet, preview]);
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      await api.post("/api/vendor/withdraw", {
-        amount: amountNum,
-        bankAccountId: pickedBankId,
-      });
+      const key = idem.get(`vendor-withdraw:${amountNum}:${pickedBankId}`);
+      await api.post(
+        "/api/vendor/withdraw",
+        {
+          amount: amountNum,
+          bankAccountId: pickedBankId,
+        },
+        { headers: { "Idempotency-Key": key } as any },
+      );
+      idem.consume(`vendor-withdraw:${amountNum}:${pickedBankId}`);
       toast.success("Withdrawal requested", {
         description: "We'll notify you when it's processed.",
       });

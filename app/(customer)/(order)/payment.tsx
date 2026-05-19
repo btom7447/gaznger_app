@@ -9,7 +9,7 @@ import { useSessionStore } from "@/store/useSessionStore";
 import { useWalletStore } from "@/store/useWalletStore";
 import { api } from "@/lib/api";
 import { setPaystackPublicKey } from "@/lib/paystackKey";
-import { newIdempotencyKey } from "@/lib/idempotency";
+import { useIdempotencyKey } from "@/lib/idempotency";
 import { requireStepUpAuth } from "@/components/ui/auth";
 import {
   FloatingCTA,
@@ -46,7 +46,16 @@ function computeServiceFee(fuelSubtotalNaira: number): number {
   return Math.round((fuelSubtotalNaira * SERVICE_FEE_BPS) / 10_000);
 }
 
-function computeDeliveryFee(distMeters?: number): number {
+/**
+ * BUSINESS P0-2 (mobile half) — fallback only. Real source of truth
+ * is `GET /api/orders/quote`. We use this haversine mirror while the
+ * server quote is in flight on first paint OR if the quote endpoint
+ * fails. It does NOT apply the LPG-swap 2× multiplier — that's
+ * server-only — so the displayed fee may briefly be ½ the true fee
+ * for cylinder_swap orders before the quote lands. The user can't
+ * submit before quote returns (button is disabled in that window).
+ */
+function computeDeliveryFeeFallback(distMeters?: number): number {
   if (!distMeters || distMeters <= 0) return DELIVERY_BASE_FEE;
   const km = distMeters / 1000;
   return Math.round(DELIVERY_BASE_FEE + DELIVERY_PER_KM * km);
@@ -89,14 +98,97 @@ export default function PaymentScreen() {
 
   const { popup } = usePaystack();
 
+  // SECURITY M2 / EDGE P0-1, P0-2, P2-3 — single key per logical
+  // operation (per orderId × op). The hook caches, so a retry of
+  // the same op reuses the same key and the server dedups. Keys
+  // consumed on terminal success so a fresh re-attempt mints a new
+  // one.
+  const idem = useIdempotencyKey();
+
   const station = draft.station;
   const totalKobo = station?.totalKobo ?? 0;
   const lockedTotalNaira = totalKobo / 100;
 
-  const deliveryFee = useMemo(
-    () => computeDeliveryFee(station?.distMeters),
-    [station?.distMeters]
+  // BUSINESS P0-2 — authoritative fee comes from server /quote.
+  // Fallback to haversine while in flight or on quote failure.
+  const [serverQuoteFee, setServerQuoteFee] = useState<number | null>(null);
+  const deliveryType = useMemo<string | undefined>(
+    () =>
+      draft.fuelTypeId === "lpg"
+        ? draft.serviceType === "swap"
+          ? "cylinder_swap"
+          : "home_refill"
+        : undefined,
+    [draft.fuelTypeId, draft.serviceType],
   );
+  useEffect(() => {
+    const sid = station?.id;
+    const aid = draft.deliveryAddressId;
+    const fid = draft.fuelTypeId;
+    if (!sid || !aid || !fid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const params = new URLSearchParams({
+          stationId: sid,
+          addressId: aid,
+          fuelTypeId: fid,
+          ...(deliveryType ? { deliveryType } : {}),
+        });
+        const res = await api.get<{
+          breakdown: { finalFee: number };
+        }>(`/api/orders/quote?${params.toString()}`, { timeoutMs: 5_000 });
+        if (!cancelled) setServerQuoteFee(res.breakdown.finalFee);
+      } catch {
+        // Leave at last-known on failure; fallback covers initial paint.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [station?.id, draft.deliveryAddressId, draft.fuelTypeId, deliveryType]);
+
+  const deliveryFee =
+    serverQuoteFee ?? computeDeliveryFeeFallback(station?.distMeters);
+
+  // BUSINESS P1-4 — divergence guard. On every Payment mount, fetch
+  // the station's current per-unit price for the locked fuel and
+  // compare to `station.perUnitKobo` recorded at lock time. If the
+  // vendor changed price between Stations selection and Payment,
+  // surface a "Price changed" card and block submit until the user
+  // re-confirms (which re-locks at the new price).
+  const [priceDrift, setPriceDrift] = useState<{
+    oldKobo: number;
+    newKobo: number;
+  } | null>(null);
+  useEffect(() => {
+    const sid = station?.id;
+    const lockedPerUnit = station?.perUnitKobo;
+    const fid = draft.fuelTypeId;
+    if (!sid || !lockedPerUnit || !fid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get<{
+          fuels?: Array<{ fuelTypeId?: string; pricePerUnit?: number }>;
+        }>(`/api/stations/${sid}`, { timeoutMs: 5_000 });
+        if (cancelled) return;
+        const current = res.fuels?.find(
+          (f) => (f.fuelTypeId ?? "").toLowerCase() === fid.toLowerCase(),
+        )?.pricePerUnit;
+        if (!current) return;
+        const currentKobo = Math.round(current * 100);
+        if (currentKobo !== lockedPerUnit) {
+          setPriceDrift({ oldKobo: lockedPerUnit, newKobo: currentKobo });
+        }
+      } catch {
+        // Best-effort — failure leaves lock intact
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [station?.id, station?.perUnitKobo, draft.fuelTypeId]);
   // `lockedTotalNaira` from station-lock is exactly `qty × perUnit`
   // — the fuel subtotal, not the grand total. Service fee + delivery
   // fee stack on top. Server's order POST recomputes the same way:
@@ -194,18 +286,25 @@ export default function PaymentScreen() {
     }
   }, [user?.preferences?.autoRedeemPoints, pointsBalance, lockedTotalNaira]);
 
-  // Auto-select wallet exactly once on return from a successful top-up
-  // (`?select=wallet`). Guarded by a ref so re-renders or back-and-
-  // forward re-mounts don't keep clobbering a manual reselection.
-  const hasAutoSelectedRef = useRef(false);
+  // LOGIC P1-2 — Auto-select wallet exactly once on return from a
+  // successful top-up (`?select=wallet`). Flag lives on the order
+  // draft (useOrderStore) instead of a per-instance ref, so a
+  // back-and-forward remount of Payment after manual reselection
+  // doesn't clobber the user's choice.
+  const autoSelectedPostTopup = useOrderStore(
+    (s) => s.order.autoSelectedPostTopup,
+  );
+  const setAutoSelectedPostTopup = useOrderStore(
+    (s) => s.setAutoSelectedPostTopup,
+  );
   useEffect(() => {
-    if (hasAutoSelectedRef.current) return;
+    if (autoSelectedPostTopup) return;
     if (select === "wallet" && methods.find((m) => m.id === "wallet")) {
       setSelectedId("wallet");
       setPaymentMethod("wallet");
-      hasAutoSelectedRef.current = true;
+      setAutoSelectedPostTopup(true);
     }
-  }, [select, methods, setPaymentMethod]);
+  }, [select, methods, setPaymentMethod, autoSelectedPostTopup, setAutoSelectedPostTopup]);
 
   const selected = methods.find((m) => m.id === selectedId) ?? null;
   const insufficient = selected?.kind === "wallet" && selected.insufficient;
@@ -241,6 +340,15 @@ export default function PaymentScreen() {
    */
   const placeOrder = useCallback(async (): Promise<string | null> => {
     try {
+      // EDGE P2-7 — past-date guard for returnSwapAt (stale-clock
+      // device or stale draft). Drop silently rather than POST a
+      // bad date; server would reject anyway and the user would see
+      // a confusing 400.
+      const returnSwapValid =
+        draft.returnSwapAt &&
+        new Date(draft.returnSwapAt).getTime() > Date.now();
+      // Same guard for scheduledAt — under-30-min lead is treated as
+      // immediate by the server (decision D3), so don't send it.
       // Server accepts EITHER `fuelId` (Mongo ObjectId, legacy) or
       // `fuelTypeId` (slug like "petrol"/"lpg", new flow). The new flow
       // never populates `draft.fuel`, so we send the slug.
@@ -250,7 +358,15 @@ export default function PaymentScreen() {
         quantity: draft.qty,
         deliveryAddressId: draft.deliveryAddressId,
         note: draft.note,
-        returnSwapAt: draft.returnSwapAt ?? undefined,
+        returnSwapAt: returnSwapValid ? draft.returnSwapAt : undefined,
+        // USE_CASES C-5 — scheduled order timestamp finally wired.
+        // The draft has carried scheduledAt since the delivery
+        // screen captured it; previously the body omitted it and
+        // the server treated every order as immediate.
+        scheduledAt:
+          draft.when === "schedule" && draft.scheduledAt
+            ? draft.scheduledAt
+            : undefined,
       };
       if (draft.product === "lpg") {
         body.cylinderType = draft.cylinderType;
@@ -264,10 +380,28 @@ export default function PaymentScreen() {
           body.cylinderDetails = draft.cylinderDetails;
         }
       }
+      // SECURITY M3 — send a stable Idempotency-Key keyed by the
+      // draft hash so a flaky-network retry of placeOrder dedupes
+      // server-side. Phase 1 server added the middleware in
+      // non-enforcing mode; Phase 3 flips to enforce once every
+      // client build is sending the header.
+      const draftKey = JSON.stringify({
+        s: body.stationId,
+        f: body.fuelTypeId,
+        q: body.quantity,
+        a: body.deliveryAddressId,
+        d: body.deliveryType ?? null,
+      });
       const order = await api.post<{ _id: string; totalPrice: number }>(
         "/api/orders",
-        body
+        body,
+        {
+          headers: {
+            "Idempotency-Key": idem.get(`place-order:${draftKey}`),
+          } as any,
+        }
       );
+      idem.consume(`place-order:${draftKey}`);
       setOrderId(order._id);
       return order._id;
     } catch (err: any) {
@@ -277,7 +411,7 @@ export default function PaymentScreen() {
       );
       return null;
     }
-  }, [draft, station, setOrderId]);
+  }, [draft, station, setOrderId, idem]);
 
   /**
    * Best-effort points redemption. Failures are non-fatal — server is
@@ -287,15 +421,29 @@ export default function PaymentScreen() {
     async (orderId: string) => {
       if (pointsToSpend <= 0) return;
       try {
-        await api.post("/api/points/redeem", {
-          orderId,
-          pointsToRedeem: pointsToSpend,
-        });
+        // BUSINESS P1-1 — server now wraps deduct + order update in a
+        // transaction AND accepts Idempotency-Key. Pass a stable key
+        // per (orderId, points) so a retry doesn't double-deduct.
+        await api.post(
+          "/api/points/redeem",
+          {
+            orderId,
+            pointsToRedeem: pointsToSpend,
+          },
+          {
+            headers: {
+              "Idempotency-Key": idem.get(
+                `points-redeem:${orderId}:${pointsToSpend}`,
+              ),
+            } as any,
+          }
+        );
+        idem.consume(`points-redeem:${orderId}:${pointsToSpend}`);
       } catch {
         // Swallow.
       }
     },
-    [pointsToSpend]
+    [pointsToSpend, idem]
   );
 
   const goReceipt = useCallback(() => {
@@ -316,7 +464,11 @@ export default function PaymentScreen() {
         init = await api.post<InitializeResponse>(
           "/api/payments/initialize",
           { orderId },
-          { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+          {
+            headers: {
+              "Idempotency-Key": idem.get(`payment-initialize:${orderId}`),
+            } as any,
+          }
         );
       } catch (err: any) {
         // Surface a clear, actionable message instead of the raw 500
@@ -332,40 +484,65 @@ export default function PaymentScreen() {
       }
       setPaystackPublicKey(init.publicKey);
 
+      // LOGIC P0-1 — single-flight lock for the Paystack callback
+      // race. onSuccess and onCancel CAN both fire (user cancels
+      // milliseconds after success); without this lock the verify
+      // call could run twice. P0-4 same lock — after a verify throw
+      // we mark the flow settled so the user can retry from a clean
+      // state. Phase 2 will also memoise the Idempotency-Key per
+      // (orderId, op) so server dedup catches anything that slips
+      // through this JS lock.
+      let settled = false;
+
       popup.checkout({
         email: userEmail,
         amount: finalTotal, // SDK takes NGN, not kobo
         reference: init.reference,
         metadata: { orderId, kind: "order_charge" },
         onSuccess: async () => {
+          if (settled) return;
+          settled = true;
           try {
             await api.post(
               "/api/payments/verify",
               { reference: init.reference },
-              { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+              {
+                headers: {
+                  "Idempotency-Key": idem.get(`payment-verify:${init.reference}`),
+                } as any,
+              }
             );
+            idem.consume(`payment-verify:${init.reference}`);
+            idem.consume(`payment-initialize:${orderId}`);
             await redeemPointsIfAny(orderId);
             goReceipt();
           } catch (err: any) {
-            Alert.alert(
-              "Payment verification failed",
-              err?.message ??
-                "We couldn't verify the payment. Please contact support if your card was charged."
-            );
+            // LOGIC P0-4 + EDGE P0-3 — route to the recovery screen
+            // so the user can re-attempt verify with the same
+            // reference instead of being stranded on a "card was
+            // charged but we don't know" Alert.
+            router.replace({
+              pathname: "/(customer)/(order)/confirming" as never,
+              params: { orderId, reference: init.reference },
+            } as never);
           } finally {
             setSubmitting(false);
           }
         },
         onCancel: () => {
+          if (settled) return;
+          settled = true;
           setSubmitting(false);
         },
         onError: (err) => {
+          if (settled) return;
+          settled = true;
           Alert.alert("Payment error", err?.message ?? "Something went wrong.");
           setSubmitting(false);
         },
       });
     },
-    [userEmail, finalTotal, popup, redeemPointsIfAny, goReceipt]
+    [userEmail, finalTotal, popup, redeemPointsIfAny, goReceipt, router]
   );
 
   /** Saved-card flow — single server call, no webview. */
@@ -375,8 +552,13 @@ export default function PaymentScreen() {
         await api.post(
           "/api/payments/charge-saved",
           { orderId },
-          { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+          {
+            headers: {
+              "Idempotency-Key": idem.get(`charge-saved:${orderId}`),
+            } as any,
+          }
         );
+        idem.consume(`charge-saved:${orderId}`);
         await redeemPointsIfAny(orderId);
         goReceipt();
       } catch (err: any) {
@@ -387,7 +569,7 @@ export default function PaymentScreen() {
         setSubmitting(false);
       }
     },
-    [redeemPointsIfAny, goReceipt]
+    [redeemPointsIfAny, goReceipt, idem]
   );
 
   /** Wallet flow — server debits the wallet, no Paystack. */
@@ -397,8 +579,13 @@ export default function PaymentScreen() {
         await api.post(
           "/api/payments/pay-with-wallet",
           { orderId },
-          { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+          {
+            headers: {
+              "Idempotency-Key": idem.get(`pay-with-wallet:${orderId}`),
+            } as any,
+          }
         );
+        idem.consume(`pay-with-wallet:${orderId}`);
         await redeemPointsIfAny(orderId);
         goReceipt();
       } catch (err: any) {
@@ -409,7 +596,7 @@ export default function PaymentScreen() {
         setSubmitting(false);
       }
     },
-    [redeemPointsIfAny, goReceipt]
+    [redeemPointsIfAny, goReceipt, idem]
   );
 
   /**
@@ -442,6 +629,36 @@ export default function PaymentScreen() {
             {
               text: "Continue",
               onPress: async () => {
+                // EDGE P0-4 — call the server's dev-mark-paid stub
+                // so the order's paymentStatus actually flips to
+                // "paid" instead of the client jumping to receipt
+                // with the order still UNPAID server-side. Endpoint
+                // is hard-gated to non-production server-side too.
+                try {
+                  await api.post(
+                    "/api/payments/dev-mark-paid",
+                    { orderId },
+                    {
+                      headers: {
+                        "Idempotency-Key": idem.get(
+                          `dev-mark-paid:${orderId}`,
+                        ),
+                      } as any,
+                    },
+                  );
+                  idem.consume(`dev-mark-paid:${orderId}`);
+                } catch (err: any) {
+                  // Best-effort — even if the stub fails (e.g. running
+                  // against a prod-mode server), surface the failure
+                  // rather than silently faking success.
+                  Alert.alert(
+                    "Dev mark-paid failed",
+                    err?.message ??
+                      "Server rejected the dev shortcut. Try card or wallet.",
+                  );
+                  setSubmitting(false);
+                  return;
+                }
                 await redeemPointsIfAny(orderId);
                 goReceipt();
                 setSubmitting(false);
@@ -559,7 +776,7 @@ export default function PaymentScreen() {
               ? "Continue with wallet after top-up"
               : selected?.sublabel
           }
-          disabled={(!selected && !insufficient) || submitting}
+          disabled={(!selected && !insufficient) || submitting || !!priceDrift}
           loading={submitting}
           onPress={insufficient ? goTopUpForShortfall : handlePay}
           floating={false}
@@ -615,6 +832,33 @@ export default function PaymentScreen() {
                 />
                 <Text style={styles.shortfallCtaText}>
                   Top up {formatCurrency(shortfall)}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        {priceDrift ? (
+          <View
+            style={[
+              styles.trustStrip,
+              { backgroundColor: theme.warningTint, borderRadius: 12 },
+            ]}
+          >
+            <Ionicons name="warning" size={18} color={theme.warning} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.trustText, { color: theme.warning }]}>
+                Price changed since you locked this station.{" "}
+                {priceDrift.oldKobo > priceDrift.newKobo
+                  ? `Now ${formatCurrency(priceDrift.newKobo / 100)} per unit.`
+                  : `Now ${formatCurrency(priceDrift.newKobo / 100)} per unit (was ${formatCurrency(priceDrift.oldKobo / 100)}).`}
+              </Text>
+              <Pressable
+                onPress={() => router.replace("/(customer)/(order)/stations" as never)}
+                accessibilityRole="link"
+              >
+                <Text style={[styles.trustText, { fontWeight: "800" }]}>
+                  Re-confirm to continue →
                 </Text>
               </Pressable>
             </View>

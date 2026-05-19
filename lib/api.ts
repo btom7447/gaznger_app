@@ -2,8 +2,27 @@ import { router } from "expo-router";
 import * as Application from "expo-application";
 import { toast } from "sonner-native";
 import { useSessionStore } from "@/store/useSessionStore";
+import { pinnedFetch } from "@/lib/pinnedFetch";
 
-const BASE_URL = process.env.EXPO_PUBLIC_BASE_URL ?? "http://localhost:5000";
+// SECURITY A4 — fail fast on misconfigured BASE_URL in production
+// builds. Silent fallback to localhost:5000 would have any prod
+// install hammer dev environments, which is both a privacy leak
+// (PII traveling to a dev server) and an availability bug. Dev +
+// EAS preview keep the localhost default so local dev still works.
+const RAW_BASE_URL = process.env.EXPO_PUBLIC_BASE_URL;
+const BASE_URL = RAW_BASE_URL ?? "http://localhost:5000";
+if (!__DEV__) {
+  if (!RAW_BASE_URL) {
+    throw new Error(
+      "SECURITY A4: EXPO_PUBLIC_BASE_URL is required in production builds.",
+    );
+  }
+  if (!RAW_BASE_URL.startsWith("https://")) {
+    throw new Error(
+      `SECURITY A4: EXPO_PUBLIC_BASE_URL must be HTTPS in production (got "${RAW_BASE_URL}").`,
+    );
+  }
+}
 
 /**
  * Compare two semver-ish version strings (e.g. "2.5.1" vs "2.4.0"). Returns
@@ -32,19 +51,34 @@ function compareVersions(a: string, b: string): number {
 /**
  * Edge-state route gate — fires from any request, deduped so a burst
  * of failing requests doesn't stack a chain of route.replace calls.
- * Reset implicitly when the router lands somewhere else and a new
- * request succeeds (a 200 doesn't go through this path).
+ *
+ * EDGE P0-5 — the dedupe USED to reset on a 1500ms timer regardless
+ * of whether the destination screen had actually mounted; a second
+ * 426/503 burst inside that window fired another `router.replace`
+ * mid-mount, which kicked the user off the destination they were
+ * still entering. We now reset only when the destination screen
+ * calls `clearEdgeStateLock()` on its own mount — typically from
+ * each edge-state screen's first useEffect.
  */
 let edgeStateRouted = false;
 function routeEdgeState(path: string) {
   if (edgeStateRouted) return;
   edgeStateRouted = true;
   router.replace(path as never);
-  // Reset after a brief window so a recovered server can route again
-  // if the user manually retries.
-  setTimeout(() => {
-    edgeStateRouted = false;
-  }, 1500);
+  // No setTimeout reset — the destination screen owns the unlock
+  // via `clearEdgeStateLock()`. If the destination never mounts
+  // (rare; only on a hard router crash), the user can still tap
+  // again because edge-state screens are reachable via navigation
+  // not the gate.
+}
+
+/**
+ * Called by every edge-state destination screen on mount
+ * (force-update, suspended, maintenance, new-device, etc.) to
+ * release the dedupe lock so a subsequent failure can route again.
+ */
+export function clearEdgeStateLock() {
+  edgeStateRouted = false;
 }
 
 /**
@@ -71,20 +105,40 @@ const COLD_START_TOLERANCE_MS = 15_000;
 // "Signed out" toast — confusing and wrong. The sign-out handler
 // raises this for a few seconds; while it's up, 401s are swallowed.
 let intentionalSignOutUntil = 0;
-export function beginIntentionalSignOut(holdMs = 4000) {
+// EDGE P2-2 — default hold window widened from 4s to 8s. Slow
+// requests at 5s+ used to surface "Session expired" right after
+// "Signed out", which felt like a bug. Callers can still pass a
+// custom window when they know in-flight latency.
+export function beginIntentionalSignOut(holdMs = 8000) {
   intentionalSignOutUntil = Date.now() + holdMs;
+}
+
+/**
+ * LOGIC P0-3 — clear both gates on successful login.
+ *
+ * Without this, the 5-second timer at the end of fireSessionExpired
+ * (and the 4-second intentionalSignOutUntil window) deadlocks a
+ * rapid logout→login cycle: a 401 during that window is silently
+ * swallowed, leaving the user looking at a stale session. The
+ * session store calls this on every successful `login()`.
+ */
+export function resetAuthGates() {
+  sessionExpiredFired = false;
+  intentionalSignOutUntil = 0;
 }
 
 function fireSessionExpired() {
   if (Date.now() < intentionalSignOutUntil) return;
   if (sessionExpiredFired) return;
   sessionExpiredFired = true;
-  const phone = useSessionStore.getState().user?.phone;
+  const user = useSessionStore.getState().user;
+  const phone = user?.phone;
   const sinceBoot = Date.now() - apiBootedAt;
-  // During the cold-start window route to PIN unlock instead of
-  // welcome/phone. PIN unlock can re-mint via /auth/login with the
-  // cached PIN — no full OTP round-trip needed.
-  if (sinceBoot < COLD_START_TOLERANCE_MS) {
+  // EDGE P1-11 — only route to PIN unlock during cold-start when the
+  // user actually HAS a PIN set. First-time-launch users with a
+  // stale token but no cached PIN would otherwise land on an
+  // unsatisfiable unlock screen. Fall through to welcome instead.
+  if (sinceBoot < COLD_START_TOLERANCE_MS && user?.hasPin) {
     router.replace("/(auth)/unlock/pin" as never);
     setTimeout(() => {
       sessionExpiredFired = false;
@@ -126,9 +180,12 @@ function checkMinVersionHeader(res: Response) {
   }
 }
 
-// DEBUG: rip out once we've confirmed the right URL is bundled.
-// eslint-disable-next-line no-console
-console.log("[api] BASE_URL =", BASE_URL);
+// SECURITY X2 / EDGE P3-1 — gated behind __DEV__ so prod builds
+// don't leak the api host through Logcat / Xcode Console.
+if (__DEV__) {
+  // eslint-disable-next-line no-console
+  console.log("[api] BASE_URL =", BASE_URL);
+}
 
 /**
  * Default per-request timeout. Render free tier often takes 20-40s to wake on
@@ -155,7 +212,7 @@ async function refreshTokens(): Promise<boolean> {
       return false;
     }
     try {
-      const refreshRes = await fetch(`${BASE_URL}/auth/refresh-token`, {
+      const refreshRes = await pinnedFetch(`${BASE_URL}/auth/refresh-token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken }),
@@ -213,35 +270,42 @@ async function request<T = unknown>(
     else externalSignal.addEventListener("abort", onExternalAbort);
   }
 
-  // DEBUG: log every request so we can see what the phone is actually hitting.
-  // eslint-disable-next-line no-console
-  console.log("[api] →", options.method ?? "GET", `${BASE_URL}${path}`);
+  // SECURITY X2 / EDGE P3-1 — every per-request log behind __DEV__.
+  // Prod builds don't leak URLs / timings / statuses to device logs.
+  if (__DEV__) {
+    // eslint-disable-next-line no-console
+    console.log("[api] →", options.method ?? "GET", `${BASE_URL}${path}`);
+  }
   const t0 = Date.now();
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}${path}`, {
+    res = await pinnedFetch(`${BASE_URL}${path}`, {
       ...rest,
       headers,
       body: options.body != null ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
     });
-    // eslint-disable-next-line no-console
-    console.log(
-      "[api] ←",
-      options.method ?? "GET",
-      `${BASE_URL}${path}`,
-      res.status,
-      `${Date.now() - t0}ms`
-    );
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log(
+        "[api] ←",
+        options.method ?? "GET",
+        `${BASE_URL}${path}`,
+        res.status,
+        `${Date.now() - t0}ms`
+      );
+    }
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.log(
-      "[api] ✗",
-      options.method ?? "GET",
-      `${BASE_URL}${path}`,
-      `${Date.now() - t0}ms`,
-      controller.signal.aborted ? "ABORTED" : (err as Error).message
-    );
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log(
+        "[api] ✗",
+        options.method ?? "GET",
+        `${BASE_URL}${path}`,
+        `${Date.now() - t0}ms`,
+        controller.signal.aborted ? "ABORTED" : (err as Error).message
+      );
+    }
     if (controller.signal.aborted) {
       throw new Error("Request timed out — check your connection.");
     }
@@ -397,7 +461,7 @@ export const api = {
     const headers: Record<string, string> = {};
     if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
     const BASE = process.env.EXPO_PUBLIC_BASE_URL ?? "http://localhost:5000";
-    const res = await fetch(`${BASE}${path}`, { method, headers, body: formData });
+    const res = await pinnedFetch(`${BASE}${path}`, { method, headers, body: formData });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({})) as { message?: string };
       throw new Error(errData.message ?? `Upload failed (${res.status})`);

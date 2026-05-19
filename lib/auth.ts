@@ -2,6 +2,7 @@ import * as SecureStore from "expo-secure-store";
 import * as Crypto from "expo-crypto";
 import * as Device from "expo-device";
 import { AUTH_KEYS } from "@/constants/authStorageKeys";
+import { devLog } from "@/lib/log";
 
 /**
  * Returns the persisted device id, generating + storing a fresh UUID
@@ -19,11 +20,11 @@ export async function getOrCreateDeviceId(): Promise<string> {
     try {
       await SecureStore.setItemAsync(AUTH_KEYS.deviceId, id);
     } catch (e: any) {
-      console.log("[auth] setDeviceId failed: " + (e?.message ?? String(e)));
+      devLog("[auth] setDeviceId failed: " + (e?.message ?? String(e)));
     }
     return id;
   } catch (e: any) {
-    console.log("[auth] getDeviceId failed: " + (e?.message ?? String(e)));
+    devLog("[auth] getDeviceId failed: " + (e?.message ?? String(e)));
     return Crypto.randomUUID();
   }
 }
@@ -48,7 +49,7 @@ export async function getHasOnboarded(): Promise<boolean> {
     const v = await SecureStore.getItemAsync(AUTH_KEYS.hasOnboarded);
     return v === "true";
   } catch (e: any) {
-    console.log("[auth] getHasOnboarded failed: " + (e?.message ?? String(e)));
+    devLog("[auth] getHasOnboarded failed: " + (e?.message ?? String(e)));
     return false;
   }
 }
@@ -57,7 +58,7 @@ export async function setHasOnboarded(v: boolean): Promise<void> {
   try {
     await SecureStore.setItemAsync(AUTH_KEYS.hasOnboarded, v ? "true" : "false");
   } catch (e: any) {
-    console.log("[auth] setHasOnboarded failed: " + (e?.message ?? String(e)));
+    devLog("[auth] setHasOnboarded failed: " + (e?.message ?? String(e)));
   }
 }
 
@@ -71,7 +72,7 @@ export async function getBiometricEnabled(): Promise<boolean> {
     const v = await SecureStore.getItemAsync(AUTH_KEYS.biometricEnabled);
     return v === "true";
   } catch (e: any) {
-    console.log("[auth] getBiometricEnabled failed: " + (e?.message ?? String(e)));
+    devLog("[auth] getBiometricEnabled failed: " + (e?.message ?? String(e)));
     return false;
   }
 }
@@ -80,7 +81,7 @@ export async function setBiometricEnabled(v: boolean): Promise<void> {
   try {
     await SecureStore.setItemAsync(AUTH_KEYS.biometricEnabled, v ? "true" : "false");
   } catch (e: any) {
-    console.log("[auth] setBiometricEnabled failed: " + (e?.message ?? String(e)));
+    devLog("[auth] setBiometricEnabled failed: " + (e?.message ?? String(e)));
   }
 }
 
@@ -126,10 +127,21 @@ export async function setBioCredential(cred: BioCredential): Promise<void> {
         requireAuthentication: true,
         authenticationPrompt:
           "Confirm to enable biometric sign-in on this device",
+        // SECURITY A3 (Phase 1, decision D1 Path B) — strictest
+        // Keychain ACL we can apply:
+        //   - WHEN_PASSCODE_SET_THIS_DEVICE_ONLY: item is unreadable
+        //     if the user removes their device passcode AND is not
+        //     transferable via iCloud Keychain to another device.
+        //   - Combined with `requireAuthentication: true` above, a
+        //     stolen unencrypted backup can't yield the credential
+        //     without the original device + a live biometric.
+        // Android maps this to AES-GCM-backed Keystore with
+        // user-authentication-required = true.
+        keychainAccessible: SecureStore.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
       }
     );
   } catch (e: any) {
-    console.log("[auth] setBioCredential failed: " + (e?.message ?? String(e)));
+    devLog("[auth] setBioCredential failed: " + (e?.message ?? String(e)));
   }
 }
 
@@ -203,7 +215,7 @@ export async function markBioCredentialPresent(present: boolean): Promise<void> 
       ).catch(() => {});
     }
   } catch (e: any) {
-    console.log("[auth] markBioCredentialPresent failed: " + (e?.message ?? String(e)));
+    devLog("[auth] markBioCredentialPresent failed: " + (e?.message ?? String(e)));
   }
 }
 

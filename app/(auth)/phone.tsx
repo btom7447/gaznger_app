@@ -85,13 +85,26 @@ export default function PhoneEntryScreen() {
     : "We'll send a code to verify it's you.";
 
   const e164 = useMemo(() => {
-    // Strip leading zero from local-format numbers (Nigerian "080...").
-    const stripped = local.replace(/^0+/, "");
+    // EDGE P2-4 — strip leading zero ONLY for Nigerian numbers
+    // (the trunk-code convention). Other countries: leave as-is.
+    const stripped =
+      country.code === "NG" ? local.replace(/^0+/, "") : local;
     if (!stripped) return null;
     return `${country.dialCode}${stripped}`;
-  }, [country.dialCode, local]);
+  }, [country.dialCode, country.code, local]);
 
-  const validE164 = e164 ? /^\+\d{8,15}$/.test(e164) : false;
+  // EDGE P1-1 — country-aware length validation. NG mobile is
+  // exactly 10 digits after the +234. Other countries fall back to
+  // the lenient 8-15 range so we don't reject valid international
+  // numbers in the country picker.
+  const validE164 = useMemo(() => {
+    if (!e164) return false;
+    if (country.code === "NG") {
+      // E.164 is `+234` + 10 digits = 14 chars total
+      return /^\+234\d{10}$/.test(e164);
+    }
+    return /^\+\d{8,15}$/.test(e164);
+  }, [e164, country.code]);
 
   const handleChange = useCallback(
     (next: string) => {

@@ -87,16 +87,25 @@ export function useActiveOrder() {
     }
   }, []);
 
-  // Initial fetch on mount + 5-minute safety net. The safety poll is
-  // ONLY a backstop for the socket: when the socket is "live", we
-  // expect order:update to keep state fresh in real time.
+  // Initial fetch on mount + 5-minute safety net.
+  // WS_VS_API P1 #2 — only run the safety poll when the socket is
+  // NOT live. If the socket is healthy the existing order:update
+  // listener keeps state fresh; polling is redundant cost.
   useEffect(() => {
     check();
-    intervalRef.current = setInterval(check, SAFETY_POLL_MS);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+    const stop = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     };
-  }, [check]);
+    if (socketStatus !== "live") {
+      intervalRef.current = setInterval(check, SAFETY_POLL_MS);
+    } else {
+      stop();
+    }
+    return stop;
+  }, [check, socketStatus]);
 
   // Reconnect catch-up — fire one fetch when the socket comes back
   // live after a drop. Belt-and-braces with the safety poll above.

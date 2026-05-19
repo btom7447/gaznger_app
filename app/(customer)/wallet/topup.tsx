@@ -16,7 +16,7 @@ import { api } from "@/lib/api";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useWalletStore } from "@/store/useWalletStore";
 import { setPaystackPublicKey } from "@/lib/paystackKey";
-import { newIdempotencyKey } from "@/lib/idempotency";
+import { useIdempotencyKey } from "@/lib/idempotency";
 import {
   FloatingCTA,
   ScreenContainer,
@@ -67,9 +67,20 @@ export default function WalletTopUp() {
   const refreshWallet = useWalletStore((s) => s.refresh);
   const { popup } = usePaystack();
 
+  // SECURITY M2 / EDGE P0-1 — stable key per top-up session so a
+  // retry of initialize OR verify reuses the same key and the
+  // server dedups. Consumed on terminal success.
+  const idem = useIdempotencyKey();
+
   const [amountText, setAmountText] = useState(() => {
+    // SECURITY X5 — clamp deep-link prefill to the same MAX as the
+    // typed input (₦500,000). Without this, a `gaznger://wallet/
+    // topup?prefill=500000000` deep link could prefill 500M and
+    // the user might tap Pay before noticing.
     const initial = parseInt(prefill ?? "", 10);
-    return Number.isFinite(initial) && initial > 0 ? String(initial) : "";
+    if (!Number.isFinite(initial) || initial <= 0) return "";
+    const clamped = Math.min(initial, MAX_TOPUP);
+    return String(clamped);
   });
   const [submitting, setSubmitting] = useState(false);
   // Tracks whether the most recent value change came from a preset tap
@@ -109,7 +120,10 @@ export default function WalletTopUp() {
 
   const onTypeDigits = useCallback((v: string) => {
     setAnimDuration(160);
-    setAmountText(v.replace(/[^0-9]/g, "").slice(0, 7));
+    // EDGE P2-5 — cap typed digits to 6 (₦999,999); MAX_TOPUP is
+    // ₦500,000 so this prevents the user from staring at an
+    // "exceeds maximum" red state when they accidentally type a 7th.
+    setAmountText(v.replace(/[^0-9]/g, "").slice(0, 6));
   }, []);
 
   const handleTopUp = useCallback(async () => {
@@ -124,9 +138,21 @@ export default function WalletTopUp() {
       const init = await api.post<InitializeResponse>(
         "/api/payments/topup/initialize",
         { amount },
-        { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+        {
+          headers: {
+            "Idempotency-Key": idem.get(`topup-initialize:${amount}`),
+          } as any,
+        }
       );
       setPaystackPublicKey(init.publicKey);
+
+      // LOGIC P0-1 / P0-4 — single-flight lock around the Paystack
+      // callbacks. Same shape as the order-payment flow: any one of
+      // onSuccess / onCancel / onError flips `settled` and the others
+      // become no-ops. Also re-enables the submit button in every
+      // terminal branch (the outer try's finally fires too early
+      // because popup.checkout returns synchronously).
+      let settled = false;
 
       popup.checkout({
         email: userEmail,
@@ -134,16 +160,27 @@ export default function WalletTopUp() {
         reference: init.reference,
         metadata: { kind: "wallet_topup", amountNgn: amount },
         onSuccess: async () => {
+          if (settled) return;
+          settled = true;
           try {
             await api.post(
               "/api/payments/topup/verify",
               { reference: init.reference },
-              { headers: { "Idempotency-Key": newIdempotencyKey() } as any }
+              {
+                headers: {
+                  "Idempotency-Key": idem.get(
+                    `topup-verify:${init.reference}`,
+                  ),
+                } as any,
+              }
             );
+            idem.consume(`topup-verify:${init.reference}`);
+            idem.consume(`topup-initialize:${amount}`);
           } catch {
             // Webhook will catch it; just refresh.
           }
           await refreshWallet();
+          setSubmitting(false);
           if (returnTo === "payment") {
             // Hand back to the order Payment step with wallet pre-selected.
             router.replace({
@@ -159,9 +196,14 @@ export default function WalletTopUp() {
           }
         },
         onCancel: () => {
-          // user closed without completing — nothing to clean up server-side.
+          if (settled) return;
+          settled = true;
+          setSubmitting(false);
         },
         onError: (err: unknown) => {
+          if (settled) return;
+          settled = true;
+          setSubmitting(false);
           Alert.alert(
             "Top-up failed",
             String((err as any)?.message ?? "Please try again.")
@@ -169,13 +211,18 @@ export default function WalletTopUp() {
         },
       });
     } catch (err: any) {
+      // Init throw — popup never opened, safe to reset.
+      setSubmitting(false);
       Alert.alert(
         "Couldn't start top-up",
         err?.message ?? "Please try again."
       );
-    } finally {
-      setSubmitting(false);
     }
+    // NOTE: no outer `finally { setSubmitting(false) }`. When init
+    // succeeds, popup.checkout() returns synchronously and the actual
+    // terminal state is reached inside one of the callbacks above.
+    // Resetting submitting here would re-enable the button while the
+    // user is still in the Paystack webview.
   }, [amount, valid, userEmail, popup, refreshWallet, router, returnTo]);
 
   const helperText = !amount

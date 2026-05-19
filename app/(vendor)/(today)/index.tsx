@@ -147,9 +147,23 @@ export default function VendorTodayScreen() {
     };
     socket.on("order:new", refetch);
     socket.on("order:update", refetch);
+    // Phase 2 — wire new granular vendor events. All three are
+    // currently best-served by a refetch (Today is a wide aggregate
+    // — splitting would mean granular cache patching across
+    // alerts[] + KPIs which isn't worth the churn).
+    socket.on("order:rider-assigned", refetch);
+    socket.on("order:confirmed", refetch);
+    socket.on("order:rejected", refetch);
+    socket.on("rating:submitted", refetch);
+    socket.on("stock:alert", refetch);
     return () => {
       socket.off("order:new", refetch);
       socket.off("order:update", refetch);
+      socket.off("order:rider-assigned", refetch);
+      socket.off("order:confirmed", refetch);
+      socket.off("order:rejected", refetch);
+      socket.off("rating:submitted", refetch);
+      socket.off("stock:alert", refetch);
     };
   }, [fetchToday]);
 
