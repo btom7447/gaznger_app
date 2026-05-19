@@ -138,15 +138,44 @@ export default function VendorOrderDetailScreen() {
     }, [fetchOrder]),
   );
 
+  // WS_VS_API P0 #1 — Phase 2A server now sends `fullOrder` in the
+  // vendor's order:update payload. Patch local state directly
+  // instead of doing a full GET on every event. Falls back to
+  // refetch only when the payload doesn't include fullOrder
+  // (old server build or partial event).
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
-    const refetch = (data: { orderId?: string } | undefined) => {
-      if (!data?.orderId || data.orderId === orderId) fetchOrder();
+    const onUpdate = (data: { orderId?: string; fullOrder?: any } | undefined) => {
+      if (!data?.orderId || data.orderId !== orderId) return;
+      if (data.fullOrder) {
+        // Merge — keep populated refs (station, fuel, riderId) from
+        // the initial GET; overlay the scalar fields from the
+        // socket so we react to status/version/riderId changes.
+        setOrder((prev) =>
+          prev ? ({ ...prev, ...data.fullOrder } as any) : prev,
+        );
+      } else {
+        fetchOrder();
+      }
     };
-    socket.on("order:update", refetch);
+    // Granular rider-assignment event — patches the rider card
+    // without a full refetch when someone else (admin / auto-
+    // dispatch) assigns / reassigns.
+    const onRiderAssigned = (data: {
+      orderId?: string;
+      riderId?: string;
+      riderName?: string | null;
+      riderPlate?: string | null;
+    }) => {
+      if (!data?.orderId || data.orderId !== orderId) return;
+      fetchOrder();
+    };
+    socket.on("order:update", onUpdate);
+    socket.on("order:rider-assigned", onRiderAssigned);
     return () => {
-      socket.off("order:update", refetch);
+      socket.off("order:update", onUpdate);
+      socket.off("order:rider-assigned", onRiderAssigned);
     };
   }, [fetchOrder, orderId]);
 

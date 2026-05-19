@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { toast } from "sonner-native";
 import { api } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 
@@ -147,9 +148,23 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       // Reset transaction cursor so the wallet screen pulls fresh on next view.
       set({ transactions: [], txCursor: null, txExhausted: false });
     };
+    // WS_VS_API #3 — payment:failed surfaces a toast + triggers wallet
+    // refresh so any reversal credit is reflected immediately.
+    const failedHandler = (data: {
+      orderId?: string;
+      reference?: string;
+      reason: string;
+      amount?: number;
+    }) => {
+      toast.error("Payment failed", { description: data.reason });
+      // Refresh wallet to pick up any auto-reversal.
+      void useWalletStore.getState().refresh();
+    };
     s.on("wallet:update", handler);
+    s.on("payment:failed", failedHandler);
     return () => {
       s.off("wallet:update", handler);
+      s.off("payment:failed", failedHandler);
     };
   },
 

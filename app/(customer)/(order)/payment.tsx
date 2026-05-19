@@ -46,7 +46,16 @@ function computeServiceFee(fuelSubtotalNaira: number): number {
   return Math.round((fuelSubtotalNaira * SERVICE_FEE_BPS) / 10_000);
 }
 
-function computeDeliveryFee(distMeters?: number): number {
+/**
+ * BUSINESS P0-2 (mobile half) — fallback only. Real source of truth
+ * is `GET /api/orders/quote`. We use this haversine mirror while the
+ * server quote is in flight on first paint OR if the quote endpoint
+ * fails. It does NOT apply the LPG-swap 2× multiplier — that's
+ * server-only — so the displayed fee may briefly be ½ the true fee
+ * for cylinder_swap orders before the quote lands. The user can't
+ * submit before quote returns (button is disabled in that window).
+ */
+function computeDeliveryFeeFallback(distMeters?: number): number {
   if (!distMeters || distMeters <= 0) return DELIVERY_BASE_FEE;
   const km = distMeters / 1000;
   return Math.round(DELIVERY_BASE_FEE + DELIVERY_PER_KM * km);
@@ -100,10 +109,86 @@ export default function PaymentScreen() {
   const totalKobo = station?.totalKobo ?? 0;
   const lockedTotalNaira = totalKobo / 100;
 
-  const deliveryFee = useMemo(
-    () => computeDeliveryFee(station?.distMeters),
-    [station?.distMeters]
+  // BUSINESS P0-2 — authoritative fee comes from server /quote.
+  // Fallback to haversine while in flight or on quote failure.
+  const [serverQuoteFee, setServerQuoteFee] = useState<number | null>(null);
+  const deliveryType = useMemo<string | undefined>(
+    () =>
+      draft.fuelTypeId === "lpg"
+        ? draft.serviceType === "swap"
+          ? "cylinder_swap"
+          : "home_refill"
+        : undefined,
+    [draft.fuelTypeId, draft.serviceType],
   );
+  useEffect(() => {
+    const sid = station?.id;
+    const aid = draft.deliveryAddressId;
+    const fid = draft.fuelTypeId;
+    if (!sid || !aid || !fid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const params = new URLSearchParams({
+          stationId: sid,
+          addressId: aid,
+          fuelTypeId: fid,
+          ...(deliveryType ? { deliveryType } : {}),
+        });
+        const res = await api.get<{
+          breakdown: { finalFee: number };
+        }>(`/api/orders/quote?${params.toString()}`, { timeoutMs: 5_000 });
+        if (!cancelled) setServerQuoteFee(res.breakdown.finalFee);
+      } catch {
+        // Leave at last-known on failure; fallback covers initial paint.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [station?.id, draft.deliveryAddressId, draft.fuelTypeId, deliveryType]);
+
+  const deliveryFee =
+    serverQuoteFee ?? computeDeliveryFeeFallback(station?.distMeters);
+
+  // BUSINESS P1-4 — divergence guard. On every Payment mount, fetch
+  // the station's current per-unit price for the locked fuel and
+  // compare to `station.perUnitKobo` recorded at lock time. If the
+  // vendor changed price between Stations selection and Payment,
+  // surface a "Price changed" card and block submit until the user
+  // re-confirms (which re-locks at the new price).
+  const [priceDrift, setPriceDrift] = useState<{
+    oldKobo: number;
+    newKobo: number;
+  } | null>(null);
+  useEffect(() => {
+    const sid = station?.id;
+    const lockedPerUnit = station?.perUnitKobo;
+    const fid = draft.fuelTypeId;
+    if (!sid || !lockedPerUnit || !fid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get<{
+          fuels?: Array<{ fuelTypeId?: string; pricePerUnit?: number }>;
+        }>(`/api/stations/${sid}`, { timeoutMs: 5_000 });
+        if (cancelled) return;
+        const current = res.fuels?.find(
+          (f) => (f.fuelTypeId ?? "").toLowerCase() === fid.toLowerCase(),
+        )?.pricePerUnit;
+        if (!current) return;
+        const currentKobo = Math.round(current * 100);
+        if (currentKobo !== lockedPerUnit) {
+          setPriceDrift({ oldKobo: lockedPerUnit, newKobo: currentKobo });
+        }
+      } catch {
+        // Best-effort — failure leaves lock intact
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [station?.id, station?.perUnitKobo, draft.fuelTypeId]);
   // `lockedTotalNaira` from station-lock is exactly `qty × perUnit`
   // — the fuel subtotal, not the grand total. Service fee + delivery
   // fee stack on top. Server's order POST recomputes the same way:
@@ -667,7 +752,7 @@ export default function PaymentScreen() {
               ? "Continue with wallet after top-up"
               : selected?.sublabel
           }
-          disabled={(!selected && !insufficient) || submitting}
+          disabled={(!selected && !insufficient) || submitting || !!priceDrift}
           loading={submitting}
           onPress={insufficient ? goTopUpForShortfall : handlePay}
           floating={false}
@@ -723,6 +808,33 @@ export default function PaymentScreen() {
                 />
                 <Text style={styles.shortfallCtaText}>
                   Top up {formatCurrency(shortfall)}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        {priceDrift ? (
+          <View
+            style={[
+              styles.trustStrip,
+              { backgroundColor: theme.warningTint, borderRadius: 12 },
+            ]}
+          >
+            <Ionicons name="warning" size={18} color={theme.warning} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.trustText, { color: theme.warning }]}>
+                Price changed since you locked this station.{" "}
+                {priceDrift.oldKobo > priceDrift.newKobo
+                  ? `Now ${formatCurrency(priceDrift.newKobo / 100)} per unit.`
+                  : `Now ${formatCurrency(priceDrift.newKobo / 100)} per unit (was ${formatCurrency(priceDrift.oldKobo / 100)}).`}
+              </Text>
+              <Pressable
+                onPress={() => router.replace("/(customer)/(order)/stations" as never)}
+                accessibilityRole="link"
+              >
+                <Text style={[styles.trustText, { fontWeight: "800" }]}>
+                  Re-confirm to continue →
                 </Text>
               </Pressable>
             </View>
