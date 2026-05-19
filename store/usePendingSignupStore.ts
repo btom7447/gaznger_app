@@ -192,7 +192,20 @@ export const usePendingSignupStore = create<PendingSignupState>()(
       // AsyncStorage is plenty for resume-after-kill semantics.
       storage: createJSONStorage(() => AsyncStorage),
       onRehydrateStorage: () => (state) => {
-        state && (state.hasHydrated = true);
+        if (!state) return;
+        state.hasHydrated = true;
+        // EDGE P1-4 — 24h TTL on pending signup drafts. If the user
+        // abandoned signup more than a day ago, drop the stale state
+        // so they don't resume from a half-completed flow whose
+        // verification token expired hours ago. Defer reset() to
+        // after rehydration since we can't call set() during the
+        // callback.
+        const TTL_MS = 24 * 60 * 60 * 1000;
+        if (state.startedAt && Date.now() - state.startedAt > TTL_MS) {
+          setTimeout(() => {
+            usePendingSignupStore.getState().reset();
+          }, 0);
+        }
       },
       // SECURITY A2 / EDGE P1-3 — strip `preparedPin` from the
       // persisted blob. The PIN must never sit in AsyncStorage at

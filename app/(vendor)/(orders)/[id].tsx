@@ -247,6 +247,48 @@ export default function VendorOrderDetailScreen() {
     );
   }, [order, router]);
 
+  // USE_CASES V-2 / decision D4 — reject with structured reason
+  // (out_of_stock / closed / unable_to_fulfil / other). Distinct
+  // from cancel: reject is "we never accepted this order"; cancel
+  // is "we accepted but something went wrong." Server emits
+  // order:rejected with the reason enum.
+  const handleReject = useCallback(() => {
+    if (!order) return;
+    Alert.alert(
+      "Reject this order?",
+      "Pick a reason — the customer sees it verbatim.",
+      [
+        { text: "Keep order", style: "cancel" },
+        {
+          text: "Out of stock",
+          onPress: () => sendReject("out_of_stock"),
+        },
+        {
+          text: "Station closed",
+          onPress: () => sendReject("closed"),
+        },
+        {
+          text: "Can't fulfil",
+          style: "destructive",
+          onPress: () => sendReject("unable_to_fulfil"),
+        },
+      ],
+    );
+    function sendReject(reason: string) {
+      setCancelling(true);
+      api
+        .patch(`/api/vendor/orders/${order!._id}/reject`, { reason })
+        .then(() => {
+          toast.success("Order rejected");
+          router.back();
+        })
+        .catch((err: any) => {
+          toast.error(err?.message ?? "Couldn't reject");
+        })
+        .finally(() => setCancelling(false));
+    }
+  }, [order, router]);
+
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   // Cancellable statuses.
@@ -597,22 +639,48 @@ export default function VendorOrderDetailScreen() {
             </VendorCard>
 
             {canCancel ? (
-              <Pressable
-                onPress={handleCancel}
-                disabled={cancelling}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel this order"
-                style={({ pressed }) => [
-                  styles.cancelBtn,
-                  pressed && { opacity: 0.85 },
-                  cancelling && { opacity: 0.6 },
-                ]}
-              >
-                <Ionicons name="close-circle" size={16} color={theme.error} />
-                <Text style={styles.cancelBtnText}>
-                  {cancelling ? "Cancelling…" : "Cancel order"}
-                </Text>
-              </Pressable>
+              <>
+                {order?.status === "new" ? (
+                  <Pressable
+                    onPress={handleReject}
+                    disabled={cancelling}
+                    accessibilityRole="button"
+                    accessibilityLabel="Reject this order with a reason"
+                    style={({ pressed }) => [
+                      styles.cancelBtn,
+                      pressed && { opacity: 0.85 },
+                      cancelling && { opacity: 0.6 },
+                    ]}
+                  >
+                    <Ionicons
+                      name="close-circle-outline"
+                      size={16}
+                      color={theme.warning}
+                    />
+                    <Text
+                      style={[styles.cancelBtnText, { color: theme.warning }]}
+                    >
+                      Reject with reason
+                    </Text>
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  onPress={handleCancel}
+                  disabled={cancelling}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel this order"
+                  style={({ pressed }) => [
+                    styles.cancelBtn,
+                    pressed && { opacity: 0.85 },
+                    cancelling && { opacity: 0.6 },
+                  ]}
+                >
+                  <Ionicons name="close-circle" size={16} color={theme.error} />
+                  <Text style={styles.cancelBtnText}>
+                    {cancelling ? "Cancelling…" : "Cancel order"}
+                  </Text>
+                </Pressable>
+              </>
             ) : null}
           </>
         )}

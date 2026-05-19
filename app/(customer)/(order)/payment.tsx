@@ -340,6 +340,15 @@ export default function PaymentScreen() {
    */
   const placeOrder = useCallback(async (): Promise<string | null> => {
     try {
+      // EDGE P2-7 — past-date guard for returnSwapAt (stale-clock
+      // device or stale draft). Drop silently rather than POST a
+      // bad date; server would reject anyway and the user would see
+      // a confusing 400.
+      const returnSwapValid =
+        draft.returnSwapAt &&
+        new Date(draft.returnSwapAt).getTime() > Date.now();
+      // Same guard for scheduledAt — under-30-min lead is treated as
+      // immediate by the server (decision D3), so don't send it.
       // Server accepts EITHER `fuelId` (Mongo ObjectId, legacy) or
       // `fuelTypeId` (slug like "petrol"/"lpg", new flow). The new flow
       // never populates `draft.fuel`, so we send the slug.
@@ -349,7 +358,15 @@ export default function PaymentScreen() {
         quantity: draft.qty,
         deliveryAddressId: draft.deliveryAddressId,
         note: draft.note,
-        returnSwapAt: draft.returnSwapAt ?? undefined,
+        returnSwapAt: returnSwapValid ? draft.returnSwapAt : undefined,
+        // USE_CASES C-5 — scheduled order timestamp finally wired.
+        // The draft has carried scheduledAt since the delivery
+        // screen captured it; previously the body omitted it and
+        // the server treated every order as immediate.
+        scheduledAt:
+          draft.when === "schedule" && draft.scheduledAt
+            ? draft.scheduledAt
+            : undefined,
       };
       if (draft.product === "lpg") {
         body.cylinderType = draft.cylinderType;

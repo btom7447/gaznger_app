@@ -289,6 +289,45 @@ export default function OrderDetailScreen() {
     router.push("/(customer)/(track)" as never);
   }, [router]);
 
+  // USE_CASES C-7 / decision D2 — customer self-cancel.
+  const cancelOrder = useCallback(() => {
+    if (!order) return;
+    Alert.alert(
+      "Cancel this order?",
+      "If you've paid, the refund lands in your wallet instantly. This can't be undone.",
+      [
+        { text: "Keep order", style: "cancel" },
+        {
+          text: "Cancel order",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await api.patch(`/api/orders/${order._id}/cancel`, {
+                reason: "User requested cancel",
+              });
+              toast.success("Order cancelled");
+              router.replace("/(customer)/(home)" as never);
+            } catch (err: any) {
+              Alert.alert(
+                "Couldn't cancel",
+                err?.message ?? "Try again in a moment.",
+              );
+            }
+          },
+        },
+      ],
+    );
+  }, [order, router]);
+
+  // USE_CASES V-4 / decision D6 — dispute = support chat for v1.
+  const openSupport = useCallback(() => {
+    if (!order) return;
+    router.push({
+      pathname: "/(screens)/help-support" as never,
+      params: { context: "order-issue", orderId: order._id },
+    } as never);
+  }, [order, router]);
+
   if (loading) {
     return (
       <ScreenContainer
@@ -322,6 +361,13 @@ export default function OrderDetailScreen() {
   const isLive = isActiveStatus(order.status);
   const isTerminal = isTerminalStatus(order.status);
   const isCancelled = status.kind === "error";
+  // USE_CASES C-7 / decision D2 — customer self-cancel is allowed
+  // while the order is pending OR confirmed AND no rider is yet
+  // assigned. Server enforces the same gate.
+  const isCancellable =
+    !isTerminal &&
+    (order.status === "pending" || order.status === "confirmed") &&
+    !order.riderId;
   const shortRef = order._id.slice(-6).toUpperCase();
   const total =
     typeof order.totalCharged === "number"
@@ -392,7 +438,35 @@ export default function OrderDetailScreen() {
         <ScreenHeader title={`Order #G-${shortRef}`} onBack={() => router.back()} />
       }
       footer={
-        isTerminal && !isCancelled ? (
+        isCancellable ? (
+          <View style={{ gap: 8 }}>
+            <FloatingCTA
+              label="Track order"
+              subtitle="See live progress"
+              onPress={trackOrder}
+              floating={false}
+            />
+            <Pressable
+              onPress={cancelOrder}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel this order"
+              style={({ pressed }) => [
+                { paddingVertical: 10, alignItems: "center" },
+                pressed && { opacity: 0.85 },
+              ]}
+            >
+              <Text
+                style={{
+                  color: theme.error,
+                  fontSize: 13,
+                  fontWeight: "800",
+                }}
+              >
+                Cancel order
+              </Text>
+            </Pressable>
+          </View>
+        ) : isTerminal && !isCancelled ? (
           <FloatingCTA
             label="Reorder"
             subtitle="Same fuel, same address"
@@ -545,9 +619,12 @@ export default function OrderDetailScreen() {
           </View>
         </View>
 
-        {/* Help */}
+        {/* Help — USE_CASES V-4 / decision D6: dispute funnels into
+            support chat for v1 (full dispute UI deferred). Passes
+            order context so support sees what the user is asking
+            about. */}
         <Pressable
-          onPress={() => router.push("/(screens)/help-support" as never)}
+          onPress={openSupport}
           accessibilityRole="button"
           accessibilityLabel="Get help with this order"
           style={({ pressed }) => [

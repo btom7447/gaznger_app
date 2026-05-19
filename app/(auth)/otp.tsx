@@ -213,7 +213,11 @@ export default function OtpScreen() {
   );
 
   const handleChange = (next: string) => {
-    setDigits(next);
+    // EDGE P1-2 — strip non-digits before set so an Android SMS
+    // paste like "Your Gaznger code is 482910" lands as "482910"
+    // (and the 6-char cap below trims any trailing junk).
+    const cleaned = next.replace(/\D/g, "").slice(0, 6);
+    setDigits(cleaned);
     if (error) setError(null);
   };
 
